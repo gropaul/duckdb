@@ -8,6 +8,7 @@ add_library_unity(
   list_sort.cpp
   list_distance.cpp
   list_cosine_similarity.cpp
+  list_cum_sum.cpp
   list_inner_product.cpp
   list_reduce.cpp
   list_transform.cpp

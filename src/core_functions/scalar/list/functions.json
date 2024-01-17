@@ -48,6 +48,14 @@
         "aliases": ["array_slice"]
     },
     {
+        "name": "list_cum_sum",
+        "parameters": "list",
+        "description": "Returns a list of cumulative sums",
+        "example": "list_cum_sum([1, 2, 3])",
+        "type": "scalar_function_set",
+        "aliases": []
+    },
+    {
         "name": "list_sort",
         "parameters": "list",
         "description": "Sorts the elements of the list",

@@ -111,6 +111,16 @@ struct ListSliceFun {
 	static ScalarFunctionSet GetFunctions();
 };
 
+
+struct ListCumSumFun {
+	static constexpr const char *Name = "list_cum_sum";
+	static constexpr const char *Parameters = "list";
+	static constexpr const char *Description = "Returns a list that is the cumulative sum of the input list";
+	static constexpr const char *Example = "list_cum_sum([1, 2, 3])";
+
+	static ScalarFunctionSet GetFunctions();
+};
+
 struct ArraySliceFun {
 	using ALIAS = ListSliceFun;
 

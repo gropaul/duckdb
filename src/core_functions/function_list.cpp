@@ -223,6 +223,7 @@ static StaticFunctionDefinition internal_functions[] = {
 	DUCKDB_SCALAR_FUNCTION(ListReduceFun),
 	DUCKDB_SCALAR_FUNCTION_SET(ListReverseSortFun),
 	DUCKDB_SCALAR_FUNCTION_SET(ListSliceFun),
+	DUCKDB_SCALAR_FUNCTION_SET(ListCumSumFun),
 	DUCKDB_SCALAR_FUNCTION_SET(ListSortFun),
 	DUCKDB_SCALAR_FUNCTION(ListTransformFun),
 	DUCKDB_SCALAR_FUNCTION(ListUniqueFun),
