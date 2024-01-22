@@ -1,0 +1,32 @@
+# name: test/sql/types/nested/list/test_list_slice.test
+# description: List cummulative sum test
+# group: [list]
+
+statement ok
+PRAGMA enable_verification
+
+statement ok
+CREATE TABLE customers (
+    name TEXT,
+    pruchases INT[]
+)
+
+statement ok
+INSERT INTO customers VALUES ('John', [10, 10, 20])
+
+statement ok
+INSERT INTO customers VALUES ('Jane', [20, 20, 30, 30, 40, 40])
+
+query I
+FROM customers SELECT name, list_cum_sum(pruchases) AS cum_sum
+----
+name|cum_sum
+John|[10, 20, 40]
+Jane|[20, 40, 70, 100, 140, 180]
+
+
+
+
+
+
+

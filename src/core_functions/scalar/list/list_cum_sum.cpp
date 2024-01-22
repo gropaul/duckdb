@@ -4,11 +4,10 @@
 
 namespace duckdb {
 
+template <typename NUMERIC_TYPE>
+static void ExecuteCumSum(Vector &result, Vector &list_vector, const idx_t count) {
 
-template <class NUMERIC_TYPE>
-static void ExecuteConstantCumSum(Vector &result, Vector &list_vector, const idx_t count, SelectionVector &sel, idx_t &sel_id) {
-
-	const auto list_count = ListVector::GetListSize(list_vector);
+	auto list_count = ListVector::GetListSize(list_vector);
 	auto &list_child = ListVector::GetEntry(list_vector);
 
 	D_ASSERT(list_child.GetVectorType() == VectorType::FLAT_VECTOR);
@@ -18,56 +17,47 @@ static void ExecuteConstantCumSum(Vector &result, Vector &list_vector, const idx
 	}
 
 	auto list_data = FlatVector::GetData<NUMERIC_TYPE>(list_child);
-	auto result_data = FlatVector::GetData<list_entry_t>(result);
+	idx_t current_offset = list_count;
 
-	NUMERIC_TYPE sum = 0;
-	vector<NUMERIC_TYPE> cum_sum_vector(list_count);
+	UnaryExecutor::Execute<list_entry_t, list_entry_t>(list_vector, result, count, [&](list_entry_t list) {
+		auto dimensions = list.length;
 
-	for (idx_t i = 0; i < list_count; i++) {
-		auto value = list_data[i];
-		sum += value;
-		cum_sum_vector[i] = sum;
-	}
+		NUMERIC_TYPE sum = 0;
+		vector<NUMERIC_TYPE> cum_sum_vector(dimensions);
 
-	auto cum_sum = make_uniq<Vector>(LogicalType::LIST(LogicalType::INTEGER));
-	for (auto val : cum_sum_vector) {
-		Value value_to_insert = val;
-		ListVector::PushBack(*cum_sum, value_to_insert);
-	}
-	idx_t result_length = ListVector::GetListSize(*cum_sum);
-	result_data[0].length = result_length;
-	result_data[0].offset = result_length;
-	ListVector::Append(result, ListVector::GetEntry(*cum_sum), result_length);
-	result_data[1].length = result_length;
-	result_data[1].offset = result_length;
-	ListVector::Append(result, ListVector::GetEntry(*cum_sum), result_length);
+		NUMERIC_TYPE *list_ptr = list_data + list.offset;
 
+		for (idx_t i = 0; i < dimensions; i++) {
+			NUMERIC_TYPE list_element = list_ptr[i];
 
-}
+			sum += list_element;
+			cum_sum_vector[i] = sum;
+		}
 
-template <typename NUMERIC_TYPE>
-static void ExecuteFlatCumSum(Vector &result, Vector &list_vector, const idx_t count, SelectionVector &sel, idx_t &sel_idx) {
-	// Todo: implement Cum Sum for flat vectors
-}
+		list_entry_t result_entry {};
+		auto cum_sum = make_uniq<Vector>(LogicalType::LIST(list_child.GetType()));
+		for (auto val : cum_sum_vector) {
+			Value value_to_insert = Value::Numeric(list_child.GetType(), val);
+			ListVector::PushBack(*cum_sum, value_to_insert);
+		}
 
-template <typename INPUT_TYPE>
-static void ExecuteCumSum(Vector &result, Vector &list_vector, const idx_t count) {
+		idx_t result_length = ListVector::GetListSize(*cum_sum);
+		result_entry.length = result_length;
+		result_entry.offset = current_offset;
 
-	SelectionVector sel;
-	idx_t sel_idx = 0;
+		current_offset += result_length;
+		ListVector::Append(result, ListVector::GetEntry(*cum_sum), result_length);
 
-	if (result.GetVectorType() == VectorType::CONSTANT_VECTOR) {
-		ExecuteConstantCumSum<INPUT_TYPE>(result, list_vector, count, sel, sel_idx);
-	} else {
-		ExecuteFlatCumSum<INPUT_TYPE>(result, list_vector, count, sel, sel_idx);
-	}
+		return result_entry;
+	});
+
 	result.Verify(count);
 }
-
+template <typename NUMERIC_TYPE>
 static void ListCumSumFunction(DataChunk &args, ExpressionState &state, Vector &result) {
+
 	// The CumSum function takes only one argument, the list to on which to apply the cumsum
 	D_ASSERT(args.ColumnCount() == 1);
-	D_ASSERT(args.data.size() == 1);
 
 	auto count = args.size();
 
@@ -89,7 +79,7 @@ static void ListCumSumFunction(DataChunk &args, ExpressionState &state, Vector &
 			list_vector.Flatten(count);
 		}
 		ListVector::ReferenceEntry(result, list_vector);
-		ExecuteCumSum<int>(result, list_vector, count);
+		ExecuteCumSum<NUMERIC_TYPE>(result, list_vector, count);
 		break;
 	}
 	default:
@@ -101,11 +91,18 @@ ScalarFunctionSet ListCumSumFun::GetFunctions() {
 
 	ScalarFunctionSet set("list_cum_sum");
 
-	// the arguments and return types are actually set in the binder function
-	set.AddFunction(ScalarFunction({LogicalType::LIST(LogicalType::INTEGER)},
-							   LogicalType::LIST(LogicalType::INTEGER), ListCumSumFunction));
+	set.AddFunction(ScalarFunction({LogicalType::LIST(LogicalType::INTEGER)}, LogicalType::LIST(LogicalType::INTEGER),
+	                               ListCumSumFunction<uint32_t>));
 
-	// Todo: add as well for other types
+	set.AddFunction(ScalarFunction({LogicalType::LIST(LogicalType::BIGINT)}, LogicalType::LIST(LogicalType::BIGINT),
+	                               ListCumSumFunction<int64_t>));
+
+	set.AddFunction(ScalarFunction({LogicalType::LIST(LogicalType::FLOAT)}, LogicalType::LIST(LogicalType::FLOAT),
+	                               ListCumSumFunction<float>));
+
+	set.AddFunction(ScalarFunction({LogicalType::LIST(LogicalType::DOUBLE)}, LogicalType::LIST(LogicalType::DOUBLE),
+	                               ListCumSumFunction<double>));
+
 
 	// Todo: What does this do ? Do I need it ?
 	// fun.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
