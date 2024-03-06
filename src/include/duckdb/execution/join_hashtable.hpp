@@ -217,6 +217,11 @@ public:
 	//! Is true if there are predicates that are not equality predicates and we need to use the matchers during probing
 	bool needs_chain_matcher;
 
+	//! If there is more than one element in the chain, we need to scan the next elements of the chain
+	bool chains_longer_than_one;
+
+	//! The capacity of the HT. Is the same as hash_map.GetSize() / sizeof(aggr_ht_entry_t)
+	idx_t capacity;
 	//! The size of an entry as stored in the HashTable
 	idx_t entry_size;
 	//! The total tuple size
@@ -276,9 +281,6 @@ private:
 	unique_ptr<PartitionedTupleData> sink_collection;
 	//! The DataCollection holding the main data of the hash table
 	unique_ptr<TupleDataCollection> data_collection;
-
-	//! The capacity of the HT. Is the same as hash_map.GetSize() / sizeof(aggr_ht_entry_t)
-	idx_t capacity;
 
 	//! The hash map of the HT, created after finalization
 	AllocatedData hash_map;

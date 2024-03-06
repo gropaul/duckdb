@@ -81,6 +81,7 @@ JoinHashTable::JoinHashTable(BufferManager &buffer_manager_p, const vector<JoinC
 		needs_chain_matcher = false;
 	}
 
+	chains_longer_than_one = false;
 	row_matcher_build.Initialize(true, layout, equality_predicates);
 
 	const auto &offsets = layout.GetOffsets();
@@ -471,14 +472,12 @@ static inline bool InsertRowToEntry(atomic<aggr_ht_entry_t> &entry, data_ptr_t r
 
 template <bool PARALLEL>
 static void InsertHashesLoop(atomic<aggr_ht_entry_t> entries[], Vector row_locations, Vector &hashes_v,
-                             const idx_t &count, JoinHashTable::InsertState &state, const idx_t &pointer_offset,
-                             const idx_t &capacity, unique_ptr<TupleDataCollection> &data_collection,
-                             RowMatcher &row_matcher_build, const vector<column_t> &equality_predicate_columns,
-                             const TupleDataLayout &layout, const idx_t &bitmask) {
+                             const idx_t &count, JoinHashTable::InsertState &state,
+                             unique_ptr<TupleDataCollection> &data_collection, JoinHashTable *ht) {
 
 	D_ASSERT(hashes_v.GetType().id() == LogicalType::HASH);
 
-	ApplyBitmaskAndGetSalt(hashes_v, count, bitmask, state.ht_offsets_v, state.hash_salts_v);
+	ApplyBitmaskAndGetSalt(hashes_v, count, ht->bitmask, state.ht_offsets_v, state.hash_salts_v);
 
 	// the offset for each row to insert
 	auto ht_offsets = FlatVector::GetData<idx_t>(state.ht_offsets_v);
@@ -513,7 +512,7 @@ static void InsertHashesLoop(atomic<aggr_ht_entry_t> entries[], Vector row_locat
 				if (!occupied) {
 					data_ptr_t row_ptr = row_ptrs_to_insert[row_index];
 					bool successful_insertion =
-					    InsertRowToEntry<PARALLEL, true>(atomic_entry, row_ptr, salt, pointer_offset);
+					    InsertRowToEntry<PARALLEL, true>(atomic_entry, row_ptr, salt, ht->pointer_offset);
 
 					// if the insertion was successful, we can stop the loop for this entry
 					if (successful_insertion) {
@@ -532,7 +531,7 @@ static void InsertHashesLoop(atomic<aggr_ht_entry_t> entries[], Vector row_locat
 
 				// condition for incrementing the ht_offset: occupied and salt does not match -> move to next entry
 				increment = !salt_match;
-				IncrementAndWrap(ht_offset, increment, bitmask);
+				IncrementAndWrap(ht_offset, increment, ht->bitmask);
 			} while (increment);
 		}
 
@@ -544,17 +543,18 @@ static void InsertHashesLoop(atomic<aggr_ht_entry_t> entries[], Vector row_locat
 
 			// Get the data for the rows that need to be compared
 			DataChunk lhs_data;
-			data_collection->InitializeChunk(lhs_data,
-			                                 equality_predicate_columns); // makes sure DataChunk has the right format
-			lhs_data.SetCardinality(count);                               // and the right size
+			data_collection->InitializeChunk(
+			    lhs_data,
+			    ht->equality_predicate_columns); // makes sure DataChunk has the right format
+			lhs_data.SetCardinality(count);      // and the right size
 
 			TupleDataChunkState chunk_state;
-			data_collection->InitializeChunkState(chunk_state, equality_predicate_columns);
+			data_collection->InitializeChunkState(chunk_state, ht->equality_predicate_columns);
 
 			// The target selection vector says where to write the results into the lhs_data, we just want to write
 			// sequentially as otherwise we trigger a bug in the Gather function
-			data_collection->Gather(row_locations, state.salt_match_sel, salt_match_count, equality_predicate_columns,
-			                        lhs_data, *FlatVector::IncrementalSelectionVector(),
+			data_collection->Gather(row_locations, state.salt_match_sel, salt_match_count,
+			                        ht->equality_predicate_columns, lhs_data, *FlatVector::IncrementalSelectionVector(),
 			                        chunk_state.cached_cast_vectors);
 
 			TupleDataCollection::ToUnifiedFormat(chunk_state, lhs_data);
@@ -578,8 +578,8 @@ static void InsertHashesLoop(atomic<aggr_ht_entry_t> entries[], Vector row_locat
 
 			idx_t key_no_match_count = 0;
 			idx_t key_match_count =
-			    row_matcher_build.Match(lhs_data, lhs_formats, match_sel, salt_match_count, layout,
-			                            state.row_ptr_insert_to_v, &state.key_no_match_sel, key_no_match_count);
+			    ht->row_matcher_build.Match(lhs_data, lhs_formats, match_sel, salt_match_count, ht->layout,
+			                                state.row_ptr_insert_to_v, &state.key_no_match_sel, key_no_match_count);
 
 			D_ASSERT(key_match_count + key_no_match_count == salt_match_count);
 			// Insert the rows that match
@@ -590,7 +590,9 @@ static void InsertHashesLoop(atomic<aggr_ht_entry_t> entries[], Vector row_locat
 				auto &entry = entries[ht_offsets[entry_index]];
 				data_ptr_t row_ptr = row_ptrs_to_insert[entry_index];
 				auto salt = hash_salts[entry_index];
-				InsertRowToEntry<PARALLEL, false>(entry, row_ptr, salt, pointer_offset);
+				InsertRowToEntry<PARALLEL, false>(entry, row_ptr, salt, ht->pointer_offset);
+
+				ht->chains_longer_than_one = true;
 			}
 
 			// Linear probing: each of the entries that do not match move to the next entry in the HT
@@ -602,7 +604,7 @@ static void InsertHashesLoop(atomic<aggr_ht_entry_t> entries[], Vector row_locat
 				auto &ht_offset = ht_offsets[entry_index];
 
 				ht_offset++;
-				if (ht_offset >= capacity) {
+				if (ht_offset >= ht->capacity) {
 					ht_offset = 0;
 				}
 
@@ -621,13 +623,13 @@ void JoinHashTable::InsertHashes(Vector &hashes_v, idx_t count, TupleDataChunkSt
                                  InsertState &insert_state, bool parallel) {
 	auto atomic_entries = reinterpret_cast<atomic<aggr_ht_entry_t> *>(this->entries);
 	auto row_locations = chunk_state.row_locations;
-
+	bool test;
 	if (parallel) {
-		InsertHashesLoop<true>(atomic_entries, row_locations, hashes_v, count, insert_state, pointer_offset, capacity,
-		                       data_collection, row_matcher_build, equality_predicate_columns, layout, bitmask);
+		InsertHashesLoop<true>(atomic_entries, row_locations, hashes_v, count, insert_state, this->data_collection,
+		                       this);
 	} else {
-		InsertHashesLoop<false>(atomic_entries, row_locations, hashes_v, count, insert_state, pointer_offset, capacity,
-		                        data_collection, row_matcher_build, equality_predicate_columns, layout, bitmask);
+		InsertHashesLoop<false>(atomic_entries, row_locations, hashes_v, count, insert_state, this->data_collection,
+		                        this);
 	}
 }
 
@@ -823,6 +825,12 @@ idx_t ScanStructure::ScanInnerJoin(DataChunk &keys, SelectionVector &result_vect
 }
 
 void ScanStructure::AdvancePointers(const SelectionVector &sel, idx_t sel_count) {
+
+	if (!ht.chains_longer_than_one) {
+		this->count = 0;
+		return;
+	}
+
 	// now for all the pointers, we move on to the next set of pointers
 	idx_t new_count = 0;
 	auto ptrs = FlatVector::GetData<data_ptr_t>(this->pointers);
