@@ -123,7 +123,6 @@ public:
 
 		ProbeState();
 
-		Vector hash_salts_v;
 		Vector ht_offsets_v;
 		Vector row_ptr_insert_to_v;
 
@@ -138,6 +137,7 @@ public:
 
 	struct InsertState : ProbeState {
 		InsertState();
+		Vector hash_salts_v;
 
 		/// Because of the index hick up
 		SelectionVector remaining_sel;

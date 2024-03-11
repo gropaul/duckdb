@@ -14,11 +14,11 @@ using ProbeSpill = JoinHashTable::ProbeSpill;
 using ProbeSpillLocalState = JoinHashTable::ProbeSpillLocalAppendState;
 
 JoinHashTable::ProbeState::ProbeState()
-    : hash_salts_v(LogicalType::UBIGINT), ht_offsets_v(LogicalType::UBIGINT), row_ptr_insert_to_v(LogicalType::POINTER),
+    : ht_offsets_v(LogicalType::UBIGINT), row_ptr_insert_to_v(LogicalType::POINTER),
       key_no_match_sel(STANDARD_VECTOR_SIZE), salt_match_sel(STANDARD_VECTOR_SIZE) {
 }
 
-JoinHashTable::InsertState::InsertState() : remaining_sel(STANDARD_VECTOR_SIZE) {
+JoinHashTable::InsertState::InsertState() : hash_salts_v(LogicalType::UBIGINT), remaining_sel(STANDARD_VECTOR_SIZE) {
 }
 
 JoinHashTable::JoinHashTable(BufferManager &buffer_manager_p, const vector<JoinCondition> &conditions_p,
@@ -116,11 +116,10 @@ void JoinHashTable::Merge(JoinHashTable &other) {
 	sink_collection->Combine(*other.sink_collection);
 }
 
-static void ApplyBitmaskAndGetSalt(Vector &hashes_v, const idx_t &count, const idx_t &bitmask, Vector &ht_offsets_v,
-                                   Vector &hash_salts_v) {
+static void ApplyBitmaskAndGetSaltBuild(Vector &hashes_v, const idx_t &count, const idx_t &bitmask,
+                                        Vector &hash_salts_v) {
 
 	auto hash_salts = FlatVector::GetData<idx_t>(hash_salts_v);
-	auto ht_offsets = FlatVector::GetData<idx_t>(ht_offsets_v);
 
 	if (hashes_v.GetVectorType() == VectorType::CONSTANT_VECTOR) {
 
@@ -129,61 +128,19 @@ static void ApplyBitmaskAndGetSalt(Vector &hashes_v, const idx_t &count, const i
 		auto indices = ConstantVector::GetData<hash_t>(hashes_v);
 		hash_t salt = aggr_ht_entry_t::ExtractSalt(*indices);
 		idx_t offset = *indices & bitmask;
+		*indices = offset;
 		hashes_v.Flatten(count);
-
 		for (idx_t i = 0; i < count; i++) {
 			hash_salts[i] = salt;
-			ht_offsets[i] = offset;
 		}
+
 	} else {
-		UnifiedVectorFormat hashes_v_unified;
-		hashes_v.ToUnifiedFormat(count, hashes_v_unified);
-
-		auto hash_data = UnifiedVectorFormat::GetData<hash_t>(hashes_v_unified);
-
-		for (idx_t i = 0; i < count; i++) {
-			auto hash_index = hashes_v_unified.sel->get_index(i);
-			auto hash = hash_data[hash_index];
-
-			auto ht_offset = hash & bitmask;
-			ht_offsets[i] = ht_offset;
-			hash_salts[i] = aggr_ht_entry_t::ExtractSalt(hash);
-		}
-	}
-}
-
-static void ApplyBitmaskAndGetSalt(Vector &hashes_v, const idx_t &count, const idx_t &bitmask, Vector &ht_offsets_v,
-                                   Vector &hash_salts_v, const SelectionVector &sel) {
-
-	auto hash_salts = FlatVector::GetData<idx_t>(hash_salts_v);
-	auto ht_offsets = FlatVector::GetData<idx_t>(ht_offsets_v);
-
-	if (hashes_v.GetVectorType() == VectorType::CONSTANT_VECTOR) {
-		D_ASSERT(!ConstantVector::IsNull(hashes_v));
-		auto indices = ConstantVector::GetData<hash_t>(hashes_v);
-		hash_t salt = aggr_ht_entry_t::ExtractSalt(*indices);
-		idx_t offset = *indices & bitmask;
 		hashes_v.Flatten(count);
+		auto hashes = FlatVector::GetData<hash_t>(hashes_v);
 
 		for (idx_t i = 0; i < count; i++) {
-			auto row_index = sel.get_index(i);
-			hash_salts[row_index] = salt;
-			ht_offsets[row_index] = offset;
-		}
-	} else {
-		UnifiedVectorFormat hashes_v_unified;
-		hashes_v.ToUnifiedFormat(count, hashes_v_unified);
-
-		auto hash_data = UnifiedVectorFormat::GetData<hash_t>(hashes_v_unified);
-
-		for (idx_t i = 0; i < count; i++) {
-			auto row_index = sel.get_index(i);
-			auto hash_index = hashes_v_unified.sel->get_index(row_index);
-			auto hash = hash_data[hash_index];
-
-			auto ht_offset = hash & bitmask;
-			ht_offsets[row_index] = ht_offset;
-			hash_salts[row_index] = aggr_ht_entry_t::ExtractSalt(hash);
+			hash_salts[i] = aggr_ht_entry_t::ExtractSalt(hashes[i]);
+			hashes[i] = hashes[i] & bitmask;
 		}
 	}
 }
@@ -202,10 +159,22 @@ void JoinHashTable::GetRowPointers(DataChunk &keys, TupleDataChunkState &key_sta
                                    const SelectionVector &sel, idx_t &count, Vector &pointers_result_v,
                                    SelectionVector &match_sel) {
 
-	ApplyBitmaskAndGetSalt(hashes_v, count, bitmask, state.ht_offsets_v, state.hash_salts_v, sel);
+	UnifiedVectorFormat hashes_v_unified;
+	hashes_v.ToUnifiedFormat(count, hashes_v_unified);
 
-	auto ht_offsets = FlatVector::GetData<idx_t>(state.ht_offsets_v);
-	auto hash_salts = FlatVector::GetData<idx_t>(state.hash_salts_v);
+	auto hashes = UnifiedVectorFormat::GetData<hash_t>(hashes_v_unified);
+
+	UnifiedVectorFormat offsets_v_unified;
+	state.ht_offsets_v.ToUnifiedFormat(count, offsets_v_unified);
+
+	auto ht_offsets = UnifiedVectorFormat::GetDataNoConst<hash_t>(offsets_v_unified);
+
+	for (idx_t i = 0; i < count; i++) {
+		const auto row_index = sel.get_index(i);
+		auto uvf_index = hashes_v_unified.sel->get_index(row_index);
+		ht_offsets[uvf_index] = hashes[uvf_index] & bitmask;
+	}
+
 	auto pointers_result = FlatVector::GetData<data_ptr_t>(pointers_result_v);
 	auto row_ptr_insert_to = FlatVector::GetData<data_ptr_t>(state.row_ptr_insert_to_v);
 
@@ -224,7 +193,9 @@ void JoinHashTable::GetRowPointers(DataChunk &keys, TupleDataChunkState &key_sta
 		// b) an entry is found where the salt matches -> need to compare the keys
 		for (idx_t i = 0; i < remaining_count; i++) {
 			const auto row_index = remaining_sel->get_index(i);
-			auto &ht_offset = ht_offsets[row_index];
+			auto uvf_index = hashes_v_unified.sel->get_index(row_index);
+
+			auto &ht_offset = ht_offsets[uvf_index];
 
 			idx_t increment;
 
@@ -239,14 +210,16 @@ void JoinHashTable::GetRowPointers(DataChunk &keys, TupleDataChunkState &key_sta
 					break;
 				}
 
-				bool salt_match = entry.GetSalt() == hash_salts[row_index];
+				auto hash = hashes[uvf_index];
+				hash_t row_salt = aggr_ht_entry_t::ExtractSalt(hash);
+				bool salt_match = entry.GetSalt() == row_salt;
 
-				// the entries we need to process in the next iteration are the ones that are occupied and the salt
+				// the entries we need to process in the next iteration are the ones that are occupied and the row_salt
 				// does not match, the ones that are empty need no further processing
 				state.salt_match_sel.set_index(salt_match_count, row_index);
 				salt_match_count += salt_match;
 
-				// condition for incrementing the ht_offset: occupied and salt does not match -> move to next entry
+				// condition for incrementing the ht_offset: occupied and row_salt does not match -> move to next entry
 				increment = !salt_match;
 				IncrementAndWrap(ht_offset, increment, bitmask);
 
@@ -261,7 +234,8 @@ void JoinHashTable::GetRowPointers(DataChunk &keys, TupleDataChunkState &key_sta
 			// Get the pointers_result_v to the rows that need to be compared
 			for (idx_t need_compare_idx = 0; need_compare_idx < salt_match_count; need_compare_idx++) {
 				const auto row_index = state.salt_match_sel.get_index(need_compare_idx);
-				const auto &entry = entries[ht_offsets[row_index]];
+				const auto uvf_index = hashes_v_unified.sel->get_index(row_index);
+				const auto &entry = entries[ht_offsets[uvf_index]];
 				row_ptr_insert_to[row_index] = entry.GetPointer();
 			}
 
@@ -285,9 +259,10 @@ void JoinHashTable::GetRowPointers(DataChunk &keys, TupleDataChunkState &key_sta
 			// update the ht_offset to point to the next entry for the ones that did not match
 			for (idx_t i = 0; i < key_no_match_count; i++) {
 				const auto row_index = state.key_no_match_sel.get_index(i);
-				auto &ht_offset = ht_offsets[row_index];
+				const auto uvf_index = hashes_v_unified.sel->get_index(row_index);
+				auto &ht_offset = ht_offsets[uvf_index];
 
-				IncrementAndWrap(ht_offset, 1, bitmask);
+				IncrementAndWrap(ht_offset, bitmask);
 			}
 
 			remaining_sel = &state.key_no_match_sel;
@@ -477,10 +452,10 @@ static void InsertHashesLoop(atomic<aggr_ht_entry_t> entries[], Vector row_locat
 
 	D_ASSERT(hashes_v.GetType().id() == LogicalType::HASH);
 
-	ApplyBitmaskAndGetSalt(hashes_v, count, ht->bitmask, state.ht_offsets_v, state.hash_salts_v);
+	ApplyBitmaskAndGetSaltBuild(hashes_v, count, ht->bitmask, state.hash_salts_v);
 
 	// the offset for each row to insert
-	auto ht_offsets = FlatVector::GetData<idx_t>(state.ht_offsets_v);
+	auto ht_offsets = FlatVector::GetData<idx_t>(hashes_v);
 	auto hash_salts = FlatVector::GetData<idx_t>(state.hash_salts_v);
 	auto row_ptr_insert_to = FlatVector::GetData<data_ptr_t>(state.row_ptr_insert_to_v);
 	auto row_ptrs_to_insert = FlatVector::GetData<data_ptr_t>(row_locations);
@@ -623,7 +598,7 @@ void JoinHashTable::InsertHashes(Vector &hashes_v, idx_t count, TupleDataChunkSt
                                  InsertState &insert_state, bool parallel) {
 	auto atomic_entries = reinterpret_cast<atomic<aggr_ht_entry_t> *>(this->entries);
 	auto row_locations = chunk_state.row_locations;
-	bool test;
+
 	if (parallel) {
 		InsertHashesLoop<true>(atomic_entries, row_locations, hashes_v, count, insert_state, this->data_collection,
 		                       this);
