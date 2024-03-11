@@ -137,11 +137,14 @@ public:
 
 	struct InsertState : ProbeState {
 		InsertState();
-		Vector hash_salts_v;
-
 		/// Because of the index hick up
 		SelectionVector remaining_sel;
 	};
+
+	//! Upper 16 bits are salt
+	static constexpr const hash_t SALT_MASK = 0xFFFF000000000000;
+	//! Lower 48 bits are the pointer
+	static constexpr const hash_t POINTER_MASK = 0x0000FFFFFFFFFFFF;
 
 	JoinHashTable(BufferManager &buffer_manager, const vector<JoinCondition> &conditions,
 	              vector<LogicalType> build_types, JoinType type, const vector<idx_t> &output_columns);
