@@ -159,19 +159,33 @@ void JoinHashTable::GetRowPointers(DataChunk &keys, TupleDataChunkState &key_sta
 
 	auto ht_offsets = FlatVector::GetData<idx_t>(state.ht_offsets_v);
 
+	// todo: make this a vector
+	idx_t ht_offsets_dense[STANDARD_VECTOR_SIZE];
+
 	idx_t non_empty_count = 0;
+
 	// first, filter out the empty rows and calculate the offset
 	for (idx_t i = 0; i < count; i++) {
 
 		const auto row_index = sel.get_index(i);
 		auto uvf_index = hashes_v_unified.sel->get_index(row_index);
 		auto ht_offset = hashes[uvf_index] & bitmask;
+		ht_offsets_dense[i] = ht_offset;
 		ht_offsets[row_index] = ht_offset;
+	}
 
+	for (idx_t i = 0; i < count; i++) {
+		idx_t ht_offset = ht_offsets_dense[i];
 		auto &entry = entries[ht_offset];
 		bool occupied = entry.IsOccupied();
-		state.non_empty_sel.set_index(non_empty_count, row_index);
+		state.non_empty_sel.set_index(non_empty_count, i);
 		non_empty_count += occupied;
+	}
+
+	for (idx_t i = 0; i < non_empty_count; i++) {
+		idx_t dense_index = state.non_empty_sel.get_index(i);
+		const auto row_index = sel.get_index(dense_index);
+		state.non_empty_sel.set_index(i, row_index);
 	}
 
 	auto pointers_result = FlatVector::GetData<data_ptr_t>(pointers_result_v);
