@@ -126,6 +126,8 @@ public:
 		Vector ht_offsets_v;
 		Vector row_ptr_insert_to_v;
 
+		SelectionVector non_empty_sel;
+
 		SelectionVector key_no_match_sel;
 
 		// Selection vectors for the find entries loop. There are three options:

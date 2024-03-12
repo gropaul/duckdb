@@ -15,7 +15,8 @@ using ProbeSpillLocalState = JoinHashTable::ProbeSpillLocalAppendState;
 
 JoinHashTable::ProbeState::ProbeState()
     : ht_offsets_v(LogicalType::UBIGINT), row_ptr_insert_to_v(LogicalType::POINTER),
-      key_no_match_sel(STANDARD_VECTOR_SIZE), salt_match_sel(STANDARD_VECTOR_SIZE) {
+      non_empty_sel(STANDARD_VECTOR_SIZE), key_no_match_sel(STANDARD_VECTOR_SIZE),
+      salt_match_sel(STANDARD_VECTOR_SIZE) {
 }
 
 JoinHashTable::InsertState::InsertState() : remaining_sel(STANDARD_VECTOR_SIZE) {
@@ -161,22 +162,31 @@ void JoinHashTable::GetRowPointers(DataChunk &keys, TupleDataChunkState &key_sta
 
 	auto ht_offsets = UnifiedVectorFormat::GetDataNoConst<hash_t>(offsets_v_unified);
 
+	idx_t non_empty_count = 0;
+	// first, filter out the empty rows and calculate the offset
 	for (idx_t i = 0; i < count; i++) {
+
 		const auto row_index = sel.get_index(i);
 		auto uvf_index = hashes_v_unified.sel->get_index(row_index);
-		ht_offsets[uvf_index] = hashes[uvf_index] & bitmask;
+		auto ht_offset = hashes[uvf_index] & bitmask;
+		ht_offsets[uvf_index] = ht_offset;
+
+		auto &entry = entries[ht_offset];
+		bool occupied = entry.IsOccupied();
+		state.non_empty_sel.set_index(non_empty_count, row_index);
+		non_empty_count += occupied;
 	}
 
 	auto pointers_result = FlatVector::GetData<data_ptr_t>(pointers_result_v);
 	auto row_ptr_insert_to = FlatVector::GetData<data_ptr_t>(state.row_ptr_insert_to_v);
 
-	const SelectionVector *remaining_sel = &sel;
-	idx_t remaining_count = count;
+	const SelectionVector *remaining_sel = &state.non_empty_sel;
+	idx_t remaining_count = non_empty_count;
 
 	idx_t &match_count = count;
 	match_count = 0;
 
-	while (true) {
+	while (remaining_count > 0) {
 
 		idx_t salt_match_count = 0;
 
@@ -218,8 +228,6 @@ void JoinHashTable::GetRowPointers(DataChunk &keys, TupleDataChunkState &key_sta
 			} while (increment);
 		}
 
-		// at this step, for all the pointers_result_v we stepped either until we found an empty entry or an entry with
-		// a matching salt, we need to compare the keys for the ones that have a matching salt
 		if (salt_match_count == 0) {
 			break;
 		} else {
