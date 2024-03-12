@@ -157,10 +157,7 @@ void JoinHashTable::GetRowPointers(DataChunk &keys, TupleDataChunkState &key_sta
 
 	auto hashes = UnifiedVectorFormat::GetData<hash_t>(hashes_v_unified);
 
-	UnifiedVectorFormat offsets_v_unified;
-	state.ht_offsets_v.ToUnifiedFormat(count, offsets_v_unified);
-
-	auto ht_offsets = UnifiedVectorFormat::GetDataNoConst<hash_t>(offsets_v_unified);
+	auto ht_offsets = FlatVector::GetData<idx_t>(state.ht_offsets_v);
 
 	idx_t non_empty_count = 0;
 	// first, filter out the empty rows and calculate the offset
@@ -169,7 +166,7 @@ void JoinHashTable::GetRowPointers(DataChunk &keys, TupleDataChunkState &key_sta
 		const auto row_index = sel.get_index(i);
 		auto uvf_index = hashes_v_unified.sel->get_index(row_index);
 		auto ht_offset = hashes[uvf_index] & bitmask;
-		ht_offsets[uvf_index] = ht_offset;
+		ht_offsets[row_index] = ht_offset;
 
 		auto &entry = entries[ht_offset];
 		bool occupied = entry.IsOccupied();
@@ -195,9 +192,8 @@ void JoinHashTable::GetRowPointers(DataChunk &keys, TupleDataChunkState &key_sta
 		// b) an entry is found where the salt matches -> need to compare the keys
 		for (idx_t i = 0; i < remaining_count; i++) {
 			const auto row_index = remaining_sel->get_index(i);
-			auto uvf_index = hashes_v_unified.sel->get_index(row_index);
 
-			auto &ht_offset = ht_offsets[uvf_index];
+			auto &ht_offset = ht_offsets[row_index];
 
 			idx_t increment;
 
@@ -211,7 +207,7 @@ void JoinHashTable::GetRowPointers(DataChunk &keys, TupleDataChunkState &key_sta
 				if (!occupied) {
 					break;
 				}
-
+				auto uvf_index = hashes_v_unified.sel->get_index(row_index);
 				auto hash = hashes[uvf_index];
 				hash_t row_salt = aggr_ht_entry_t::ExtractSalt(hash);
 				bool salt_match = entry.GetSalt() == row_salt;
@@ -234,8 +230,7 @@ void JoinHashTable::GetRowPointers(DataChunk &keys, TupleDataChunkState &key_sta
 			// Get the pointers_result_v to the rows that need to be compared
 			for (idx_t need_compare_idx = 0; need_compare_idx < salt_match_count; need_compare_idx++) {
 				const auto row_index = state.salt_match_sel.get_index(need_compare_idx);
-				const auto uvf_index = hashes_v_unified.sel->get_index(row_index);
-				const auto &entry = entries[ht_offsets[uvf_index]];
+				const auto &entry = entries[ht_offsets[row_index]];
 				row_ptr_insert_to[row_index] = entry.GetPointer();
 			}
 
@@ -259,8 +254,7 @@ void JoinHashTable::GetRowPointers(DataChunk &keys, TupleDataChunkState &key_sta
 			// update the ht_offset to point to the next entry for the ones that did not match
 			for (idx_t i = 0; i < key_no_match_count; i++) {
 				const auto row_index = state.key_no_match_sel.get_index(i);
-				const auto uvf_index = hashes_v_unified.sel->get_index(row_index);
-				auto &ht_offset = ht_offsets[uvf_index];
+				auto &ht_offset = ht_offsets[row_index];
 
 				IncrementAndWrap(ht_offset, 1, bitmask);
 			}
@@ -548,9 +542,7 @@ static void InsertHashesLoop(atomic<aggr_ht_entry_t> entries[], Vector row_locat
 				row_ptr_insert_to[need_compare_idx] = entry.load().GetPointer();
 			}
 
-			// todo: Gather only the columns that are needed for the comparison
 			// Perform row comparisons
-
 			SelectionVector match_sel(STANDARD_VECTOR_SIZE);
 			for (idx_t i = 0; i < salt_match_count; i++) {
 				match_sel.set_index(i, i);
