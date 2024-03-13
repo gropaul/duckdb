@@ -1,4 +1,4 @@
-# name: benchmark/mine/my_06f.benchmark
+# name: benchmark/mine/my_02c.benchmark
 # description: Run query 06f from the imdb benchmark (single-threaded)
 # group: [mine]
 

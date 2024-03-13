@@ -155,7 +155,6 @@ inline void IncrementAndWrap(idx_t &value, const idx_t &increment, const uint64_
 	value &= capacity_mask;
 }
 
-
 void JoinHashTable::GetRowPointers(DataChunk &keys, TupleDataChunkState &key_state, ProbeState &state, Vector &hashes_v,
                                    const SelectionVector &sel, idx_t &count, Vector &pointers_result_v,
                                    SelectionVector &match_sel) {
@@ -253,7 +252,6 @@ void JoinHashTable::GetRowPointers(DataChunk &keys, TupleDataChunkState &key_sta
 		if (salt_match_count == 0) {
 			break;
 		} else {
-
 
 			// Perform row comparisons, after function call salt_match_sel will point to the keys that match
 			idx_t key_no_match_count = 0;
