@@ -126,6 +126,7 @@ public:
 		Vector ht_offsets_v;
 		Vector ht_offsets_dense_v;
 		Vector row_ptr_insert_to_v;
+		Vector salt_v;
 
 		SelectionVector non_empty_sel;
 

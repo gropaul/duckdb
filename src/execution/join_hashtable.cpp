@@ -14,7 +14,7 @@ using ProbeSpill = JoinHashTable::ProbeSpill;
 using ProbeSpillLocalState = JoinHashTable::ProbeSpillLocalAppendState;
 
 JoinHashTable::ProbeState::ProbeState()
-    : ht_offsets_v(LogicalType::UBIGINT), ht_offsets_dense_v(LogicalType::UBIGINT),
+    : ht_offsets_v(LogicalType::UBIGINT), salt_v(LogicalType::UBIGINT), ht_offsets_dense_v(LogicalType::UBIGINT),
       row_ptr_insert_to_v(LogicalType::POINTER), non_empty_sel(STANDARD_VECTOR_SIZE),
       key_no_match_sel(STANDARD_VECTOR_SIZE), salt_match_sel(STANDARD_VECTOR_SIZE) {
 }
@@ -142,11 +142,19 @@ static void ApplyBitmaskAndGetSaltBuild(Vector &hashes_v, const idx_t &count, co
 }
 
 // uses an AND operation to apply the capacity_mask instead of an in condition
-inline void IncrementAndWrap(idx_t &value, const idx_t &increment, const uint64_t &capacity_mask) {
+inline void IncrementAndWrapWithMask(idx_t &value, const idx_t &increment, const uint64_t &capacity_mask) {
 	value += increment;
 	// leave the salt bits unchanged
 	value &= capacity_mask | 0xFFFF000000000000;
 }
+
+// uses an AND operation to apply the capacity_mask instead of an in condition
+inline void IncrementAndWrap(idx_t &value, const idx_t &increment, const uint64_t &capacity_mask) {
+	value += increment;
+	// leave the salt bits unchanged
+	value &= capacity_mask;
+}
+
 
 void JoinHashTable::GetRowPointers(DataChunk &keys, TupleDataChunkState &key_state, ProbeState &state, Vector &hashes_v,
                                    const SelectionVector &sel, idx_t &count, Vector &pointers_result_v,
@@ -156,6 +164,7 @@ void JoinHashTable::GetRowPointers(DataChunk &keys, TupleDataChunkState &key_sta
 	hashes_v.ToUnifiedFormat(count, hashes_v_unified);
 
 	auto hashes = UnifiedVectorFormat::GetData<hash_t>(hashes_v_unified);
+	auto salts = FlatVector::GetData<hash_t>(state.salt_v);
 
 	auto ht_offsets = FlatVector::GetData<idx_t>(state.ht_offsets_v);
 	auto ht_offsets_dense = FlatVector::GetData<idx_t>(state.ht_offsets_dense_v);
@@ -184,6 +193,11 @@ void JoinHashTable::GetRowPointers(DataChunk &keys, TupleDataChunkState &key_sta
 		idx_t dense_index = state.non_empty_sel.get_index(i);
 		const auto row_index = sel.get_index(dense_index);
 		state.non_empty_sel.set_index(i, row_index);
+
+		auto uvf_index = hashes_v_unified.sel->get_index(row_index);
+		auto hash = hashes[uvf_index];
+		hash_t row_salt = aggr_ht_entry_t::ExtractSalt(hash);
+		salts[row_index] = row_salt;
 	}
 
 	auto pointers_result = FlatVector::GetData<data_ptr_t>(pointers_result_v);
@@ -208,43 +222,38 @@ void JoinHashTable::GetRowPointers(DataChunk &keys, TupleDataChunkState &key_sta
 			auto &ht_offset = ht_offsets[row_index];
 
 			idx_t increment;
+			hash_t row_salt = salts[row_index];
+
+			bool occupied;
+			bool salt_match;
+
+			aggr_ht_entry_t entry;
 
 			// increment the ht_offset of the entry as long as next entry is occupied and salt does not match
 			do {
 
-				auto &entry = entries[ht_offset];
-				bool occupied = entry.IsOccupied();
-
-				// no need to do anything, as the vector is zeroed
-				if (!occupied) {
-					break;
-				}
-				auto uvf_index = hashes_v_unified.sel->get_index(row_index);
-				auto hash = hashes[uvf_index];
-				hash_t row_salt = aggr_ht_entry_t::ExtractSalt(hash);
-				bool salt_match = entry.GetSalt() == row_salt;
-
-				// the entries we need to process in the next iteration are the ones that are occupied and the row_salt
-				// does not match, the ones that are empty need no further processing
-				state.salt_match_sel.set_index(salt_match_count, row_index);
-				salt_match_count += salt_match;
+				entry = entries[ht_offset];
+				occupied = entry.IsOccupied();
+				salt_match = entry.GetSalt() == row_salt;
 
 				// condition for incrementing the ht_offset: occupied and row_salt does not match -> move to next entry
-				increment = !salt_match;
+				increment = !salt_match && occupied;
 				IncrementAndWrap(ht_offset, increment, bitmask);
 
 			} while (increment);
+
+			// the entries we need to process in the next iteration are the ones that are occupied and the row_salt
+			// does not match, the ones that are empty need no further processing
+			state.salt_match_sel.set_index(salt_match_count, row_index);
+			salt_match_count += occupied && salt_match;
+
+			row_ptr_insert_to[row_index] = entry.GetPointer();
 		}
 
 		if (salt_match_count == 0) {
 			break;
 		} else {
-			// Get the pointers_result_v to the rows that need to be compared
-			for (idx_t need_compare_idx = 0; need_compare_idx < salt_match_count; need_compare_idx++) {
-				const auto row_index = state.salt_match_sel.get_index(need_compare_idx);
-				const auto &entry = entries[ht_offsets[row_index]];
-				row_ptr_insert_to[row_index] = entry.GetPointer();
-			}
+
 
 			// Perform row comparisons, after function call salt_match_sel will point to the keys that match
 			idx_t key_no_match_count = 0;
@@ -268,7 +277,7 @@ void JoinHashTable::GetRowPointers(DataChunk &keys, TupleDataChunkState &key_sta
 				const auto row_index = state.key_no_match_sel.get_index(i);
 				auto &ht_offset = ht_offsets[row_index];
 
-				IncrementAndWrap(ht_offset, 1, bitmask);
+				IncrementAndWrapWithMask(ht_offset, 1, bitmask);
 			}
 
 			remaining_sel = &state.key_no_match_sel;
@@ -517,7 +526,7 @@ static void InsertHashesLoop(atomic<aggr_ht_entry_t> entries[], Vector row_locat
 				// condition for incrementing the ht_offset_with_salt: occupied and salt does not match -> move to next
 				// entry
 				increment = !salt_match;
-				IncrementAndWrap(ht_offset_with_salt, increment, ht->bitmask);
+				IncrementAndWrapWithMask(ht_offset_with_salt, increment, ht->bitmask);
 			} while (increment);
 		}
 
@@ -588,7 +597,7 @@ static void InsertHashesLoop(atomic<aggr_ht_entry_t> entries[], Vector row_locat
 
 				auto &ht_offset = ht_offsets_and_salt[entry_index];
 
-				IncrementAndWrap(ht_offset, 1, ht->bitmask);
+				IncrementAndWrapWithMask(ht_offset, 1, ht->bitmask);
 
 				state.remaining_sel.set_index(i, entry_index);
 			}
