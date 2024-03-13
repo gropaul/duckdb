@@ -14,9 +14,9 @@ using ProbeSpill = JoinHashTable::ProbeSpill;
 using ProbeSpillLocalState = JoinHashTable::ProbeSpillLocalAppendState;
 
 JoinHashTable::ProbeState::ProbeState()
-    : ht_offsets_v(LogicalType::UBIGINT), row_ptr_insert_to_v(LogicalType::POINTER),
-      non_empty_sel(STANDARD_VECTOR_SIZE), key_no_match_sel(STANDARD_VECTOR_SIZE),
-      salt_match_sel(STANDARD_VECTOR_SIZE) {
+    : ht_offsets_v(LogicalType::UBIGINT), ht_offsets_dense_v(LogicalType::UBIGINT),
+      row_ptr_insert_to_v(LogicalType::POINTER), non_empty_sel(STANDARD_VECTOR_SIZE),
+      key_no_match_sel(STANDARD_VECTOR_SIZE), salt_match_sel(STANDARD_VECTOR_SIZE) {
 }
 
 JoinHashTable::InsertState::InsertState() : remaining_sel(STANDARD_VECTOR_SIZE) {
@@ -158,9 +158,7 @@ void JoinHashTable::GetRowPointers(DataChunk &keys, TupleDataChunkState &key_sta
 	auto hashes = UnifiedVectorFormat::GetData<hash_t>(hashes_v_unified);
 
 	auto ht_offsets = FlatVector::GetData<idx_t>(state.ht_offsets_v);
-
-	// todo: make this a vector
-	idx_t ht_offsets_dense[STANDARD_VECTOR_SIZE];
+	auto ht_offsets_dense = FlatVector::GetData<idx_t>(state.ht_offsets_dense_v);
 
 	idx_t non_empty_count = 0;
 
