@@ -7,10 +7,12 @@ group join
 
 load
 CREATE TABLE t1 AS
-SELECT
-    round(random() * 10) as v1,
-    i as v2
-from range (0,10) t(i);
+SELECT v1, v2
+FROM (
+    SELECT i as v1, i as v2, RANDOM() as rand
+    FROM range(0,10) t(i)
+) sub
+ORDER BY rand;
 CREATE TABLE t2 AS
 SELECT
     round(random() * 10) as v1,
