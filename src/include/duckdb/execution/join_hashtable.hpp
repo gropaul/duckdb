@@ -123,6 +123,7 @@ public:
 
 		ProbeState();
 
+		Vector hashes;
 		Vector ht_offsets_v;
 		Vector ht_offsets_dense_v;
 		Vector row_ptr_insert_to_v;
@@ -140,9 +141,12 @@ public:
 	};
 
 	struct InsertState : ProbeState {
-		InsertState();
+		InsertState(const unique_ptr<TupleDataCollection> &data_collection,
+		            const vector<column_t> &equality_predicate_columns);
 		/// Because of the index hick up
 		SelectionVector remaining_sel;
+		SelectionVector match_sel;
+		TupleDataChunkState chunk_state;
 	};
 
 	//! Upper 16 bits are salt

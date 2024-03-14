@@ -14,12 +14,15 @@ using ProbeSpill = JoinHashTable::ProbeSpill;
 using ProbeSpillLocalState = JoinHashTable::ProbeSpillLocalAppendState;
 
 JoinHashTable::ProbeState::ProbeState()
-    : ht_offsets_v(LogicalType::UBIGINT), salt_v(LogicalType::UBIGINT), ht_offsets_dense_v(LogicalType::UBIGINT),
-      row_ptr_insert_to_v(LogicalType::POINTER), non_empty_sel(STANDARD_VECTOR_SIZE),
+    : hashes(LogicalType::HASH), ht_offsets_v(LogicalType::UBIGINT), ht_offsets_dense_v(LogicalType::UBIGINT),
+      row_ptr_insert_to_v(LogicalType::POINTER), salt_v(LogicalType::UBIGINT), non_empty_sel(STANDARD_VECTOR_SIZE),
       key_no_match_sel(STANDARD_VECTOR_SIZE), salt_match_sel(STANDARD_VECTOR_SIZE) {
 }
 
-JoinHashTable::InsertState::InsertState() : remaining_sel(STANDARD_VECTOR_SIZE) {
+JoinHashTable::InsertState::InsertState(const unique_ptr<TupleDataCollection> &data_collection,
+                                        const vector<column_t> &equality_predicate_columns)
+    : ProbeState(), match_sel(STANDARD_VECTOR_SIZE), remaining_sel(STANDARD_VECTOR_SIZE) {
+	data_collection->InitializeChunkState(chunk_state, equality_predicate_columns);
 }
 
 JoinHashTable::JoinHashTable(BufferManager &buffer_manager_p, const vector<JoinCondition> &conditions_p,
@@ -142,13 +145,6 @@ static void ApplyBitmaskAndGetSaltBuild(Vector &hashes_v, const idx_t &count, co
 }
 
 // uses an AND operation to apply the capacity_mask instead of an in condition
-inline void IncrementAndWrapWithMask(idx_t &value, const idx_t &increment, const uint64_t &capacity_mask) {
-	value += increment;
-	// leave the salt bits unchanged
-	value &= capacity_mask | 0xFFFF000000000000;
-}
-
-// uses an AND operation to apply the capacity_mask instead of an in condition
 inline void IncrementAndWrap(idx_t &value, const idx_t &increment, const uint64_t &capacity_mask) {
 	value += increment;
 	// leave the salt bits unchanged
@@ -218,9 +214,8 @@ void JoinHashTable::GetRowPointers(DataChunk &keys, TupleDataChunkState &key_sta
 		for (idx_t i = 0; i < remaining_count; i++) {
 			const auto row_index = remaining_sel->get_index(i);
 
-			auto &ht_offset = ht_offsets[row_index];
+			idx_t &ht_offset = ht_offsets[row_index];
 
-			idx_t increment;
 			hash_t row_salt = salts[row_index];
 
 			bool occupied;
@@ -229,22 +224,23 @@ void JoinHashTable::GetRowPointers(DataChunk &keys, TupleDataChunkState &key_sta
 			aggr_ht_entry_t entry;
 
 			// increment the ht_offset of the entry as long as next entry is occupied and salt does not match
-			do {
-
+			while (true) {
 				entry = entries[ht_offset];
 				occupied = entry.IsOccupied();
 				salt_match = entry.GetSalt() == row_salt;
 
 				// condition for incrementing the ht_offset: occupied and row_salt does not match -> move to next entry
-				increment = !salt_match && occupied;
-				IncrementAndWrap(ht_offset, increment, bitmask);
+				if(!occupied || salt_match) {
+					break;
+				}
 
-			} while (increment);
+				IncrementAndWrap(ht_offset, 1, bitmask);
+			}
 
 			// the entries we need to process in the next iteration are the ones that are occupied and the row_salt
 			// does not match, the ones that are empty need no further processing
 			state.salt_match_sel.set_index(salt_match_count, row_index);
-			salt_match_count += occupied && salt_match;
+			salt_match_count += occupied;
 
 			row_ptr_insert_to[row_index] = entry.GetPointer();
 		}
@@ -275,7 +271,7 @@ void JoinHashTable::GetRowPointers(DataChunk &keys, TupleDataChunkState &key_sta
 				const auto row_index = state.key_no_match_sel.get_index(i);
 				auto &ht_offset = ht_offsets[row_index];
 
-				IncrementAndWrapWithMask(ht_offset, 1, bitmask);
+				IncrementAndWrap(ht_offset, 1, bitmask);
 			}
 
 			remaining_sel = &state.key_no_match_sel;
@@ -412,9 +408,12 @@ idx_t JoinHashTable::PrepareKeys(DataChunk &keys, vector<TupleDataVectorFormat> 
 	return added_count;
 }
 
+//! If we consider to insert into an entry we expct to be empty, if it was filled in the meantime the insert will not
+//! happen and we need to return the pointer to the to row with which the new entry would have collided. In any other
+//! case we return a nullptr
 template <bool PARALLEL, bool EXPECT_EMPTY>
-static inline bool InsertRowToEntry(atomic<aggr_ht_entry_t> &entry, data_ptr_t row_ptr_to_insert, const hash_t salt,
-                                    const idx_t pointer_offset) {
+static inline data_ptr_t InsertRowToEntry(atomic<aggr_ht_entry_t> &entry, data_ptr_t row_ptr_to_insert,
+                                          const hash_t salt, const idx_t pointer_offset) {
 
 	if (PARALLEL) {
 
@@ -428,7 +427,11 @@ static inline bool InsertRowToEntry(atomic<aggr_ht_entry_t> &entry, data_ptr_t r
 			aggr_ht_entry_t new_empty_entry = aggr_ht_entry_t::GetDesiredEntry(row_ptr_to_insert, salt);
 			aggr_ht_entry_t expected_empty_entry = aggr_ht_entry_t::GetEmptyEntry();
 			bool successful_swap = std::atomic_compare_exchange_weak(&entry, &expected_empty_entry, new_empty_entry);
-			return successful_swap;
+
+			// if the expected empty entry actually was null, we can just return the pointer, and it will be a nullptr
+			// if the expected entry was filled in the meantime, we need to cancel the operation and will return the
+			// pointer to the next entry
+			return expected_empty_entry.GetPointerOrNull();
 		}
 
 		// if we expect the entry to be full, we know that even if the insert fails the keys still match so we can
@@ -445,7 +448,7 @@ static inline bool InsertRowToEntry(atomic<aggr_ht_entry_t> &entry, data_ptr_t r
 				desired_new_entry = aggr_ht_entry_t::GetDesiredEntry(row_ptr_to_insert, salt);
 			} while (!std::atomic_compare_exchange_weak(&entry, &expected_current_entry, desired_new_entry));
 
-			return true;
+			return nullptr;
 		}
 	}
 	// if we are not in parallel mode, we can just do the operation without any checks
@@ -454,7 +457,7 @@ static inline bool InsertRowToEntry(atomic<aggr_ht_entry_t> &entry, data_ptr_t r
 		data_ptr_t current_row_pointer = current_entry.GetPointerOrNull();
 		Store<data_ptr_t>(current_row_pointer, row_ptr_to_insert + pointer_offset);
 		entry = aggr_ht_entry_t::GetDesiredEntry(row_ptr_to_insert, salt);
-		return true;
+		return nullptr;
 	}
 }
 
@@ -475,6 +478,9 @@ static void InsertHashesLoop(atomic<aggr_ht_entry_t> entries[], Vector row_locat
 	const SelectionVector *remaining_sel = FlatVector::IncrementalSelectionVector();
 	idx_t remaining_count = count;
 
+	// use the ht bitmask to make the modulo operation faster but keep the salt bits intact
+	idx_t capacity_mask = ht->bitmask | JoinHashTable::SALT_MASK;
+
 	while (true) {
 
 		idx_t salt_match_count = 0;
@@ -482,50 +488,56 @@ static void InsertHashesLoop(atomic<aggr_ht_entry_t> entries[], Vector row_locat
 		// iterate over each entry to find out whether it belongs to an existing list or will start
 		// a new list
 		for (idx_t i = 0; i < remaining_count; i++) {
-			const auto row_index = remaining_sel->get_index(i);
-			auto &ht_offset_with_salt = ht_offsets_and_salt[row_index];
-			auto salt = aggr_ht_entry_t::ExtractSalt(ht_offset_with_salt);
 
+			const idx_t row_index = remaining_sel->get_index(i);
+
+			idx_t &ht_offset_and_salt = ht_offsets_and_salt[row_index];
+			const hash_t salt = aggr_ht_entry_t::ExtractSalt(ht_offset_and_salt);
 			idx_t increment;
+			idx_t ht_offset;
 
-			// increment the ht_offset_with_salt of the entry as long as next entry is occupied and salt does not match
+			bool occupied;
+			bool salt_match;
+
+			aggr_ht_entry_t entry;
+
+			// increment the ht_offset_and_salt of the entry as long as next entry is occupied and salt does not match
 			do {
-				atomic<aggr_ht_entry_t> &atomic_entry = entries[ht_offset_with_salt & JoinHashTable::POINTER_MASK];
-				aggr_ht_entry_t entry = atomic_entry.load();
+				ht_offset = ht_offset_and_salt & JoinHashTable::POINTER_MASK;
+				atomic<aggr_ht_entry_t> &atomic_entry = entries[ht_offset];
+				entry = atomic_entry.load();
+				occupied = entry.IsOccupied();
+				salt_match = entry.GetSalt() == salt;
 
-				bool occupied = entry.IsOccupied();
+				// condition for incrementing the ht_offset_and_salt: occupied and row_salt does not match -> move to
+				// next entry
+				increment = !salt_match && occupied;
+				IncrementAndWrap(ht_offset_and_salt, increment, capacity_mask);
+			} while (increment);
 
-				// if the entry is empty, we can insert the row and stop the loop for this entry
-				if (!occupied) {
-					data_ptr_t row_ptr = row_ptrs_to_insert[row_index];
-					bool successful_insertion =
-					    InsertRowToEntry<PARALLEL, true>(atomic_entry, row_ptr, salt, ht->pointer_offset);
+			if (!occupied) { // insert into free
+				atomic<aggr_ht_entry_t> &atomic_entry = entries[ht_offset];
+				data_ptr_t row_ptr = row_ptrs_to_insert[row_index];
+				data_ptr_t potential_collided_ptr =
+				    InsertRowToEntry<PARALLEL, true>(atomic_entry, row_ptr, salt, ht->pointer_offset);
 
-					if (PARALLEL) {
-						// if the insertion was successful, we can stop the loop for this entry
-						if (successful_insertion) {
-							break;
-						}
-						// if the insertion was not successful, the entry was occupied in the meantime
-						else {
-							occupied = true;
-							entry = atomic_entry.load();
-						}
-					} else {
-						// if we are not in parallel mode, we can just stop the loop for this entry
-						break;
+				if (PARALLEL) {
+					// if the insertion was not successful, the entry was occupied in the meantime, so we have to
+					// compare the keys and insert the row to the next entry
+					if (potential_collided_ptr) {
+						// if the entry was occupied, we need to compare the keys and insert the row to the next entry
+						// we need to compare the keys and insert the row to the next entry
+						state.salt_match_sel.set_index(salt_match_count, row_index);
+						row_ptr_insert_to[salt_match_count] = potential_collided_ptr;
+						salt_match_count += 1;
 					}
 				}
 
-				bool salt_match = entry.GetSalt() == salt;
+			} else {  // compare with full
 				state.salt_match_sel.set_index(salt_match_count, row_index);
-				salt_match_count += salt_match;
-
-				// condition for incrementing the ht_offset_with_salt: occupied and salt does not match -> move to next
-				// entry
-				increment = !salt_match;
-				IncrementAndWrapWithMask(ht_offset_with_salt, increment, ht->bitmask);
-			} while (increment);
+				row_ptr_insert_to[salt_match_count] = entry.GetPointer();
+				salt_match_count += 1;
+			}
 		}
 
 		// at this step, for all the pointers_result_v we stepped either until we found an empty entry or an entry with
@@ -539,49 +551,37 @@ static void InsertHashesLoop(atomic<aggr_ht_entry_t> entries[], Vector row_locat
 			data_collection->InitializeChunk(
 			    lhs_data,
 			    ht->equality_predicate_columns); // makes sure DataChunk has the right format
-			lhs_data.SetCardinality(count);      // and the right size
-
-			TupleDataChunkState chunk_state;
-			data_collection->InitializeChunkState(chunk_state, ht->equality_predicate_columns);
+			lhs_data.SetCardinality(count);        // and the right size
 
 			// The target selection vector says where to write the results into the lhs_data, we just want to write
 			// sequentially as otherwise we trigger a bug in the Gather function
 			data_collection->Gather(row_locations, state.salt_match_sel, salt_match_count,
 			                        ht->equality_predicate_columns, lhs_data, *FlatVector::IncrementalSelectionVector(),
-			                        chunk_state.cached_cast_vectors);
+			                        state.chunk_state.cached_cast_vectors);
 
-			TupleDataCollection::ToUnifiedFormat(chunk_state, lhs_data);
-
-			vector<TupleDataVectorFormat> &lhs_formats = chunk_state.vector_data;
-
-			// Get the pointers to the rows that need to be compared
-			for (idx_t need_compare_idx = 0; need_compare_idx < salt_match_count; need_compare_idx++) {
-				const auto entry_index = state.salt_match_sel.get_index(need_compare_idx);
-				const auto &entry = entries[ht_offsets_and_salt[entry_index] & JoinHashTable::POINTER_MASK];
-				row_ptr_insert_to[need_compare_idx] = entry.load().GetPointer();
-			}
+			TupleDataCollection::ToUnifiedFormat(state.chunk_state, lhs_data);
 
 			// Perform row comparisons
-			SelectionVector match_sel(STANDARD_VECTOR_SIZE);
 			for (idx_t i = 0; i < salt_match_count; i++) {
-				match_sel.set_index(i, i);
+				state.match_sel.set_index(i, i);
 			}
 
 			idx_t key_no_match_count = 0;
 			idx_t key_match_count =
-			    ht->row_matcher_build.Match(lhs_data, lhs_formats, match_sel, salt_match_count, ht->layout,
+			    ht->row_matcher_build.Match(lhs_data, state.chunk_state.vector_data, state.match_sel, salt_match_count, ht->layout,
 			                                state.row_ptr_insert_to_v, &state.key_no_match_sel, key_no_match_count);
 
 			D_ASSERT(key_match_count + key_no_match_count == salt_match_count);
 			// Insert the rows that match
 			for (idx_t i = 0; i < key_match_count; i++) {
-				const auto need_compare_idx = match_sel.get_index(i);
+				const auto need_compare_idx = state.match_sel.get_index(i);
 				const auto entry_index = state.salt_match_sel.get_index(need_compare_idx);
 
-				idx_t offset_and_salt = ht_offsets_and_salt[entry_index];
-				auto &entry = entries[offset_and_salt & JoinHashTable::POINTER_MASK];
+				idx_t ht_offset = ht_offsets_and_salt[entry_index] & JoinHashTable::POINTER_MASK;
+				auto &entry = entries[ht_offset];
 				data_ptr_t row_ptr = row_ptrs_to_insert[entry_index];
-				auto salt = offset_and_salt & JoinHashTable::SALT_MASK;
+
+				auto salt = ht_offsets_and_salt[entry_index];
 				InsertRowToEntry<PARALLEL, false>(entry, row_ptr, salt, ht->pointer_offset);
 
 				ht->chains_longer_than_one = true;
@@ -593,9 +593,9 @@ static void InsertHashesLoop(atomic<aggr_ht_entry_t> entries[], Vector row_locat
 				const auto need_compare_idx = state.key_no_match_sel.get_index(i);
 				const auto entry_index = state.salt_match_sel.get_index(need_compare_idx);
 
-				auto &ht_offset = ht_offsets_and_salt[entry_index];
+				idx_t &ht_offset_and_salt = ht_offsets_and_salt[entry_index];
 
-				IncrementAndWrapWithMask(ht_offset, 1, ht->bitmask);
+				IncrementAndWrap(ht_offset_and_salt, 1, capacity_mask);
 
 				state.remaining_sel.set_index(i, entry_index);
 			}
@@ -662,7 +662,8 @@ void JoinHashTable::Finalize(idx_t chunk_idx_from, idx_t chunk_idx_to, bool para
 	                                chunk_idx_to, false);
 	const auto row_locations = iterator.GetRowLocations();
 
-	InsertState insert_state;
+	InsertState insert_state(this->data_collection, this->equality_predicate_columns);
+
 	do {
 
 		const auto count = iterator.GetCurrentChunkCount();
@@ -707,11 +708,10 @@ unique_ptr<ScanStructure> JoinHashTable::Probe(DataChunk &keys, TupleDataChunkSt
 		               ss->sel_vector);
 	} else {
 		// hash all the keys
-		Vector hashes(LogicalType::HASH);
-		Hash(keys, *current_sel, ss->count, hashes);
+		Hash(keys, *current_sel, ss->count, probe_state.hashes);
 
 		// now initialize the pointers of the scan structure based on the hashes
-		GetRowPointers(keys, key_state, probe_state, hashes, *current_sel, ss->count, ss->pointers, ss->sel_vector);
+		GetRowPointers(keys, key_state, probe_state, probe_state.hashes, *current_sel, ss->count, ss->pointers, ss->sel_vector);
 	}
 
 	return ss;
