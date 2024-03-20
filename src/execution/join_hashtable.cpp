@@ -438,7 +438,7 @@ static inline data_ptr_t InsertRowToEntry(atomic<aggr_ht_entry_t> &entry, data_p
 		// just keep trying until we succeed
 		else {
 
-			aggr_ht_entry_t expected_current_entry = entry.load();
+			aggr_ht_entry_t expected_current_entry = entry.load(std::memory_order_relaxed);
 			aggr_ht_entry_t desired_new_entry;
 			D_ASSERT(expected_current_entry.IsOccupied());
 
@@ -453,7 +453,7 @@ static inline data_ptr_t InsertRowToEntry(atomic<aggr_ht_entry_t> &entry, data_p
 	}
 	// if we are not in parallel mode, we can just do the operation without any checks
 	else {
-		aggr_ht_entry_t current_entry = entry.load();
+		aggr_ht_entry_t current_entry = entry.load(std::memory_order_relaxed);
 		data_ptr_t current_row_pointer = current_entry.GetPointerOrNull();
 		Store<data_ptr_t>(current_row_pointer, row_ptr_to_insert + pointer_offset);
 		entry = aggr_ht_entry_t::GetDesiredEntry(row_ptr_to_insert, salt);
@@ -505,7 +505,7 @@ static void InsertHashesLoop(atomic<aggr_ht_entry_t> entries[], Vector row_locat
 			do {
 				ht_offset = ht_offset_and_salt & JoinHashTable::POINTER_MASK;
 				atomic<aggr_ht_entry_t> &atomic_entry = entries[ht_offset];
-				entry = atomic_entry.load();
+				entry = atomic_entry.load(std::memory_order_relaxed);
 				occupied = entry.IsOccupied();
 				salt_match = entry.GetSalt() == salt;
 
