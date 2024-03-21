@@ -1,4 +1,4 @@
-# name: benchmark/mine/hash_join_with_dups_lhs.benchmark
+# name: benchmark/mine/hash_join_with_dups_lhs_random.benchmark
 # description: Hash Join where RHS has high cardinality
 # group: [mine]
 

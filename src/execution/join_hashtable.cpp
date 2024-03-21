@@ -230,7 +230,7 @@ void JoinHashTable::GetRowPointers(DataChunk &keys, TupleDataChunkState &key_sta
 				salt_match = entry.GetSalt() == row_salt;
 
 				// condition for incrementing the ht_offset: occupied and row_salt does not match -> move to next entry
-				if(!occupied || salt_match) {
+				if (!occupied || salt_match) {
 					break;
 				}
 
@@ -426,7 +426,7 @@ static inline data_ptr_t InsertRowToEntry(atomic<aggr_ht_entry_t> &entry, data_p
 
 			aggr_ht_entry_t new_empty_entry = aggr_ht_entry_t::GetDesiredEntry(row_ptr_to_insert, salt);
 			aggr_ht_entry_t expected_empty_entry = aggr_ht_entry_t::GetEmptyEntry();
-			bool successful_swap = std::atomic_compare_exchange_weak(&entry, &expected_empty_entry, new_empty_entry);
+			std::atomic_compare_exchange_weak(&entry, &expected_empty_entry, new_empty_entry);
 
 			// if the expected empty entry actually was null, we can just return the pointer, and it will be a nullptr
 			// if the expected entry was filled in the meantime, we need to cancel the operation and will return the
@@ -439,13 +439,12 @@ static inline data_ptr_t InsertRowToEntry(atomic<aggr_ht_entry_t> &entry, data_p
 		else {
 
 			aggr_ht_entry_t expected_current_entry = entry.load(std::memory_order_relaxed);
-			aggr_ht_entry_t desired_new_entry;
+			aggr_ht_entry_t desired_new_entry = aggr_ht_entry_t::GetDesiredEntry(row_ptr_to_insert, salt);
 			D_ASSERT(expected_current_entry.IsOccupied());
 
 			do {
 				data_ptr_t current_row_pointer = expected_current_entry.GetPointer();
 				Store<data_ptr_t>(current_row_pointer, row_ptr_to_insert + pointer_offset);
-				desired_new_entry = aggr_ht_entry_t::GetDesiredEntry(row_ptr_to_insert, salt);
 			} while (!std::atomic_compare_exchange_weak(&entry, &expected_current_entry, desired_new_entry));
 
 			return nullptr;
@@ -533,7 +532,7 @@ static void InsertHashesLoop(atomic<aggr_ht_entry_t> entries[], Vector row_locat
 					}
 				}
 
-			} else {  // compare with full
+			} else { // compare with full
 				state.salt_match_sel.set_index(salt_match_count, row_index);
 				row_ptr_insert_to[salt_match_count] = entry.GetPointer();
 				salt_match_count += 1;
@@ -551,7 +550,7 @@ static void InsertHashesLoop(atomic<aggr_ht_entry_t> entries[], Vector row_locat
 			data_collection->InitializeChunk(
 			    lhs_data,
 			    ht->equality_predicate_columns); // makes sure DataChunk has the right format
-			lhs_data.SetCardinality(count);        // and the right size
+			lhs_data.SetCardinality(count);      // and the right size
 
 			// The target selection vector says where to write the results into the lhs_data, we just want to write
 			// sequentially as otherwise we trigger a bug in the Gather function
@@ -567,9 +566,9 @@ static void InsertHashesLoop(atomic<aggr_ht_entry_t> entries[], Vector row_locat
 			}
 
 			idx_t key_no_match_count = 0;
-			idx_t key_match_count =
-			    ht->row_matcher_build.Match(lhs_data, state.chunk_state.vector_data, state.match_sel, salt_match_count, ht->layout,
-			                                state.row_ptr_insert_to_v, &state.key_no_match_sel, key_no_match_count);
+			idx_t key_match_count = ht->row_matcher_build.Match(
+			    lhs_data, state.chunk_state.vector_data, state.match_sel, salt_match_count, ht->layout,
+			    state.row_ptr_insert_to_v, &state.key_no_match_sel, key_no_match_count);
 
 			D_ASSERT(key_match_count + key_no_match_count == salt_match_count);
 			// Insert the rows that match
@@ -711,7 +710,8 @@ unique_ptr<ScanStructure> JoinHashTable::Probe(DataChunk &keys, TupleDataChunkSt
 		Hash(keys, *current_sel, ss->count, probe_state.hashes);
 
 		// now initialize the pointers of the scan structure based on the hashes
-		GetRowPointers(keys, key_state, probe_state, probe_state.hashes, *current_sel, ss->count, ss->pointers, ss->sel_vector);
+		GetRowPointers(keys, key_state, probe_state, probe_state.hashes, *current_sel, ss->count, ss->pointers,
+		               ss->sel_vector);
 	}
 
 	return ss;
