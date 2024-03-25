@@ -14,14 +14,14 @@ using ProbeSpill = JoinHashTable::ProbeSpill;
 using ProbeSpillLocalState = JoinHashTable::ProbeSpillLocalAppendState;
 
 JoinHashTable::ProbeState::ProbeState()
-    : hashes(LogicalType::HASH), ht_offsets_v(LogicalType::UBIGINT), ht_offsets_dense_v(LogicalType::UBIGINT),
+    : ht_offsets_v(LogicalType::UBIGINT), ht_offsets_dense_v(LogicalType::UBIGINT),
       row_ptr_insert_to_v(LogicalType::POINTER), salt_v(LogicalType::UBIGINT), non_empty_sel(STANDARD_VECTOR_SIZE),
       key_no_match_sel(STANDARD_VECTOR_SIZE), salt_match_sel(STANDARD_VECTOR_SIZE) {
 }
 
 JoinHashTable::InsertState::InsertState(const unique_ptr<TupleDataCollection> &data_collection,
                                         const vector<column_t> &equality_predicate_columns)
-    : ProbeState(), match_sel(STANDARD_VECTOR_SIZE), remaining_sel(STANDARD_VECTOR_SIZE) {
+    : ProbeState(), remaining_sel(STANDARD_VECTOR_SIZE), match_sel(STANDARD_VECTOR_SIZE) {
 	data_collection->InitializeChunkState(chunk_state, equality_predicate_columns);
 }
 
@@ -706,12 +706,12 @@ unique_ptr<ScanStructure> JoinHashTable::Probe(DataChunk &keys, TupleDataChunkSt
 		GetRowPointers(keys, key_state, probe_state, *precomputed_hashes, *current_sel, ss->count, ss->pointers,
 		               ss->sel_vector);
 	} else {
+		Vector hashes(LogicalType::HASH);
 		// hash all the keys
-		Hash(keys, *current_sel, ss->count, probe_state.hashes);
+		Hash(keys, *current_sel, ss->count, hashes);
 
 		// now initialize the pointers of the scan structure based on the hashes
-		GetRowPointers(keys, key_state, probe_state, probe_state.hashes, *current_sel, ss->count, ss->pointers,
-		               ss->sel_vector);
+		GetRowPointers(keys, key_state, probe_state, hashes, *current_sel, ss->count, ss->pointers, ss->sel_vector);
 	}
 
 	return ss;
