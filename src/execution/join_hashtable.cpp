@@ -782,7 +782,7 @@ idx_t ScanStructure::ResolvePredicates(DataChunk &keys, SelectionVector &match_s
 		// the non-equality columns
 
 		return matcher->Match(keys, key_state.vector_data, match_sel, this->count, ht.layout, pointers, no_match_sel,
-		                      no_match_count);
+		                      no_match_count, ht.non_equality_predicate_columns);
 	} else {
 		// no match sel is the opposite of match sel
 		return this->count;
