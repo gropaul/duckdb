@@ -242,7 +242,9 @@ void JoinHashTable::GetRowPointers(DataChunk &keys, TupleDataChunkState &key_sta
 			state.salt_match_sel.set_index(salt_match_count, row_index);
 			salt_match_count += occupied;
 
-			row_ptr_insert_to[row_index] = entry.GetPointer();
+			// entry might be empty, so the pointer in the entry is nullptr, but this does not matter as the row
+			// will not be compared anyway as with an empty entry we are already done
+			row_ptr_insert_to[row_index] = entry.GetPointerOrNull();
 		}
 
 		if (salt_match_count == 0) {
