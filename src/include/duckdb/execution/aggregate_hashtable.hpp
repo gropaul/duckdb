@@ -31,17 +31,29 @@ struct FlushMoveState;
 
 struct aggr_ht_entry_t { // NOLINT
 public:
-	explicit aggr_ht_entry_t(hash_t value_p) : value(value_p) {
+	explicit inline aggr_ht_entry_t(hash_t value_p) : value(value_p) {
+	}
+
+	// Add a default constructor for 32 bit linux test case
+	aggr_ht_entry_t() : value(0) {
 	}
 
 	inline bool IsOccupied() const {
 		return value != 0;
 	}
 
+	// Returns a pointer based on the stored value without checking cell occupancy.
+	// This can return a nullptr if the cell is not occupied.
+	inline data_ptr_t GetPointerOrNull() const {
+		return reinterpret_cast<data_ptr_t>(value & POINTER_MASK);
+	}
+
+	// Will only return if cell is occupied
 	inline data_ptr_t GetPointer() const {
 		D_ASSERT(IsOccupied());
 		return reinterpret_cast<data_ptr_t>(value & POINTER_MASK);
 	}
+
 	inline void SetPointer(const data_ptr_t &pointer) {
 		// Pointer shouldn't use upper bits
 		D_ASSERT((reinterpret_cast<uint64_t>(pointer) & SALT_MASK) == 0);
@@ -55,6 +67,12 @@ public:
 		// Leaves upper bits intact, sets lower bits to all 1's
 		return hash | POINTER_MASK;
 	}
+
+	static inline hash_t ExtractSaltWithNull(const hash_t &hash) {
+		// Leaves upper bits intact, sets lower bits to all 0's
+		return hash & SALT_MASK;
+	}
+
 	inline hash_t GetSalt() const {
 		return ExtractSalt(value);
 	}
@@ -65,6 +83,15 @@ public:
 		D_ASSERT((salt & POINTER_MASK) == POINTER_MASK);
 		// No need to mask, just put the whole thing there
 		value = salt;
+	}
+
+	static inline aggr_ht_entry_t GetDesiredEntry(const data_ptr_t &pointer, const hash_t &salt) {
+		auto desired = reinterpret_cast<uint64_t>(pointer) | (salt & SALT_MASK);
+		return aggr_ht_entry_t(desired);
+	}
+
+	static inline aggr_ht_entry_t GetEmptyEntry() {
+		return aggr_ht_entry_t(0);
 	}
 
 private:

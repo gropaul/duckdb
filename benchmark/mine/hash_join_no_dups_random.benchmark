@@ -1,0 +1,25 @@
+# name: benchmark/mine/hash_join_no_dups_random.benchmark
+# description: Hash Join where RHS has high cardinality
+# group: [mine]
+
+name High Cardinality Join (No Index, Count Only)
+group join
+
+load
+CREATE TABLE t1 AS
+SELECT v1, v2
+FROM (
+    SELECT i as v1, i as v2, RANDOM() as rand
+    FROM range(0,10000000) t(i)
+) sub
+ORDER BY rand;
+CREATE TABLE t2 AS
+SELECT v1, v2
+FROM (
+    SELECT i as v1, i as v2, RANDOM() as rand
+    FROM range(0,10000000) t(i)
+) sub
+ORDER BY rand;
+
+run
+SELECT t1.v2,t2.v2 from t1 inner join t2 on (t1.v1 = t2.v1)
