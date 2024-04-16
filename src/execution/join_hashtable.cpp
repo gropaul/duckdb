@@ -870,7 +870,7 @@ idx_t ScanStructure::ScanInnerJoin(DataChunk &keys, SelectionVector &result_vect
 
 void ScanStructure::AdvancePointers(const SelectionVector &sel, idx_t sel_count) {
 
-	if (!ht.chains_longer_than_one) {
+	if (!ht.chains_longer_than_one || EmitFactVectors()) {
 		this->count = 0;
 		return;
 	}
@@ -914,6 +914,7 @@ void ScanStructure::NextInnerJoin(DataChunk &keys, DataChunk &left, DataChunk &r
 	idx_t result_count = ScanInnerJoin(keys, chain_match_sel_vector);
 
 	if (result_count > 0) {
+
 		if (PropagatesBuildSide(ht.join_type)) {
 			// full/right outer join: mark join matches as FOUND in the HT
 			auto ptrs = FlatVector::GetData<data_ptr_t>(pointers);
@@ -925,19 +926,42 @@ void ScanStructure::NextInnerJoin(DataChunk &keys, DataChunk &left, DataChunk &r
 				Store<bool>(true, ptrs[idx] + ht.tuple_size);
 			}
 		}
+
 		// for right semi join, just mark the entry as found and move on. Propagation happens later
 		if (ht.join_type != JoinType::RIGHT_SEMI && ht.join_type != JoinType::RIGHT_ANTI) {
+
 			// matches were found
 			// construct the result
 			// on the LHS, we create a slice using the result vector
-			result.Slice(left, chain_match_sel_vector, result_count);
+			result.Slice(left, chain_match_sel_vector, result_count, 0);
 
-			// on the RHS, we need to fetch the data from the hash table
-			for (idx_t i = 0; i < ht.output_columns.size(); i++) {
-				auto &vector = result.data[left.ColumnCount() + i];
-				const auto output_col_idx = ht.output_columns[i];
-				D_ASSERT(vector.GetType() == ht.layout.GetTypes()[output_col_idx]);
-				GatherResult(vector, chain_match_sel_vector, result_count, output_col_idx);
+			if (EmitFactVectors()) {
+				// in our very special case, the aggregate keys are the first vector and the key to be grouped by is
+				// the second vector
+
+				// set the first vector in the result to be the fact vector
+				auto &fact_vector = result.data[1];
+				fact_vector.SetVectorType(VectorType::FLAT_VECTOR);
+				// fact_vector.SetVectorType(VectorType::FACTORIZED_VECTOR);
+				auto fact_vector_pointer = FactorizedVector::GetData(fact_vector);
+
+				auto ptrs = FlatVector::GetData<data_ptr_t>(pointers);
+
+				for (idx_t j = 0; j < result_count; j++) {
+					auto idx = chain_match_sel_vector.get_index(j);
+					data_ptr_t ptr = ptrs[idx];
+					fact_vector_pointer[idx] = fact_entry_t(ptr);
+				}
+
+			} else {
+
+				// on the RHS, we need to fetch the data from the hash table
+				for (idx_t i = 0; i < ht.output_columns.size(); i++) {
+					auto &vector = result.data[left.ColumnCount() + i];
+					const auto output_col_idx = ht.output_columns[i];
+					D_ASSERT(vector.GetType() == ht.layout.GetTypes()[output_col_idx]);
+					GatherResult(vector, chain_match_sel_vector, result_count, output_col_idx);
+				}
 			}
 		}
 		AdvancePointers();
@@ -1472,6 +1496,22 @@ unique_ptr<ScanStructure> JoinHashTable::ProbeAndSpill(DataChunk &keys, TupleDat
 	GetRowPointers(keys, key_state, probe_state, hashes, *current_sel, ss->count, ss->pointers, ss->sel_vector);
 
 	return ss;
+}
+void JoinHashTable::GetChainLengths(Vector &row_pointer_v, idx_t count, idx_t pointer_offset) {
+
+	row_pointer_v.Flatten(count);
+	auto row_pointer = FlatVector::GetData<data_ptr_t>(row_pointer_v);
+
+	for (idx_t i = 0; i < count; i++) {
+		auto next_ptr = row_pointer[i];
+		idx_t chain_length = 0;
+		while (next_ptr) {
+			next_ptr = Load<data_ptr_t>(next_ptr + pointer_offset);
+			chain_length++;
+		}
+		// set the chain length in the row pointer
+		row_pointer[i] = reinterpret_cast<data_ptr_t>(chain_length);
+	}
 }
 
 ProbeSpill::ProbeSpill(JoinHashTable &ht, ClientContext &context, const vector<LogicalType> &probe_types)

@@ -10,6 +10,7 @@
 #include "duckdb/common/vector_operations/vector_operations.hpp"
 #include "duckdb/execution/expression_executor.hpp"
 #include "duckdb/execution/ht_entry.hpp"
+#include "duckdb/execution/join_hashtable.hpp"
 #include "duckdb/planner/expression/bound_aggregate_expression.hpp"
 
 namespace duckdb {
@@ -245,6 +246,8 @@ idx_t GroupedAggregateHashTable::AddChunk(DataChunk &groups, Vector &group_hashe
 		D_ASSERT(groups.GetTypes()[i] == layout.GetTypes()[i]);
 	}
 #endif
+	// todo: magic number 9 (pointer offset)
+	JoinHashTable::GetChainLengths(payload.data[0], groups.size(), 9);
 
 	const auto new_group_count = FindOrCreateGroups(groups, group_hashes, state.addresses, state.new_groups);
 	VectorOperations::AddInPlace(state.addresses, layout.GetAggrOffset(), payload.size());

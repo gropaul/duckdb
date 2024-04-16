@@ -75,6 +75,7 @@ class Vector {
 	friend struct UnionVector;
 	friend struct SequenceVector;
 	friend struct ArrayVector;
+	friend struct FactorizedVector;
 
 	friend class DataChunk;
 	friend class VectorCacheBuffer;
@@ -560,6 +561,18 @@ struct SequenceVector {
 	static void GetSequence(const Vector &vector, int64_t &start, int64_t &increment) {
 		int64_t sequence_count;
 		GetSequence(vector, start, increment, sequence_count);
+	}
+};
+
+struct FactorizedVector {
+
+	static inline const ValidityMask &Validity(const Vector &vector) {
+		D_ASSERT(vector.GetVectorType() == VectorType::FACTORIZED_VECTOR);
+		return vector.validity;
+	}
+
+	static inline fact_entry_t *GetData(Vector &vector) {
+		return reinterpret_cast<fact_entry_t *>(vector.data);
 	}
 };
 

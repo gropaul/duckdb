@@ -128,6 +128,8 @@ PhysicalType LogicalType::GetInternalType() {
 		return PhysicalType::LIST;
 	case LogicalTypeId::ARRAY:
 		return PhysicalType::ARRAY;
+	case LogicalTypeId::FACTORIZED:
+		return PhysicalType::FACTORIZED;
 	case LogicalTypeId::POINTER:
 		// LCOV_EXCL_START
 		if (sizeof(uintptr_t) == sizeof(uint32_t)) {
@@ -288,6 +290,8 @@ string TypeIdToString(PhysicalType type) {
 		return "LIST";
 	case PhysicalType::ARRAY:
 		return "ARRAY";
+	case PhysicalType::FACTORIZED:
+		return "FACTORIZED";
 	case PhysicalType::INVALID:
 		return "INVALID";
 	case PhysicalType::BIT:
@@ -295,6 +299,7 @@ string TypeIdToString(PhysicalType type) {
 	case PhysicalType::UNKNOWN:
 		return "UNKNOWN";
 	}
+
 	return "INVALID";
 }
 // LCOV_EXCL_STOP
@@ -338,6 +343,8 @@ idx_t GetTypeIdSize(PhysicalType type) {
 		return 0; // no own payload
 	case PhysicalType::LIST:
 		return sizeof(list_entry_t); // offset + len
+	case PhysicalType::FACTORIZED:
+		return sizeof(fact_entry_t);
 	default:
 		throw InternalException("Invalid PhysicalType for GetTypeIdSize");
 	}

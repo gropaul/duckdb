@@ -29,6 +29,8 @@ static const ValidityMask &CopyValidityMask(const Vector &v) {
 		return FlatVector::Validity(v);
 	case VectorType::FSST_VECTOR:
 		return FSSTVector::Validity(v);
+	case VectorType::FACTORIZED_VECTOR:
+		return FactorizedVector::Validity(v);
 	default:
 		throw InternalException("Unsupported vector type in vector copy");
 	}
@@ -74,6 +76,9 @@ void VectorOperations::Copy(const Vector &source_p, Vector &target, const Select
 			finished = true;
 			break;
 		case VectorType::FLAT_VECTOR:
+			finished = true;
+			break;
+		case VectorType::FACTORIZED_VECTOR:
 			finished = true;
 			break;
 		default:

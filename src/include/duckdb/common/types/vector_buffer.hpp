@@ -302,4 +302,6 @@ private:
 	BufferHandle handle;
 };
 
+class VectorFactBuffer : public VectorBuffer {};
+
 } // namespace duckdb

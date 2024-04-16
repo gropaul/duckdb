@@ -21,8 +21,11 @@ vector<ColumnBinding> LogicalJoin::GetColumnBindings() {
 		left_bindings.emplace_back(mark_index, 0);
 		return left_bindings;
 	}
+	// todo: hack - override the return types of the rhs to be one fact vector
+
 	// for other join types we project both the LHS and the RHS
 	auto right_bindings = MapBindings(children[1]->GetColumnBindings(), right_projection_map);
+	// auto right_bindings = {children[1]->GetColumnBindings()[0]};
 	if (join_type == JoinType::RIGHT_SEMI || join_type == JoinType::RIGHT_ANTI) {
 		return right_bindings;
 	}
@@ -42,7 +45,12 @@ void LogicalJoin::ResolveTypes() {
 		return;
 	}
 	// for any other join we project both sides
+
+	// todo: hack - override the return types of the rhs to be one fact vector
+	// vector<LogicalType> right_types_override = {LogicalType::FACTORIZED};
+
 	auto right_types = MapTypes(children[1]->types, right_projection_map);
+
 	if (join_type == JoinType::RIGHT_SEMI || join_type == JoinType::RIGHT_ANTI) {
 		types = right_types;
 		return;
