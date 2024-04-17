@@ -246,6 +246,7 @@ idx_t GroupedAggregateHashTable::AddChunk(DataChunk &groups, Vector &group_hashe
 		D_ASSERT(groups.GetTypes()[i] == layout.GetTypes()[i]);
 	}
 #endif
+
 	// todo: magic number 9 (pointer offset)
 	JoinHashTable::GetChainLengths(payload.data[0], groups.size(), 9);
 

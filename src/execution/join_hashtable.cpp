@@ -942,6 +942,7 @@ void ScanStructure::NextInnerJoin(DataChunk &keys, DataChunk &left, DataChunk &r
 				// set the first vector in the result to be the fact vector
 				auto &fact_vector = result.data[1];
 				fact_vector.SetVectorType(VectorType::FLAT_VECTOR);
+
 				// fact_vector.SetVectorType(VectorType::FACTORIZED_VECTOR);
 				auto fact_vector_pointer = FactorizedVector::GetData(fact_vector);
 
@@ -952,6 +953,11 @@ void ScanStructure::NextInnerJoin(DataChunk &keys, DataChunk &left, DataChunk &r
 					data_ptr_t ptr = ptrs[idx];
 					fact_vector_pointer[idx] = fact_entry_t(ptr);
 				}
+
+				// mark only the fields with pointers as valid
+				fact_vector.Slice(chain_match_sel_vector, result_count);
+
+
 
 			} else {
 
@@ -1497,21 +1503,44 @@ unique_ptr<ScanStructure> JoinHashTable::ProbeAndSpill(DataChunk &keys, TupleDat
 
 	return ss;
 }
-void JoinHashTable::GetChainLengths(Vector &row_pointer_v, idx_t count, idx_t pointer_offset) {
+void JoinHashTable::GetChainLengths(Vector &row_pointer_v, const idx_t count, const idx_t pointer_offset) {
+
+	const idx_t COMPUTED_MASK = 0x8000000000000000;
 
 	row_pointer_v.Flatten(count);
 	auto row_pointer = FlatVector::GetData<data_ptr_t>(row_pointer_v);
 
 	for (idx_t i = 0; i < count; i++) {
-		auto next_ptr = row_pointer[i];
-		idx_t chain_length = 0;
-		while (next_ptr) {
-			next_ptr = Load<data_ptr_t>(next_ptr + pointer_offset);
-			chain_length++;
+		auto list_start_ptr = row_pointer[i];
+
+		D_ASSERT(list_start_ptr != nullptr);
+
+		idx_t chain_length;
+
+		auto first_next_pointer = Load<idx_t>(list_start_ptr + pointer_offset);
+
+		// the chain length is already computed, just read the length from the first pointer
+		if (first_next_pointer & COMPUTED_MASK) {
+			// the chain length is already computed
+			chain_length = first_next_pointer & ~COMPUTED_MASK;
 		}
-		// set the chain length in the row pointer
+		// the chain length is not computed yet, traverse the chain and compute the length
+		else {
+			chain_length = 1;
+			auto next_ptr = reinterpret_cast<data_ptr_t>(first_next_pointer);
+
+			while (next_ptr) {
+				next_ptr = Load<data_ptr_t>(next_ptr + pointer_offset);
+				chain_length++;
+			}
+
+			// store the chain length in the first pointer
+			Store<idx_t>(chain_length | COMPUTED_MASK, list_start_ptr + pointer_offset);
+		}
+
 		row_pointer[i] = reinterpret_cast<data_ptr_t>(chain_length);
 	}
+
 }
 
 ProbeSpill::ProbeSpill(JoinHashTable &ht, ClientContext &context, const vector<LogicalType> &probe_types)

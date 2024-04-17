@@ -383,7 +383,7 @@ public:
 		return true;
 	}
 
-	static void GetChainLengths(Vector &row_pointer_v, idx_t count, idx_t pointer_offset);
+	static void GetChainLengths(Vector &row_pointer_v, const idx_t count, const idx_t pointer_offset);
 
 	//! Get total size of HT if all partitions would be built
 	idx_t GetTotalSize(vector<unique_ptr<JoinHashTable>> &local_hts, idx_t &max_partition_size,
