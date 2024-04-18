@@ -8,8 +8,8 @@
 // You should move the enum to the duckdb namespace, manually write a specialization or add it to the blacklist
 //-------------------------------------------------------------------------
 
-
 #include "duckdb/common/enum_util.hpp"
+
 #include "duckdb/catalog/catalog_entry/dependency/dependency_entry.hpp"
 #include "duckdb/catalog/catalog_entry/table_column_type.hpp"
 #include "duckdb/common/box_renderer.hpp"
@@ -129,9 +129,9 @@
 
 namespace duckdb {
 
-template<>
-const char* EnumUtil::ToChars<AccessMode>(AccessMode value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<AccessMode>(AccessMode value) {
+	switch (value) {
 	case AccessMode::UNDEFINED:
 		return "UNDEFINED";
 	case AccessMode::AUTOMATIC:
@@ -145,7 +145,7 @@ const char* EnumUtil::ToChars<AccessMode>(AccessMode value) {
 	}
 }
 
-template<>
+template <>
 AccessMode EnumUtil::FromString<AccessMode>(const char *value) {
 	if (StringUtil::Equals(value, "UNDEFINED")) {
 		return AccessMode::UNDEFINED;
@@ -162,9 +162,9 @@ AccessMode EnumUtil::FromString<AccessMode>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<AggregateCombineType>(AggregateCombineType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<AggregateCombineType>(AggregateCombineType value) {
+	switch (value) {
 	case AggregateCombineType::PRESERVE_INPUT:
 		return "PRESERVE_INPUT";
 	case AggregateCombineType::ALLOW_DESTRUCTIVE:
@@ -174,7 +174,7 @@ const char* EnumUtil::ToChars<AggregateCombineType>(AggregateCombineType value) 
 	}
 }
 
-template<>
+template <>
 AggregateCombineType EnumUtil::FromString<AggregateCombineType>(const char *value) {
 	if (StringUtil::Equals(value, "PRESERVE_INPUT")) {
 		return AggregateCombineType::PRESERVE_INPUT;
@@ -185,9 +185,9 @@ AggregateCombineType EnumUtil::FromString<AggregateCombineType>(const char *valu
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<AggregateHandling>(AggregateHandling value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<AggregateHandling>(AggregateHandling value) {
+	switch (value) {
 	case AggregateHandling::STANDARD_HANDLING:
 		return "STANDARD_HANDLING";
 	case AggregateHandling::NO_AGGREGATES_ALLOWED:
@@ -199,7 +199,7 @@ const char* EnumUtil::ToChars<AggregateHandling>(AggregateHandling value) {
 	}
 }
 
-template<>
+template <>
 AggregateHandling EnumUtil::FromString<AggregateHandling>(const char *value) {
 	if (StringUtil::Equals(value, "STANDARD_HANDLING")) {
 		return AggregateHandling::STANDARD_HANDLING;
@@ -213,9 +213,9 @@ AggregateHandling EnumUtil::FromString<AggregateHandling>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<AggregateOrderDependent>(AggregateOrderDependent value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<AggregateOrderDependent>(AggregateOrderDependent value) {
+	switch (value) {
 	case AggregateOrderDependent::ORDER_DEPENDENT:
 		return "ORDER_DEPENDENT";
 	case AggregateOrderDependent::NOT_ORDER_DEPENDENT:
@@ -225,7 +225,7 @@ const char* EnumUtil::ToChars<AggregateOrderDependent>(AggregateOrderDependent v
 	}
 }
 
-template<>
+template <>
 AggregateOrderDependent EnumUtil::FromString<AggregateOrderDependent>(const char *value) {
 	if (StringUtil::Equals(value, "ORDER_DEPENDENT")) {
 		return AggregateOrderDependent::ORDER_DEPENDENT;
@@ -236,9 +236,9 @@ AggregateOrderDependent EnumUtil::FromString<AggregateOrderDependent>(const char
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<AggregateType>(AggregateType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<AggregateType>(AggregateType value) {
+	switch (value) {
 	case AggregateType::NON_DISTINCT:
 		return "NON_DISTINCT";
 	case AggregateType::DISTINCT:
@@ -248,7 +248,7 @@ const char* EnumUtil::ToChars<AggregateType>(AggregateType value) {
 	}
 }
 
-template<>
+template <>
 AggregateType EnumUtil::FromString<AggregateType>(const char *value) {
 	if (StringUtil::Equals(value, "NON_DISTINCT")) {
 		return AggregateType::NON_DISTINCT;
@@ -259,9 +259,9 @@ AggregateType EnumUtil::FromString<AggregateType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<AlterForeignKeyType>(AlterForeignKeyType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<AlterForeignKeyType>(AlterForeignKeyType value) {
+	switch (value) {
 	case AlterForeignKeyType::AFT_ADD:
 		return "AFT_ADD";
 	case AlterForeignKeyType::AFT_DELETE:
@@ -271,7 +271,7 @@ const char* EnumUtil::ToChars<AlterForeignKeyType>(AlterForeignKeyType value) {
 	}
 }
 
-template<>
+template <>
 AlterForeignKeyType EnumUtil::FromString<AlterForeignKeyType>(const char *value) {
 	if (StringUtil::Equals(value, "AFT_ADD")) {
 		return AlterForeignKeyType::AFT_ADD;
@@ -282,9 +282,9 @@ AlterForeignKeyType EnumUtil::FromString<AlterForeignKeyType>(const char *value)
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<AlterScalarFunctionType>(AlterScalarFunctionType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<AlterScalarFunctionType>(AlterScalarFunctionType value) {
+	switch (value) {
 	case AlterScalarFunctionType::INVALID:
 		return "INVALID";
 	case AlterScalarFunctionType::ADD_FUNCTION_OVERLOADS:
@@ -294,7 +294,7 @@ const char* EnumUtil::ToChars<AlterScalarFunctionType>(AlterScalarFunctionType v
 	}
 }
 
-template<>
+template <>
 AlterScalarFunctionType EnumUtil::FromString<AlterScalarFunctionType>(const char *value) {
 	if (StringUtil::Equals(value, "INVALID")) {
 		return AlterScalarFunctionType::INVALID;
@@ -305,9 +305,9 @@ AlterScalarFunctionType EnumUtil::FromString<AlterScalarFunctionType>(const char
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<AlterTableFunctionType>(AlterTableFunctionType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<AlterTableFunctionType>(AlterTableFunctionType value) {
+	switch (value) {
 	case AlterTableFunctionType::INVALID:
 		return "INVALID";
 	case AlterTableFunctionType::ADD_FUNCTION_OVERLOADS:
@@ -317,7 +317,7 @@ const char* EnumUtil::ToChars<AlterTableFunctionType>(AlterTableFunctionType val
 	}
 }
 
-template<>
+template <>
 AlterTableFunctionType EnumUtil::FromString<AlterTableFunctionType>(const char *value) {
 	if (StringUtil::Equals(value, "INVALID")) {
 		return AlterTableFunctionType::INVALID;
@@ -328,9 +328,9 @@ AlterTableFunctionType EnumUtil::FromString<AlterTableFunctionType>(const char *
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<AlterTableType>(AlterTableType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<AlterTableType>(AlterTableType value) {
+	switch (value) {
 	case AlterTableType::INVALID:
 		return "INVALID";
 	case AlterTableType::RENAME_COLUMN:
@@ -358,7 +358,7 @@ const char* EnumUtil::ToChars<AlterTableType>(AlterTableType value) {
 	}
 }
 
-template<>
+template <>
 AlterTableType EnumUtil::FromString<AlterTableType>(const char *value) {
 	if (StringUtil::Equals(value, "INVALID")) {
 		return AlterTableType::INVALID;
@@ -396,9 +396,9 @@ AlterTableType EnumUtil::FromString<AlterTableType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<AlterType>(AlterType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<AlterType>(AlterType value) {
+	switch (value) {
 	case AlterType::INVALID:
 		return "INVALID";
 	case AlterType::ALTER_TABLE:
@@ -422,7 +422,7 @@ const char* EnumUtil::ToChars<AlterType>(AlterType value) {
 	}
 }
 
-template<>
+template <>
 AlterType EnumUtil::FromString<AlterType>(const char *value) {
 	if (StringUtil::Equals(value, "INVALID")) {
 		return AlterType::INVALID;
@@ -454,9 +454,9 @@ AlterType EnumUtil::FromString<AlterType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<AlterViewType>(AlterViewType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<AlterViewType>(AlterViewType value) {
+	switch (value) {
 	case AlterViewType::INVALID:
 		return "INVALID";
 	case AlterViewType::RENAME_VIEW:
@@ -466,7 +466,7 @@ const char* EnumUtil::ToChars<AlterViewType>(AlterViewType value) {
 	}
 }
 
-template<>
+template <>
 AlterViewType EnumUtil::FromString<AlterViewType>(const char *value) {
 	if (StringUtil::Equals(value, "INVALID")) {
 		return AlterViewType::INVALID;
@@ -477,9 +477,9 @@ AlterViewType EnumUtil::FromString<AlterViewType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<AppenderType>(AppenderType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<AppenderType>(AppenderType value) {
+	switch (value) {
 	case AppenderType::LOGICAL:
 		return "LOGICAL";
 	case AppenderType::PHYSICAL:
@@ -489,7 +489,7 @@ const char* EnumUtil::ToChars<AppenderType>(AppenderType value) {
 	}
 }
 
-template<>
+template <>
 AppenderType EnumUtil::FromString<AppenderType>(const char *value) {
 	if (StringUtil::Equals(value, "LOGICAL")) {
 		return AppenderType::LOGICAL;
@@ -500,9 +500,9 @@ AppenderType EnumUtil::FromString<AppenderType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<ArrowDateTimeType>(ArrowDateTimeType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<ArrowDateTimeType>(ArrowDateTimeType value) {
+	switch (value) {
 	case ArrowDateTimeType::MILLISECONDS:
 		return "MILLISECONDS";
 	case ArrowDateTimeType::MICROSECONDS:
@@ -522,7 +522,7 @@ const char* EnumUtil::ToChars<ArrowDateTimeType>(ArrowDateTimeType value) {
 	}
 }
 
-template<>
+template <>
 ArrowDateTimeType EnumUtil::FromString<ArrowDateTimeType>(const char *value) {
 	if (StringUtil::Equals(value, "MILLISECONDS")) {
 		return ArrowDateTimeType::MILLISECONDS;
@@ -548,9 +548,9 @@ ArrowDateTimeType EnumUtil::FromString<ArrowDateTimeType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<ArrowOffsetSize>(ArrowOffsetSize value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<ArrowOffsetSize>(ArrowOffsetSize value) {
+	switch (value) {
 	case ArrowOffsetSize::REGULAR:
 		return "REGULAR";
 	case ArrowOffsetSize::LARGE:
@@ -560,7 +560,7 @@ const char* EnumUtil::ToChars<ArrowOffsetSize>(ArrowOffsetSize value) {
 	}
 }
 
-template<>
+template <>
 ArrowOffsetSize EnumUtil::FromString<ArrowOffsetSize>(const char *value) {
 	if (StringUtil::Equals(value, "REGULAR")) {
 		return ArrowOffsetSize::REGULAR;
@@ -571,9 +571,9 @@ ArrowOffsetSize EnumUtil::FromString<ArrowOffsetSize>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<ArrowVariableSizeType>(ArrowVariableSizeType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<ArrowVariableSizeType>(ArrowVariableSizeType value) {
+	switch (value) {
 	case ArrowVariableSizeType::FIXED_SIZE:
 		return "FIXED_SIZE";
 	case ArrowVariableSizeType::NORMAL:
@@ -587,7 +587,7 @@ const char* EnumUtil::ToChars<ArrowVariableSizeType>(ArrowVariableSizeType value
 	}
 }
 
-template<>
+template <>
 ArrowVariableSizeType EnumUtil::FromString<ArrowVariableSizeType>(const char *value) {
 	if (StringUtil::Equals(value, "FIXED_SIZE")) {
 		return ArrowVariableSizeType::FIXED_SIZE;
@@ -604,9 +604,9 @@ ArrowVariableSizeType EnumUtil::FromString<ArrowVariableSizeType>(const char *va
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<BindingMode>(BindingMode value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<BindingMode>(BindingMode value) {
+	switch (value) {
 	case BindingMode::STANDARD_BINDING:
 		return "STANDARD_BINDING";
 	case BindingMode::EXTRACT_NAMES:
@@ -616,7 +616,7 @@ const char* EnumUtil::ToChars<BindingMode>(BindingMode value) {
 	}
 }
 
-template<>
+template <>
 BindingMode EnumUtil::FromString<BindingMode>(const char *value) {
 	if (StringUtil::Equals(value, "STANDARD_BINDING")) {
 		return BindingMode::STANDARD_BINDING;
@@ -627,9 +627,9 @@ BindingMode EnumUtil::FromString<BindingMode>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<BitpackingMode>(BitpackingMode value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<BitpackingMode>(BitpackingMode value) {
+	switch (value) {
 	case BitpackingMode::INVALID:
 		return "INVALID";
 	case BitpackingMode::AUTO:
@@ -647,7 +647,7 @@ const char* EnumUtil::ToChars<BitpackingMode>(BitpackingMode value) {
 	}
 }
 
-template<>
+template <>
 BitpackingMode EnumUtil::FromString<BitpackingMode>(const char *value) {
 	if (StringUtil::Equals(value, "INVALID")) {
 		return BitpackingMode::INVALID;
@@ -670,9 +670,9 @@ BitpackingMode EnumUtil::FromString<BitpackingMode>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<BlockState>(BlockState value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<BlockState>(BlockState value) {
+	switch (value) {
 	case BlockState::BLOCK_UNLOADED:
 		return "BLOCK_UNLOADED";
 	case BlockState::BLOCK_LOADED:
@@ -682,7 +682,7 @@ const char* EnumUtil::ToChars<BlockState>(BlockState value) {
 	}
 }
 
-template<>
+template <>
 BlockState EnumUtil::FromString<BlockState>(const char *value) {
 	if (StringUtil::Equals(value, "BLOCK_UNLOADED")) {
 		return BlockState::BLOCK_UNLOADED;
@@ -693,9 +693,9 @@ BlockState EnumUtil::FromString<BlockState>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<CAPIResultSetType>(CAPIResultSetType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<CAPIResultSetType>(CAPIResultSetType value) {
+	switch (value) {
 	case CAPIResultSetType::CAPI_RESULT_TYPE_NONE:
 		return "CAPI_RESULT_TYPE_NONE";
 	case CAPIResultSetType::CAPI_RESULT_TYPE_MATERIALIZED:
@@ -709,7 +709,7 @@ const char* EnumUtil::ToChars<CAPIResultSetType>(CAPIResultSetType value) {
 	}
 }
 
-template<>
+template <>
 CAPIResultSetType EnumUtil::FromString<CAPIResultSetType>(const char *value) {
 	if (StringUtil::Equals(value, "CAPI_RESULT_TYPE_NONE")) {
 		return CAPIResultSetType::CAPI_RESULT_TYPE_NONE;
@@ -726,9 +726,9 @@ CAPIResultSetType EnumUtil::FromString<CAPIResultSetType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<CSVState>(CSVState value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<CSVState>(CSVState value) {
+	switch (value) {
 	case CSVState::STANDARD:
 		return "STANDARD";
 	case CSVState::DELIMITER:
@@ -756,7 +756,7 @@ const char* EnumUtil::ToChars<CSVState>(CSVState value) {
 	}
 }
 
-template<>
+template <>
 CSVState EnumUtil::FromString<CSVState>(const char *value) {
 	if (StringUtil::Equals(value, "STANDARD")) {
 		return CSVState::STANDARD;
@@ -794,9 +794,9 @@ CSVState EnumUtil::FromString<CSVState>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<CTEMaterialize>(CTEMaterialize value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<CTEMaterialize>(CTEMaterialize value) {
+	switch (value) {
 	case CTEMaterialize::CTE_MATERIALIZE_DEFAULT:
 		return "CTE_MATERIALIZE_DEFAULT";
 	case CTEMaterialize::CTE_MATERIALIZE_ALWAYS:
@@ -808,7 +808,7 @@ const char* EnumUtil::ToChars<CTEMaterialize>(CTEMaterialize value) {
 	}
 }
 
-template<>
+template <>
 CTEMaterialize EnumUtil::FromString<CTEMaterialize>(const char *value) {
 	if (StringUtil::Equals(value, "CTE_MATERIALIZE_DEFAULT")) {
 		return CTEMaterialize::CTE_MATERIALIZE_DEFAULT;
@@ -822,9 +822,9 @@ CTEMaterialize EnumUtil::FromString<CTEMaterialize>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<CatalogLookupBehavior>(CatalogLookupBehavior value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<CatalogLookupBehavior>(CatalogLookupBehavior value) {
+	switch (value) {
 	case CatalogLookupBehavior::STANDARD:
 		return "STANDARD";
 	case CatalogLookupBehavior::LOWER_PRIORITY:
@@ -836,7 +836,7 @@ const char* EnumUtil::ToChars<CatalogLookupBehavior>(CatalogLookupBehavior value
 	}
 }
 
-template<>
+template <>
 CatalogLookupBehavior EnumUtil::FromString<CatalogLookupBehavior>(const char *value) {
 	if (StringUtil::Equals(value, "STANDARD")) {
 		return CatalogLookupBehavior::STANDARD;
@@ -850,9 +850,9 @@ CatalogLookupBehavior EnumUtil::FromString<CatalogLookupBehavior>(const char *va
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<CatalogType>(CatalogType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<CatalogType>(CatalogType value) {
+	switch (value) {
 	case CatalogType::INVALID:
 		return "INVALID";
 	case CatalogType::TABLE_ENTRY:
@@ -904,7 +904,7 @@ const char* EnumUtil::ToChars<CatalogType>(CatalogType value) {
 	}
 }
 
-template<>
+template <>
 CatalogType EnumUtil::FromString<CatalogType>(const char *value) {
 	if (StringUtil::Equals(value, "INVALID")) {
 		return CatalogType::INVALID;
@@ -978,9 +978,9 @@ CatalogType EnumUtil::FromString<CatalogType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<CheckpointAbort>(CheckpointAbort value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<CheckpointAbort>(CheckpointAbort value) {
+	switch (value) {
 	case CheckpointAbort::NO_ABORT:
 		return "NO_ABORT";
 	case CheckpointAbort::DEBUG_ABORT_BEFORE_TRUNCATE:
@@ -994,7 +994,7 @@ const char* EnumUtil::ToChars<CheckpointAbort>(CheckpointAbort value) {
 	}
 }
 
-template<>
+template <>
 CheckpointAbort EnumUtil::FromString<CheckpointAbort>(const char *value) {
 	if (StringUtil::Equals(value, "NO_ABORT")) {
 		return CheckpointAbort::NO_ABORT;
@@ -1011,9 +1011,9 @@ CheckpointAbort EnumUtil::FromString<CheckpointAbort>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<ChunkInfoType>(ChunkInfoType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<ChunkInfoType>(ChunkInfoType value) {
+	switch (value) {
 	case ChunkInfoType::CONSTANT_INFO:
 		return "CONSTANT_INFO";
 	case ChunkInfoType::VECTOR_INFO:
@@ -1025,7 +1025,7 @@ const char* EnumUtil::ToChars<ChunkInfoType>(ChunkInfoType value) {
 	}
 }
 
-template<>
+template <>
 ChunkInfoType EnumUtil::FromString<ChunkInfoType>(const char *value) {
 	if (StringUtil::Equals(value, "CONSTANT_INFO")) {
 		return ChunkInfoType::CONSTANT_INFO;
@@ -1039,9 +1039,9 @@ ChunkInfoType EnumUtil::FromString<ChunkInfoType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<ColumnDataAllocatorType>(ColumnDataAllocatorType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<ColumnDataAllocatorType>(ColumnDataAllocatorType value) {
+	switch (value) {
 	case ColumnDataAllocatorType::BUFFER_MANAGER_ALLOCATOR:
 		return "BUFFER_MANAGER_ALLOCATOR";
 	case ColumnDataAllocatorType::IN_MEMORY_ALLOCATOR:
@@ -1053,7 +1053,7 @@ const char* EnumUtil::ToChars<ColumnDataAllocatorType>(ColumnDataAllocatorType v
 	}
 }
 
-template<>
+template <>
 ColumnDataAllocatorType EnumUtil::FromString<ColumnDataAllocatorType>(const char *value) {
 	if (StringUtil::Equals(value, "BUFFER_MANAGER_ALLOCATOR")) {
 		return ColumnDataAllocatorType::BUFFER_MANAGER_ALLOCATOR;
@@ -1067,9 +1067,9 @@ ColumnDataAllocatorType EnumUtil::FromString<ColumnDataAllocatorType>(const char
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<ColumnDataScanProperties>(ColumnDataScanProperties value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<ColumnDataScanProperties>(ColumnDataScanProperties value) {
+	switch (value) {
 	case ColumnDataScanProperties::INVALID:
 		return "INVALID";
 	case ColumnDataScanProperties::ALLOW_ZERO_COPY:
@@ -1081,7 +1081,7 @@ const char* EnumUtil::ToChars<ColumnDataScanProperties>(ColumnDataScanProperties
 	}
 }
 
-template<>
+template <>
 ColumnDataScanProperties EnumUtil::FromString<ColumnDataScanProperties>(const char *value) {
 	if (StringUtil::Equals(value, "INVALID")) {
 		return ColumnDataScanProperties::INVALID;
@@ -1095,9 +1095,9 @@ ColumnDataScanProperties EnumUtil::FromString<ColumnDataScanProperties>(const ch
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<ColumnSegmentType>(ColumnSegmentType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<ColumnSegmentType>(ColumnSegmentType value) {
+	switch (value) {
 	case ColumnSegmentType::TRANSIENT:
 		return "TRANSIENT";
 	case ColumnSegmentType::PERSISTENT:
@@ -1107,7 +1107,7 @@ const char* EnumUtil::ToChars<ColumnSegmentType>(ColumnSegmentType value) {
 	}
 }
 
-template<>
+template <>
 ColumnSegmentType EnumUtil::FromString<ColumnSegmentType>(const char *value) {
 	if (StringUtil::Equals(value, "TRANSIENT")) {
 		return ColumnSegmentType::TRANSIENT;
@@ -1118,9 +1118,9 @@ ColumnSegmentType EnumUtil::FromString<ColumnSegmentType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<CompressedMaterializationDirection>(CompressedMaterializationDirection value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<CompressedMaterializationDirection>(CompressedMaterializationDirection value) {
+	switch (value) {
 	case CompressedMaterializationDirection::INVALID:
 		return "INVALID";
 	case CompressedMaterializationDirection::COMPRESS:
@@ -1132,7 +1132,7 @@ const char* EnumUtil::ToChars<CompressedMaterializationDirection>(CompressedMate
 	}
 }
 
-template<>
+template <>
 CompressedMaterializationDirection EnumUtil::FromString<CompressedMaterializationDirection>(const char *value) {
 	if (StringUtil::Equals(value, "INVALID")) {
 		return CompressedMaterializationDirection::INVALID;
@@ -1146,9 +1146,9 @@ CompressedMaterializationDirection EnumUtil::FromString<CompressedMaterializatio
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<CompressionType>(CompressionType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<CompressionType>(CompressionType value) {
+	switch (value) {
 	case CompressionType::COMPRESSION_AUTO:
 		return "COMPRESSION_AUTO";
 	case CompressionType::COMPRESSION_UNCOMPRESSED:
@@ -1180,7 +1180,7 @@ const char* EnumUtil::ToChars<CompressionType>(CompressionType value) {
 	}
 }
 
-template<>
+template <>
 CompressionType EnumUtil::FromString<CompressionType>(const char *value) {
 	if (StringUtil::Equals(value, "COMPRESSION_AUTO")) {
 		return CompressionType::COMPRESSION_AUTO;
@@ -1224,9 +1224,9 @@ CompressionType EnumUtil::FromString<CompressionType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<ConflictManagerMode>(ConflictManagerMode value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<ConflictManagerMode>(ConflictManagerMode value) {
+	switch (value) {
 	case ConflictManagerMode::SCAN:
 		return "SCAN";
 	case ConflictManagerMode::THROW:
@@ -1236,7 +1236,7 @@ const char* EnumUtil::ToChars<ConflictManagerMode>(ConflictManagerMode value) {
 	}
 }
 
-template<>
+template <>
 ConflictManagerMode EnumUtil::FromString<ConflictManagerMode>(const char *value) {
 	if (StringUtil::Equals(value, "SCAN")) {
 		return ConflictManagerMode::SCAN;
@@ -1247,9 +1247,9 @@ ConflictManagerMode EnumUtil::FromString<ConflictManagerMode>(const char *value)
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<ConstraintType>(ConstraintType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<ConstraintType>(ConstraintType value) {
+	switch (value) {
 	case ConstraintType::INVALID:
 		return "INVALID";
 	case ConstraintType::NOT_NULL:
@@ -1265,7 +1265,7 @@ const char* EnumUtil::ToChars<ConstraintType>(ConstraintType value) {
 	}
 }
 
-template<>
+template <>
 ConstraintType EnumUtil::FromString<ConstraintType>(const char *value) {
 	if (StringUtil::Equals(value, "INVALID")) {
 		return ConstraintType::INVALID;
@@ -1285,9 +1285,9 @@ ConstraintType EnumUtil::FromString<ConstraintType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<DataFileType>(DataFileType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<DataFileType>(DataFileType value) {
+	switch (value) {
 	case DataFileType::FILE_DOES_NOT_EXIST:
 		return "FILE_DOES_NOT_EXIST";
 	case DataFileType::DUCKDB_FILE:
@@ -1301,7 +1301,7 @@ const char* EnumUtil::ToChars<DataFileType>(DataFileType value) {
 	}
 }
 
-template<>
+template <>
 DataFileType EnumUtil::FromString<DataFileType>(const char *value) {
 	if (StringUtil::Equals(value, "FILE_DOES_NOT_EXIST")) {
 		return DataFileType::FILE_DOES_NOT_EXIST;
@@ -1318,9 +1318,9 @@ DataFileType EnumUtil::FromString<DataFileType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<DatePartSpecifier>(DatePartSpecifier value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<DatePartSpecifier>(DatePartSpecifier value) {
+	switch (value) {
 	case DatePartSpecifier::YEAR:
 		return "YEAR";
 	case DatePartSpecifier::MONTH:
@@ -1376,7 +1376,7 @@ const char* EnumUtil::ToChars<DatePartSpecifier>(DatePartSpecifier value) {
 	}
 }
 
-template<>
+template <>
 DatePartSpecifier EnumUtil::FromString<DatePartSpecifier>(const char *value) {
 	if (StringUtil::Equals(value, "YEAR")) {
 		return DatePartSpecifier::YEAR;
@@ -1456,9 +1456,9 @@ DatePartSpecifier EnumUtil::FromString<DatePartSpecifier>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<DebugInitialize>(DebugInitialize value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<DebugInitialize>(DebugInitialize value) {
+	switch (value) {
 	case DebugInitialize::NO_INITIALIZE:
 		return "NO_INITIALIZE";
 	case DebugInitialize::DEBUG_ZERO_INITIALIZE:
@@ -1470,7 +1470,7 @@ const char* EnumUtil::ToChars<DebugInitialize>(DebugInitialize value) {
 	}
 }
 
-template<>
+template <>
 DebugInitialize EnumUtil::FromString<DebugInitialize>(const char *value) {
 	if (StringUtil::Equals(value, "NO_INITIALIZE")) {
 		return DebugInitialize::NO_INITIALIZE;
@@ -1484,9 +1484,9 @@ DebugInitialize EnumUtil::FromString<DebugInitialize>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<DefaultOrderByNullType>(DefaultOrderByNullType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<DefaultOrderByNullType>(DefaultOrderByNullType value) {
+	switch (value) {
 	case DefaultOrderByNullType::INVALID:
 		return "INVALID";
 	case DefaultOrderByNullType::NULLS_FIRST:
@@ -1502,7 +1502,7 @@ const char* EnumUtil::ToChars<DefaultOrderByNullType>(DefaultOrderByNullType val
 	}
 }
 
-template<>
+template <>
 DefaultOrderByNullType EnumUtil::FromString<DefaultOrderByNullType>(const char *value) {
 	if (StringUtil::Equals(value, "INVALID")) {
 		return DefaultOrderByNullType::INVALID;
@@ -1522,9 +1522,9 @@ DefaultOrderByNullType EnumUtil::FromString<DefaultOrderByNullType>(const char *
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<DependencyEntryType>(DependencyEntryType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<DependencyEntryType>(DependencyEntryType value) {
+	switch (value) {
 	case DependencyEntryType::SUBJECT:
 		return "SUBJECT";
 	case DependencyEntryType::DEPENDENT:
@@ -1534,7 +1534,7 @@ const char* EnumUtil::ToChars<DependencyEntryType>(DependencyEntryType value) {
 	}
 }
 
-template<>
+template <>
 DependencyEntryType EnumUtil::FromString<DependencyEntryType>(const char *value) {
 	if (StringUtil::Equals(value, "SUBJECT")) {
 		return DependencyEntryType::SUBJECT;
@@ -1545,9 +1545,9 @@ DependencyEntryType EnumUtil::FromString<DependencyEntryType>(const char *value)
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<DeprecatedIndexType>(DeprecatedIndexType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<DeprecatedIndexType>(DeprecatedIndexType value) {
+	switch (value) {
 	case DeprecatedIndexType::INVALID:
 		return "INVALID";
 	case DeprecatedIndexType::ART:
@@ -1559,7 +1559,7 @@ const char* EnumUtil::ToChars<DeprecatedIndexType>(DeprecatedIndexType value) {
 	}
 }
 
-template<>
+template <>
 DeprecatedIndexType EnumUtil::FromString<DeprecatedIndexType>(const char *value) {
 	if (StringUtil::Equals(value, "INVALID")) {
 		return DeprecatedIndexType::INVALID;
@@ -1573,9 +1573,9 @@ DeprecatedIndexType EnumUtil::FromString<DeprecatedIndexType>(const char *value)
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<DistinctType>(DistinctType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<DistinctType>(DistinctType value) {
+	switch (value) {
 	case DistinctType::DISTINCT:
 		return "DISTINCT";
 	case DistinctType::DISTINCT_ON:
@@ -1585,7 +1585,7 @@ const char* EnumUtil::ToChars<DistinctType>(DistinctType value) {
 	}
 }
 
-template<>
+template <>
 DistinctType EnumUtil::FromString<DistinctType>(const char *value) {
 	if (StringUtil::Equals(value, "DISTINCT")) {
 		return DistinctType::DISTINCT;
@@ -1596,9 +1596,9 @@ DistinctType EnumUtil::FromString<DistinctType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<ErrorType>(ErrorType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<ErrorType>(ErrorType value) {
+	switch (value) {
 	case ErrorType::UNSIGNED_EXTENSION:
 		return "UNSIGNED_EXTENSION";
 	case ErrorType::INVALIDATED_TRANSACTION:
@@ -1614,7 +1614,7 @@ const char* EnumUtil::ToChars<ErrorType>(ErrorType value) {
 	}
 }
 
-template<>
+template <>
 ErrorType EnumUtil::FromString<ErrorType>(const char *value) {
 	if (StringUtil::Equals(value, "UNSIGNED_EXTENSION")) {
 		return ErrorType::UNSIGNED_EXTENSION;
@@ -1634,9 +1634,9 @@ ErrorType EnumUtil::FromString<ErrorType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<ExceptionFormatValueType>(ExceptionFormatValueType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<ExceptionFormatValueType>(ExceptionFormatValueType value) {
+	switch (value) {
 	case ExceptionFormatValueType::FORMAT_VALUE_TYPE_DOUBLE:
 		return "FORMAT_VALUE_TYPE_DOUBLE";
 	case ExceptionFormatValueType::FORMAT_VALUE_TYPE_INTEGER:
@@ -1648,7 +1648,7 @@ const char* EnumUtil::ToChars<ExceptionFormatValueType>(ExceptionFormatValueType
 	}
 }
 
-template<>
+template <>
 ExceptionFormatValueType EnumUtil::FromString<ExceptionFormatValueType>(const char *value) {
 	if (StringUtil::Equals(value, "FORMAT_VALUE_TYPE_DOUBLE")) {
 		return ExceptionFormatValueType::FORMAT_VALUE_TYPE_DOUBLE;
@@ -1662,9 +1662,9 @@ ExceptionFormatValueType EnumUtil::FromString<ExceptionFormatValueType>(const ch
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<ExceptionType>(ExceptionType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<ExceptionType>(ExceptionType value) {
+	switch (value) {
 	case ExceptionType::INVALID:
 		return "INVALID";
 	case ExceptionType::OUT_OF_RANGE:
@@ -1754,7 +1754,7 @@ const char* EnumUtil::ToChars<ExceptionType>(ExceptionType value) {
 	}
 }
 
-template<>
+template <>
 ExceptionType EnumUtil::FromString<ExceptionType>(const char *value) {
 	if (StringUtil::Equals(value, "INVALID")) {
 		return ExceptionType::INVALID;
@@ -1885,9 +1885,9 @@ ExceptionType EnumUtil::FromString<ExceptionType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<ExplainOutputType>(ExplainOutputType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<ExplainOutputType>(ExplainOutputType value) {
+	switch (value) {
 	case ExplainOutputType::ALL:
 		return "ALL";
 	case ExplainOutputType::OPTIMIZED_ONLY:
@@ -1899,7 +1899,7 @@ const char* EnumUtil::ToChars<ExplainOutputType>(ExplainOutputType value) {
 	}
 }
 
-template<>
+template <>
 ExplainOutputType EnumUtil::FromString<ExplainOutputType>(const char *value) {
 	if (StringUtil::Equals(value, "ALL")) {
 		return ExplainOutputType::ALL;
@@ -1913,9 +1913,9 @@ ExplainOutputType EnumUtil::FromString<ExplainOutputType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<ExplainType>(ExplainType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<ExplainType>(ExplainType value) {
+	switch (value) {
 	case ExplainType::EXPLAIN_STANDARD:
 		return "EXPLAIN_STANDARD";
 	case ExplainType::EXPLAIN_ANALYZE:
@@ -1925,7 +1925,7 @@ const char* EnumUtil::ToChars<ExplainType>(ExplainType value) {
 	}
 }
 
-template<>
+template <>
 ExplainType EnumUtil::FromString<ExplainType>(const char *value) {
 	if (StringUtil::Equals(value, "EXPLAIN_STANDARD")) {
 		return ExplainType::EXPLAIN_STANDARD;
@@ -1936,9 +1936,9 @@ ExplainType EnumUtil::FromString<ExplainType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<ExpressionClass>(ExpressionClass value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<ExpressionClass>(ExpressionClass value) {
+	switch (value) {
 	case ExpressionClass::INVALID:
 		return "INVALID";
 	case ExpressionClass::AGGREGATE:
@@ -2022,7 +2022,7 @@ const char* EnumUtil::ToChars<ExpressionClass>(ExpressionClass value) {
 	}
 }
 
-template<>
+template <>
 ExpressionClass EnumUtil::FromString<ExpressionClass>(const char *value) {
 	if (StringUtil::Equals(value, "INVALID")) {
 		return ExpressionClass::INVALID;
@@ -2144,9 +2144,9 @@ ExpressionClass EnumUtil::FromString<ExpressionClass>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<ExpressionType>(ExpressionType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<ExpressionType>(ExpressionType value) {
+	switch (value) {
 	case ExpressionType::INVALID:
 		return "INVALID";
 	case ExpressionType::OPERATOR_CAST:
@@ -2288,7 +2288,7 @@ const char* EnumUtil::ToChars<ExpressionType>(ExpressionType value) {
 	}
 }
 
-template<>
+template <>
 ExpressionType EnumUtil::FromString<ExpressionType>(const char *value) {
 	if (StringUtil::Equals(value, "INVALID")) {
 		return ExpressionType::INVALID;
@@ -2497,9 +2497,9 @@ ExpressionType EnumUtil::FromString<ExpressionType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<ExtensionLoadResult>(ExtensionLoadResult value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<ExtensionLoadResult>(ExtensionLoadResult value) {
+	switch (value) {
 	case ExtensionLoadResult::LOADED_EXTENSION:
 		return "LOADED_EXTENSION";
 	case ExtensionLoadResult::EXTENSION_UNKNOWN:
@@ -2511,7 +2511,7 @@ const char* EnumUtil::ToChars<ExtensionLoadResult>(ExtensionLoadResult value) {
 	}
 }
 
-template<>
+template <>
 ExtensionLoadResult EnumUtil::FromString<ExtensionLoadResult>(const char *value) {
 	if (StringUtil::Equals(value, "LOADED_EXTENSION")) {
 		return ExtensionLoadResult::LOADED_EXTENSION;
@@ -2525,9 +2525,9 @@ ExtensionLoadResult EnumUtil::FromString<ExtensionLoadResult>(const char *value)
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<ExternalDependenciesType>(ExternalDependenciesType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<ExternalDependenciesType>(ExternalDependenciesType value) {
+	switch (value) {
 	case ExternalDependenciesType::PYTHON_DEPENDENCY:
 		return "PYTHON_DEPENDENCY";
 	default:
@@ -2535,7 +2535,7 @@ const char* EnumUtil::ToChars<ExternalDependenciesType>(ExternalDependenciesType
 	}
 }
 
-template<>
+template <>
 ExternalDependenciesType EnumUtil::FromString<ExternalDependenciesType>(const char *value) {
 	if (StringUtil::Equals(value, "PYTHON_DEPENDENCY")) {
 		return ExternalDependenciesType::PYTHON_DEPENDENCY;
@@ -2543,9 +2543,9 @@ ExternalDependenciesType EnumUtil::FromString<ExternalDependenciesType>(const ch
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<ExtraDropInfoType>(ExtraDropInfoType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<ExtraDropInfoType>(ExtraDropInfoType value) {
+	switch (value) {
 	case ExtraDropInfoType::INVALID:
 		return "INVALID";
 	case ExtraDropInfoType::SECRET_INFO:
@@ -2555,7 +2555,7 @@ const char* EnumUtil::ToChars<ExtraDropInfoType>(ExtraDropInfoType value) {
 	}
 }
 
-template<>
+template <>
 ExtraDropInfoType EnumUtil::FromString<ExtraDropInfoType>(const char *value) {
 	if (StringUtil::Equals(value, "INVALID")) {
 		return ExtraDropInfoType::INVALID;
@@ -2566,9 +2566,9 @@ ExtraDropInfoType EnumUtil::FromString<ExtraDropInfoType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<ExtraTypeInfoType>(ExtraTypeInfoType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<ExtraTypeInfoType>(ExtraTypeInfoType value) {
+	switch (value) {
 	case ExtraTypeInfoType::INVALID_TYPE_INFO:
 		return "INVALID_TYPE_INFO";
 	case ExtraTypeInfoType::GENERIC_TYPE_INFO:
@@ -2598,7 +2598,7 @@ const char* EnumUtil::ToChars<ExtraTypeInfoType>(ExtraTypeInfoType value) {
 	}
 }
 
-template<>
+template <>
 ExtraTypeInfoType EnumUtil::FromString<ExtraTypeInfoType>(const char *value) {
 	if (StringUtil::Equals(value, "INVALID_TYPE_INFO")) {
 		return ExtraTypeInfoType::INVALID_TYPE_INFO;
@@ -2639,9 +2639,9 @@ ExtraTypeInfoType EnumUtil::FromString<ExtraTypeInfoType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<FileBufferType>(FileBufferType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<FileBufferType>(FileBufferType value) {
+	switch (value) {
 	case FileBufferType::BLOCK:
 		return "BLOCK";
 	case FileBufferType::MANAGED_BUFFER:
@@ -2653,7 +2653,7 @@ const char* EnumUtil::ToChars<FileBufferType>(FileBufferType value) {
 	}
 }
 
-template<>
+template <>
 FileBufferType EnumUtil::FromString<FileBufferType>(const char *value) {
 	if (StringUtil::Equals(value, "BLOCK")) {
 		return FileBufferType::BLOCK;
@@ -2667,9 +2667,9 @@ FileBufferType EnumUtil::FromString<FileBufferType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<FileCompressionType>(FileCompressionType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<FileCompressionType>(FileCompressionType value) {
+	switch (value) {
 	case FileCompressionType::AUTO_DETECT:
 		return "AUTO_DETECT";
 	case FileCompressionType::UNCOMPRESSED:
@@ -2683,7 +2683,7 @@ const char* EnumUtil::ToChars<FileCompressionType>(FileCompressionType value) {
 	}
 }
 
-template<>
+template <>
 FileCompressionType EnumUtil::FromString<FileCompressionType>(const char *value) {
 	if (StringUtil::Equals(value, "AUTO_DETECT")) {
 		return FileCompressionType::AUTO_DETECT;
@@ -2700,9 +2700,9 @@ FileCompressionType EnumUtil::FromString<FileCompressionType>(const char *value)
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<FileGlobOptions>(FileGlobOptions value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<FileGlobOptions>(FileGlobOptions value) {
+	switch (value) {
 	case FileGlobOptions::DISALLOW_EMPTY:
 		return "DISALLOW_EMPTY";
 	case FileGlobOptions::ALLOW_EMPTY:
@@ -2712,7 +2712,7 @@ const char* EnumUtil::ToChars<FileGlobOptions>(FileGlobOptions value) {
 	}
 }
 
-template<>
+template <>
 FileGlobOptions EnumUtil::FromString<FileGlobOptions>(const char *value) {
 	if (StringUtil::Equals(value, "DISALLOW_EMPTY")) {
 		return FileGlobOptions::DISALLOW_EMPTY;
@@ -2723,9 +2723,9 @@ FileGlobOptions EnumUtil::FromString<FileGlobOptions>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<FileLockType>(FileLockType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<FileLockType>(FileLockType value) {
+	switch (value) {
 	case FileLockType::NO_LOCK:
 		return "NO_LOCK";
 	case FileLockType::READ_LOCK:
@@ -2737,7 +2737,7 @@ const char* EnumUtil::ToChars<FileLockType>(FileLockType value) {
 	}
 }
 
-template<>
+template <>
 FileLockType EnumUtil::FromString<FileLockType>(const char *value) {
 	if (StringUtil::Equals(value, "NO_LOCK")) {
 		return FileLockType::NO_LOCK;
@@ -2751,9 +2751,9 @@ FileLockType EnumUtil::FromString<FileLockType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<FilterPropagateResult>(FilterPropagateResult value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<FilterPropagateResult>(FilterPropagateResult value) {
+	switch (value) {
 	case FilterPropagateResult::NO_PRUNING_POSSIBLE:
 		return "NO_PRUNING_POSSIBLE";
 	case FilterPropagateResult::FILTER_ALWAYS_TRUE:
@@ -2769,7 +2769,7 @@ const char* EnumUtil::ToChars<FilterPropagateResult>(FilterPropagateResult value
 	}
 }
 
-template<>
+template <>
 FilterPropagateResult EnumUtil::FromString<FilterPropagateResult>(const char *value) {
 	if (StringUtil::Equals(value, "NO_PRUNING_POSSIBLE")) {
 		return FilterPropagateResult::NO_PRUNING_POSSIBLE;
@@ -2789,9 +2789,9 @@ FilterPropagateResult EnumUtil::FromString<FilterPropagateResult>(const char *va
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<ForeignKeyType>(ForeignKeyType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<ForeignKeyType>(ForeignKeyType value) {
+	switch (value) {
 	case ForeignKeyType::FK_TYPE_PRIMARY_KEY_TABLE:
 		return "FK_TYPE_PRIMARY_KEY_TABLE";
 	case ForeignKeyType::FK_TYPE_FOREIGN_KEY_TABLE:
@@ -2803,7 +2803,7 @@ const char* EnumUtil::ToChars<ForeignKeyType>(ForeignKeyType value) {
 	}
 }
 
-template<>
+template <>
 ForeignKeyType EnumUtil::FromString<ForeignKeyType>(const char *value) {
 	if (StringUtil::Equals(value, "FK_TYPE_PRIMARY_KEY_TABLE")) {
 		return ForeignKeyType::FK_TYPE_PRIMARY_KEY_TABLE;
@@ -2817,9 +2817,9 @@ ForeignKeyType EnumUtil::FromString<ForeignKeyType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<FunctionNullHandling>(FunctionNullHandling value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<FunctionNullHandling>(FunctionNullHandling value) {
+	switch (value) {
 	case FunctionNullHandling::DEFAULT_NULL_HANDLING:
 		return "DEFAULT_NULL_HANDLING";
 	case FunctionNullHandling::SPECIAL_HANDLING:
@@ -2829,7 +2829,7 @@ const char* EnumUtil::ToChars<FunctionNullHandling>(FunctionNullHandling value) 
 	}
 }
 
-template<>
+template <>
 FunctionNullHandling EnumUtil::FromString<FunctionNullHandling>(const char *value) {
 	if (StringUtil::Equals(value, "DEFAULT_NULL_HANDLING")) {
 		return FunctionNullHandling::DEFAULT_NULL_HANDLING;
@@ -2840,9 +2840,9 @@ FunctionNullHandling EnumUtil::FromString<FunctionNullHandling>(const char *valu
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<FunctionStability>(FunctionStability value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<FunctionStability>(FunctionStability value) {
+	switch (value) {
 	case FunctionStability::CONSISTENT:
 		return "CONSISTENT";
 	case FunctionStability::VOLATILE:
@@ -2854,7 +2854,7 @@ const char* EnumUtil::ToChars<FunctionStability>(FunctionStability value) {
 	}
 }
 
-template<>
+template <>
 FunctionStability EnumUtil::FromString<FunctionStability>(const char *value) {
 	if (StringUtil::Equals(value, "CONSISTENT")) {
 		return FunctionStability::CONSISTENT;
@@ -2868,9 +2868,9 @@ FunctionStability EnumUtil::FromString<FunctionStability>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<HLLStorageType>(HLLStorageType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<HLLStorageType>(HLLStorageType value) {
+	switch (value) {
 	case HLLStorageType::UNCOMPRESSED:
 		return "UNCOMPRESSED";
 	default:
@@ -2878,7 +2878,7 @@ const char* EnumUtil::ToChars<HLLStorageType>(HLLStorageType value) {
 	}
 }
 
-template<>
+template <>
 HLLStorageType EnumUtil::FromString<HLLStorageType>(const char *value) {
 	if (StringUtil::Equals(value, "UNCOMPRESSED")) {
 		return HLLStorageType::UNCOMPRESSED;
@@ -2886,9 +2886,9 @@ HLLStorageType EnumUtil::FromString<HLLStorageType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<IndexConstraintType>(IndexConstraintType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<IndexConstraintType>(IndexConstraintType value) {
+	switch (value) {
 	case IndexConstraintType::NONE:
 		return "NONE";
 	case IndexConstraintType::UNIQUE:
@@ -2902,7 +2902,7 @@ const char* EnumUtil::ToChars<IndexConstraintType>(IndexConstraintType value) {
 	}
 }
 
-template<>
+template <>
 IndexConstraintType EnumUtil::FromString<IndexConstraintType>(const char *value) {
 	if (StringUtil::Equals(value, "NONE")) {
 		return IndexConstraintType::NONE;
@@ -2919,9 +2919,9 @@ IndexConstraintType EnumUtil::FromString<IndexConstraintType>(const char *value)
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<InsertColumnOrder>(InsertColumnOrder value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<InsertColumnOrder>(InsertColumnOrder value) {
+	switch (value) {
 	case InsertColumnOrder::INSERT_BY_POSITION:
 		return "INSERT_BY_POSITION";
 	case InsertColumnOrder::INSERT_BY_NAME:
@@ -2931,7 +2931,7 @@ const char* EnumUtil::ToChars<InsertColumnOrder>(InsertColumnOrder value) {
 	}
 }
 
-template<>
+template <>
 InsertColumnOrder EnumUtil::FromString<InsertColumnOrder>(const char *value) {
 	if (StringUtil::Equals(value, "INSERT_BY_POSITION")) {
 		return InsertColumnOrder::INSERT_BY_POSITION;
@@ -2942,9 +2942,9 @@ InsertColumnOrder EnumUtil::FromString<InsertColumnOrder>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<InterruptMode>(InterruptMode value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<InterruptMode>(InterruptMode value) {
+	switch (value) {
 	case InterruptMode::NO_INTERRUPTS:
 		return "NO_INTERRUPTS";
 	case InterruptMode::TASK:
@@ -2956,7 +2956,7 @@ const char* EnumUtil::ToChars<InterruptMode>(InterruptMode value) {
 	}
 }
 
-template<>
+template <>
 InterruptMode EnumUtil::FromString<InterruptMode>(const char *value) {
 	if (StringUtil::Equals(value, "NO_INTERRUPTS")) {
 		return InterruptMode::NO_INTERRUPTS;
@@ -2970,9 +2970,9 @@ InterruptMode EnumUtil::FromString<InterruptMode>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<JoinRefType>(JoinRefType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<JoinRefType>(JoinRefType value) {
+	switch (value) {
 	case JoinRefType::REGULAR:
 		return "REGULAR";
 	case JoinRefType::NATURAL:
@@ -2990,7 +2990,7 @@ const char* EnumUtil::ToChars<JoinRefType>(JoinRefType value) {
 	}
 }
 
-template<>
+template <>
 JoinRefType EnumUtil::FromString<JoinRefType>(const char *value) {
 	if (StringUtil::Equals(value, "REGULAR")) {
 		return JoinRefType::REGULAR;
@@ -3013,9 +3013,9 @@ JoinRefType EnumUtil::FromString<JoinRefType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<JoinType>(JoinType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<JoinType>(JoinType value) {
+	switch (value) {
 	case JoinType::INVALID:
 		return "INVALID";
 	case JoinType::LEFT:
@@ -3043,7 +3043,7 @@ const char* EnumUtil::ToChars<JoinType>(JoinType value) {
 	}
 }
 
-template<>
+template <>
 JoinType EnumUtil::FromString<JoinType>(const char *value) {
 	if (StringUtil::Equals(value, "INVALID")) {
 		return JoinType::INVALID;
@@ -3081,9 +3081,9 @@ JoinType EnumUtil::FromString<JoinType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<KeywordCategory>(KeywordCategory value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<KeywordCategory>(KeywordCategory value) {
+	switch (value) {
 	case KeywordCategory::KEYWORD_RESERVED:
 		return "KEYWORD_RESERVED";
 	case KeywordCategory::KEYWORD_UNRESERVED:
@@ -3097,7 +3097,7 @@ const char* EnumUtil::ToChars<KeywordCategory>(KeywordCategory value) {
 	}
 }
 
-template<>
+template <>
 KeywordCategory EnumUtil::FromString<KeywordCategory>(const char *value) {
 	if (StringUtil::Equals(value, "KEYWORD_RESERVED")) {
 		return KeywordCategory::KEYWORD_RESERVED;
@@ -3114,9 +3114,9 @@ KeywordCategory EnumUtil::FromString<KeywordCategory>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<LimitNodeType>(LimitNodeType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<LimitNodeType>(LimitNodeType value) {
+	switch (value) {
 	case LimitNodeType::UNSET:
 		return "UNSET";
 	case LimitNodeType::CONSTANT_VALUE:
@@ -3132,7 +3132,7 @@ const char* EnumUtil::ToChars<LimitNodeType>(LimitNodeType value) {
 	}
 }
 
-template<>
+template <>
 LimitNodeType EnumUtil::FromString<LimitNodeType>(const char *value) {
 	if (StringUtil::Equals(value, "UNSET")) {
 		return LimitNodeType::UNSET;
@@ -3152,9 +3152,9 @@ LimitNodeType EnumUtil::FromString<LimitNodeType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<LoadType>(LoadType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<LoadType>(LoadType value) {
+	switch (value) {
 	case LoadType::LOAD:
 		return "LOAD";
 	case LoadType::INSTALL:
@@ -3166,7 +3166,7 @@ const char* EnumUtil::ToChars<LoadType>(LoadType value) {
 	}
 }
 
-template<>
+template <>
 LoadType EnumUtil::FromString<LoadType>(const char *value) {
 	if (StringUtil::Equals(value, "LOAD")) {
 		return LoadType::LOAD;
@@ -3180,9 +3180,9 @@ LoadType EnumUtil::FromString<LoadType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<LogicalOperatorType>(LogicalOperatorType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<LogicalOperatorType>(LogicalOperatorType value) {
+	switch (value) {
 	case LogicalOperatorType::LOGICAL_INVALID:
 		return "LOGICAL_INVALID";
 	case LogicalOperatorType::LOGICAL_PROJECTION:
@@ -3308,7 +3308,7 @@ const char* EnumUtil::ToChars<LogicalOperatorType>(LogicalOperatorType value) {
 	}
 }
 
-template<>
+template <>
 LogicalOperatorType EnumUtil::FromString<LogicalOperatorType>(const char *value) {
 	if (StringUtil::Equals(value, "LOGICAL_INVALID")) {
 		return LogicalOperatorType::LOGICAL_INVALID;
@@ -3493,9 +3493,9 @@ LogicalOperatorType EnumUtil::FromString<LogicalOperatorType>(const char *value)
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<LogicalTypeId>(LogicalTypeId value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<LogicalTypeId>(LogicalTypeId value) {
+	switch (value) {
 	case LogicalTypeId::INVALID:
 		return "INVALID";
 	case LogicalTypeId::SQLNULL:
@@ -3593,7 +3593,7 @@ const char* EnumUtil::ToChars<LogicalTypeId>(LogicalTypeId value) {
 	}
 }
 
-template<>
+template <>
 LogicalTypeId EnumUtil::FromString<LogicalTypeId>(const char *value) {
 	if (StringUtil::Equals(value, "INVALID")) {
 		return LogicalTypeId::INVALID;
@@ -3736,9 +3736,9 @@ LogicalTypeId EnumUtil::FromString<LogicalTypeId>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<LookupResultType>(LookupResultType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<LookupResultType>(LookupResultType value) {
+	switch (value) {
 	case LookupResultType::LOOKUP_MISS:
 		return "LOOKUP_MISS";
 	case LookupResultType::LOOKUP_HIT:
@@ -3750,7 +3750,7 @@ const char* EnumUtil::ToChars<LookupResultType>(LookupResultType value) {
 	}
 }
 
-template<>
+template <>
 LookupResultType EnumUtil::FromString<LookupResultType>(const char *value) {
 	if (StringUtil::Equals(value, "LOOKUP_MISS")) {
 		return LookupResultType::LOOKUP_MISS;
@@ -3764,9 +3764,9 @@ LookupResultType EnumUtil::FromString<LookupResultType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<MacroType>(MacroType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<MacroType>(MacroType value) {
+	switch (value) {
 	case MacroType::VOID_MACRO:
 		return "VOID_MACRO";
 	case MacroType::TABLE_MACRO:
@@ -3778,7 +3778,7 @@ const char* EnumUtil::ToChars<MacroType>(MacroType value) {
 	}
 }
 
-template<>
+template <>
 MacroType EnumUtil::FromString<MacroType>(const char *value) {
 	if (StringUtil::Equals(value, "VOID_MACRO")) {
 		return MacroType::VOID_MACRO;
@@ -3792,9 +3792,9 @@ MacroType EnumUtil::FromString<MacroType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<MapInvalidReason>(MapInvalidReason value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<MapInvalidReason>(MapInvalidReason value) {
+	switch (value) {
 	case MapInvalidReason::VALID:
 		return "VALID";
 	case MapInvalidReason::NULL_KEY_LIST:
@@ -3814,7 +3814,7 @@ const char* EnumUtil::ToChars<MapInvalidReason>(MapInvalidReason value) {
 	}
 }
 
-template<>
+template <>
 MapInvalidReason EnumUtil::FromString<MapInvalidReason>(const char *value) {
 	if (StringUtil::Equals(value, "VALID")) {
 		return MapInvalidReason::VALID;
@@ -3840,9 +3840,9 @@ MapInvalidReason EnumUtil::FromString<MapInvalidReason>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<MemoryTag>(MemoryTag value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<MemoryTag>(MemoryTag value) {
+	switch (value) {
 	case MemoryTag::BASE_TABLE:
 		return "BASE_TABLE";
 	case MemoryTag::HASH_TABLE:
@@ -3872,7 +3872,7 @@ const char* EnumUtil::ToChars<MemoryTag>(MemoryTag value) {
 	}
 }
 
-template<>
+template <>
 MemoryTag EnumUtil::FromString<MemoryTag>(const char *value) {
 	if (StringUtil::Equals(value, "BASE_TABLE")) {
 		return MemoryTag::BASE_TABLE;
@@ -3913,9 +3913,9 @@ MemoryTag EnumUtil::FromString<MemoryTag>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<NType>(NType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<NType>(NType value) {
+	switch (value) {
 	case NType::PREFIX:
 		return "PREFIX";
 	case NType::LEAF:
@@ -3935,7 +3935,7 @@ const char* EnumUtil::ToChars<NType>(NType value) {
 	}
 }
 
-template<>
+template <>
 NType EnumUtil::FromString<NType>(const char *value) {
 	if (StringUtil::Equals(value, "PREFIX")) {
 		return NType::PREFIX;
@@ -3961,9 +3961,9 @@ NType EnumUtil::FromString<NType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<NewLineIdentifier>(NewLineIdentifier value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<NewLineIdentifier>(NewLineIdentifier value) {
+	switch (value) {
 	case NewLineIdentifier::SINGLE:
 		return "SINGLE";
 	case NewLineIdentifier::CARRY_ON:
@@ -3975,7 +3975,7 @@ const char* EnumUtil::ToChars<NewLineIdentifier>(NewLineIdentifier value) {
 	}
 }
 
-template<>
+template <>
 NewLineIdentifier EnumUtil::FromString<NewLineIdentifier>(const char *value) {
 	if (StringUtil::Equals(value, "SINGLE")) {
 		return NewLineIdentifier::SINGLE;
@@ -3989,9 +3989,9 @@ NewLineIdentifier EnumUtil::FromString<NewLineIdentifier>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<OnConflictAction>(OnConflictAction value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<OnConflictAction>(OnConflictAction value) {
+	switch (value) {
 	case OnConflictAction::THROW:
 		return "THROW";
 	case OnConflictAction::NOTHING:
@@ -4005,7 +4005,7 @@ const char* EnumUtil::ToChars<OnConflictAction>(OnConflictAction value) {
 	}
 }
 
-template<>
+template <>
 OnConflictAction EnumUtil::FromString<OnConflictAction>(const char *value) {
 	if (StringUtil::Equals(value, "THROW")) {
 		return OnConflictAction::THROW;
@@ -4022,9 +4022,9 @@ OnConflictAction EnumUtil::FromString<OnConflictAction>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<OnCreateConflict>(OnCreateConflict value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<OnCreateConflict>(OnCreateConflict value) {
+	switch (value) {
 	case OnCreateConflict::ERROR_ON_CONFLICT:
 		return "ERROR_ON_CONFLICT";
 	case OnCreateConflict::IGNORE_ON_CONFLICT:
@@ -4038,7 +4038,7 @@ const char* EnumUtil::ToChars<OnCreateConflict>(OnCreateConflict value) {
 	}
 }
 
-template<>
+template <>
 OnCreateConflict EnumUtil::FromString<OnCreateConflict>(const char *value) {
 	if (StringUtil::Equals(value, "ERROR_ON_CONFLICT")) {
 		return OnCreateConflict::ERROR_ON_CONFLICT;
@@ -4055,9 +4055,9 @@ OnCreateConflict EnumUtil::FromString<OnCreateConflict>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<OnEntryNotFound>(OnEntryNotFound value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<OnEntryNotFound>(OnEntryNotFound value) {
+	switch (value) {
 	case OnEntryNotFound::THROW_EXCEPTION:
 		return "THROW_EXCEPTION";
 	case OnEntryNotFound::RETURN_NULL:
@@ -4067,7 +4067,7 @@ const char* EnumUtil::ToChars<OnEntryNotFound>(OnEntryNotFound value) {
 	}
 }
 
-template<>
+template <>
 OnEntryNotFound EnumUtil::FromString<OnEntryNotFound>(const char *value) {
 	if (StringUtil::Equals(value, "THROW_EXCEPTION")) {
 		return OnEntryNotFound::THROW_EXCEPTION;
@@ -4078,9 +4078,9 @@ OnEntryNotFound EnumUtil::FromString<OnEntryNotFound>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<OperatorFinalizeResultType>(OperatorFinalizeResultType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<OperatorFinalizeResultType>(OperatorFinalizeResultType value) {
+	switch (value) {
 	case OperatorFinalizeResultType::HAVE_MORE_OUTPUT:
 		return "HAVE_MORE_OUTPUT";
 	case OperatorFinalizeResultType::FINISHED:
@@ -4090,7 +4090,7 @@ const char* EnumUtil::ToChars<OperatorFinalizeResultType>(OperatorFinalizeResult
 	}
 }
 
-template<>
+template <>
 OperatorFinalizeResultType EnumUtil::FromString<OperatorFinalizeResultType>(const char *value) {
 	if (StringUtil::Equals(value, "HAVE_MORE_OUTPUT")) {
 		return OperatorFinalizeResultType::HAVE_MORE_OUTPUT;
@@ -4101,9 +4101,9 @@ OperatorFinalizeResultType EnumUtil::FromString<OperatorFinalizeResultType>(cons
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<OperatorResultType>(OperatorResultType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<OperatorResultType>(OperatorResultType value) {
+	switch (value) {
 	case OperatorResultType::NEED_MORE_INPUT:
 		return "NEED_MORE_INPUT";
 	case OperatorResultType::HAVE_MORE_OUTPUT:
@@ -4117,7 +4117,7 @@ const char* EnumUtil::ToChars<OperatorResultType>(OperatorResultType value) {
 	}
 }
 
-template<>
+template <>
 OperatorResultType EnumUtil::FromString<OperatorResultType>(const char *value) {
 	if (StringUtil::Equals(value, "NEED_MORE_INPUT")) {
 		return OperatorResultType::NEED_MORE_INPUT;
@@ -4134,9 +4134,9 @@ OperatorResultType EnumUtil::FromString<OperatorResultType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<OptimizerType>(OptimizerType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<OptimizerType>(OptimizerType value) {
+	switch (value) {
 	case OptimizerType::INVALID:
 		return "INVALID";
 	case OptimizerType::EXPRESSION_REWRITER:
@@ -4173,6 +4173,8 @@ const char* EnumUtil::ToChars<OptimizerType>(OptimizerType value) {
 		return "DUPLICATE_GROUPS";
 	case OptimizerType::REORDER_FILTER:
 		return "REORDER_FILTER";
+	case OptimizerType::FACTORIZATION:
+		return "FACTORIZATION";
 	case OptimizerType::EXTENSION:
 		return "EXTENSION";
 	default:
@@ -4180,7 +4182,7 @@ const char* EnumUtil::ToChars<OptimizerType>(OptimizerType value) {
 	}
 }
 
-template<>
+template <>
 OptimizerType EnumUtil::FromString<OptimizerType>(const char *value) {
 	if (StringUtil::Equals(value, "INVALID")) {
 		return OptimizerType::INVALID;
@@ -4242,9 +4244,9 @@ OptimizerType EnumUtil::FromString<OptimizerType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<OrderByNullType>(OrderByNullType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<OrderByNullType>(OrderByNullType value) {
+	switch (value) {
 	case OrderByNullType::INVALID:
 		return "INVALID";
 	case OrderByNullType::ORDER_DEFAULT:
@@ -4258,7 +4260,7 @@ const char* EnumUtil::ToChars<OrderByNullType>(OrderByNullType value) {
 	}
 }
 
-template<>
+template <>
 OrderByNullType EnumUtil::FromString<OrderByNullType>(const char *value) {
 	if (StringUtil::Equals(value, "INVALID")) {
 		return OrderByNullType::INVALID;
@@ -4275,9 +4277,9 @@ OrderByNullType EnumUtil::FromString<OrderByNullType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<OrderPreservationType>(OrderPreservationType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<OrderPreservationType>(OrderPreservationType value) {
+	switch (value) {
 	case OrderPreservationType::NO_ORDER:
 		return "NO_ORDER";
 	case OrderPreservationType::INSERTION_ORDER:
@@ -4289,7 +4291,7 @@ const char* EnumUtil::ToChars<OrderPreservationType>(OrderPreservationType value
 	}
 }
 
-template<>
+template <>
 OrderPreservationType EnumUtil::FromString<OrderPreservationType>(const char *value) {
 	if (StringUtil::Equals(value, "NO_ORDER")) {
 		return OrderPreservationType::NO_ORDER;
@@ -4303,9 +4305,9 @@ OrderPreservationType EnumUtil::FromString<OrderPreservationType>(const char *va
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<OrderType>(OrderType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<OrderType>(OrderType value) {
+	switch (value) {
 	case OrderType::INVALID:
 		return "INVALID";
 	case OrderType::ORDER_DEFAULT:
@@ -4319,7 +4321,7 @@ const char* EnumUtil::ToChars<OrderType>(OrderType value) {
 	}
 }
 
-template<>
+template <>
 OrderType EnumUtil::FromString<OrderType>(const char *value) {
 	if (StringUtil::Equals(value, "INVALID")) {
 		return OrderType::INVALID;
@@ -4336,9 +4338,9 @@ OrderType EnumUtil::FromString<OrderType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<OutputStream>(OutputStream value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<OutputStream>(OutputStream value) {
+	switch (value) {
 	case OutputStream::STREAM_STDOUT:
 		return "STREAM_STDOUT";
 	case OutputStream::STREAM_STDERR:
@@ -4348,7 +4350,7 @@ const char* EnumUtil::ToChars<OutputStream>(OutputStream value) {
 	}
 }
 
-template<>
+template <>
 OutputStream EnumUtil::FromString<OutputStream>(const char *value) {
 	if (StringUtil::Equals(value, "STREAM_STDOUT")) {
 		return OutputStream::STREAM_STDOUT;
@@ -4359,9 +4361,9 @@ OutputStream EnumUtil::FromString<OutputStream>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<ParseInfoType>(ParseInfoType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<ParseInfoType>(ParseInfoType value) {
+	switch (value) {
 	case ParseInfoType::ALTER_INFO:
 		return "ALTER_INFO";
 	case ParseInfoType::ATTACH_INFO:
@@ -4397,7 +4399,7 @@ const char* EnumUtil::ToChars<ParseInfoType>(ParseInfoType value) {
 	}
 }
 
-template<>
+template <>
 ParseInfoType EnumUtil::FromString<ParseInfoType>(const char *value) {
 	if (StringUtil::Equals(value, "ALTER_INFO")) {
 		return ParseInfoType::ALTER_INFO;
@@ -4447,9 +4449,9 @@ ParseInfoType EnumUtil::FromString<ParseInfoType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<ParserExtensionResultType>(ParserExtensionResultType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<ParserExtensionResultType>(ParserExtensionResultType value) {
+	switch (value) {
 	case ParserExtensionResultType::PARSE_SUCCESSFUL:
 		return "PARSE_SUCCESSFUL";
 	case ParserExtensionResultType::DISPLAY_ORIGINAL_ERROR:
@@ -4461,7 +4463,7 @@ const char* EnumUtil::ToChars<ParserExtensionResultType>(ParserExtensionResultTy
 	}
 }
 
-template<>
+template <>
 ParserExtensionResultType EnumUtil::FromString<ParserExtensionResultType>(const char *value) {
 	if (StringUtil::Equals(value, "PARSE_SUCCESSFUL")) {
 		return ParserExtensionResultType::PARSE_SUCCESSFUL;
@@ -4475,9 +4477,9 @@ ParserExtensionResultType EnumUtil::FromString<ParserExtensionResultType>(const 
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<PartitionSortStage>(PartitionSortStage value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<PartitionSortStage>(PartitionSortStage value) {
+	switch (value) {
 	case PartitionSortStage::INIT:
 		return "INIT";
 	case PartitionSortStage::SCAN:
@@ -4493,7 +4495,7 @@ const char* EnumUtil::ToChars<PartitionSortStage>(PartitionSortStage value) {
 	}
 }
 
-template<>
+template <>
 PartitionSortStage EnumUtil::FromString<PartitionSortStage>(const char *value) {
 	if (StringUtil::Equals(value, "INIT")) {
 		return PartitionSortStage::INIT;
@@ -4513,9 +4515,9 @@ PartitionSortStage EnumUtil::FromString<PartitionSortStage>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<PartitionedColumnDataType>(PartitionedColumnDataType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<PartitionedColumnDataType>(PartitionedColumnDataType value) {
+	switch (value) {
 	case PartitionedColumnDataType::INVALID:
 		return "INVALID";
 	case PartitionedColumnDataType::RADIX:
@@ -4527,7 +4529,7 @@ const char* EnumUtil::ToChars<PartitionedColumnDataType>(PartitionedColumnDataTy
 	}
 }
 
-template<>
+template <>
 PartitionedColumnDataType EnumUtil::FromString<PartitionedColumnDataType>(const char *value) {
 	if (StringUtil::Equals(value, "INVALID")) {
 		return PartitionedColumnDataType::INVALID;
@@ -4541,9 +4543,9 @@ PartitionedColumnDataType EnumUtil::FromString<PartitionedColumnDataType>(const 
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<PartitionedTupleDataType>(PartitionedTupleDataType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<PartitionedTupleDataType>(PartitionedTupleDataType value) {
+	switch (value) {
 	case PartitionedTupleDataType::INVALID:
 		return "INVALID";
 	case PartitionedTupleDataType::RADIX:
@@ -4553,7 +4555,7 @@ const char* EnumUtil::ToChars<PartitionedTupleDataType>(PartitionedTupleDataType
 	}
 }
 
-template<>
+template <>
 PartitionedTupleDataType EnumUtil::FromString<PartitionedTupleDataType>(const char *value) {
 	if (StringUtil::Equals(value, "INVALID")) {
 		return PartitionedTupleDataType::INVALID;
@@ -4564,9 +4566,9 @@ PartitionedTupleDataType EnumUtil::FromString<PartitionedTupleDataType>(const ch
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<PendingExecutionResult>(PendingExecutionResult value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<PendingExecutionResult>(PendingExecutionResult value) {
+	switch (value) {
 	case PendingExecutionResult::RESULT_READY:
 		return "RESULT_READY";
 	case PendingExecutionResult::RESULT_NOT_READY:
@@ -4582,7 +4584,7 @@ const char* EnumUtil::ToChars<PendingExecutionResult>(PendingExecutionResult val
 	}
 }
 
-template<>
+template <>
 PendingExecutionResult EnumUtil::FromString<PendingExecutionResult>(const char *value) {
 	if (StringUtil::Equals(value, "RESULT_READY")) {
 		return PendingExecutionResult::RESULT_READY;
@@ -4602,9 +4604,9 @@ PendingExecutionResult EnumUtil::FromString<PendingExecutionResult>(const char *
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<PhysicalOperatorType>(PhysicalOperatorType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<PhysicalOperatorType>(PhysicalOperatorType value) {
+	switch (value) {
 	case PhysicalOperatorType::INVALID:
 		return "INVALID";
 	case PhysicalOperatorType::ORDER_BY:
@@ -4762,7 +4764,7 @@ const char* EnumUtil::ToChars<PhysicalOperatorType>(PhysicalOperatorType value) 
 	}
 }
 
-template<>
+template <>
 PhysicalOperatorType EnumUtil::FromString<PhysicalOperatorType>(const char *value) {
 	if (StringUtil::Equals(value, "INVALID")) {
 		return PhysicalOperatorType::INVALID;
@@ -4995,9 +4997,9 @@ PhysicalOperatorType EnumUtil::FromString<PhysicalOperatorType>(const char *valu
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<PhysicalType>(PhysicalType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<PhysicalType>(PhysicalType value) {
+	switch (value) {
 	case PhysicalType::BOOL:
 		return "BOOL";
 	case PhysicalType::UINT8:
@@ -5045,7 +5047,7 @@ const char* EnumUtil::ToChars<PhysicalType>(PhysicalType value) {
 	}
 }
 
-template<>
+template <>
 PhysicalType EnumUtil::FromString<PhysicalType>(const char *value) {
 	if (StringUtil::Equals(value, "BOOL")) {
 		return PhysicalType::BOOL;
@@ -5113,9 +5115,9 @@ PhysicalType EnumUtil::FromString<PhysicalType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<PragmaType>(PragmaType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<PragmaType>(PragmaType value) {
+	switch (value) {
 	case PragmaType::PRAGMA_STATEMENT:
 		return "PRAGMA_STATEMENT";
 	case PragmaType::PRAGMA_CALL:
@@ -5125,7 +5127,7 @@ const char* EnumUtil::ToChars<PragmaType>(PragmaType value) {
 	}
 }
 
-template<>
+template <>
 PragmaType EnumUtil::FromString<PragmaType>(const char *value) {
 	if (StringUtil::Equals(value, "PRAGMA_STATEMENT")) {
 		return PragmaType::PRAGMA_STATEMENT;
@@ -5136,9 +5138,9 @@ PragmaType EnumUtil::FromString<PragmaType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<PreparedParamType>(PreparedParamType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<PreparedParamType>(PreparedParamType value) {
+	switch (value) {
 	case PreparedParamType::AUTO_INCREMENT:
 		return "AUTO_INCREMENT";
 	case PreparedParamType::POSITIONAL:
@@ -5152,7 +5154,7 @@ const char* EnumUtil::ToChars<PreparedParamType>(PreparedParamType value) {
 	}
 }
 
-template<>
+template <>
 PreparedParamType EnumUtil::FromString<PreparedParamType>(const char *value) {
 	if (StringUtil::Equals(value, "AUTO_INCREMENT")) {
 		return PreparedParamType::AUTO_INCREMENT;
@@ -5169,9 +5171,9 @@ PreparedParamType EnumUtil::FromString<PreparedParamType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<PreparedStatementMode>(PreparedStatementMode value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<PreparedStatementMode>(PreparedStatementMode value) {
+	switch (value) {
 	case PreparedStatementMode::PREPARE_ONLY:
 		return "PREPARE_ONLY";
 	case PreparedStatementMode::PREPARE_AND_EXECUTE:
@@ -5181,7 +5183,7 @@ const char* EnumUtil::ToChars<PreparedStatementMode>(PreparedStatementMode value
 	}
 }
 
-template<>
+template <>
 PreparedStatementMode EnumUtil::FromString<PreparedStatementMode>(const char *value) {
 	if (StringUtil::Equals(value, "PREPARE_ONLY")) {
 		return PreparedStatementMode::PREPARE_ONLY;
@@ -5192,9 +5194,9 @@ PreparedStatementMode EnumUtil::FromString<PreparedStatementMode>(const char *va
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<ProfilerPrintFormat>(ProfilerPrintFormat value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<ProfilerPrintFormat>(ProfilerPrintFormat value) {
+	switch (value) {
 	case ProfilerPrintFormat::QUERY_TREE:
 		return "QUERY_TREE";
 	case ProfilerPrintFormat::JSON:
@@ -5206,7 +5208,7 @@ const char* EnumUtil::ToChars<ProfilerPrintFormat>(ProfilerPrintFormat value) {
 	}
 }
 
-template<>
+template <>
 ProfilerPrintFormat EnumUtil::FromString<ProfilerPrintFormat>(const char *value) {
 	if (StringUtil::Equals(value, "QUERY_TREE")) {
 		return ProfilerPrintFormat::QUERY_TREE;
@@ -5220,9 +5222,9 @@ ProfilerPrintFormat EnumUtil::FromString<ProfilerPrintFormat>(const char *value)
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<QuantileSerializationType>(QuantileSerializationType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<QuantileSerializationType>(QuantileSerializationType value) {
+	switch (value) {
 	case QuantileSerializationType::NON_DECIMAL:
 		return "NON_DECIMAL";
 	case QuantileSerializationType::DECIMAL_DISCRETE:
@@ -5238,7 +5240,7 @@ const char* EnumUtil::ToChars<QuantileSerializationType>(QuantileSerializationTy
 	}
 }
 
-template<>
+template <>
 QuantileSerializationType EnumUtil::FromString<QuantileSerializationType>(const char *value) {
 	if (StringUtil::Equals(value, "NON_DECIMAL")) {
 		return QuantileSerializationType::NON_DECIMAL;
@@ -5258,9 +5260,9 @@ QuantileSerializationType EnumUtil::FromString<QuantileSerializationType>(const 
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<QueryNodeType>(QueryNodeType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<QueryNodeType>(QueryNodeType value) {
+	switch (value) {
 	case QueryNodeType::SELECT_NODE:
 		return "SELECT_NODE";
 	case QueryNodeType::SET_OPERATION_NODE:
@@ -5276,7 +5278,7 @@ const char* EnumUtil::ToChars<QueryNodeType>(QueryNodeType value) {
 	}
 }
 
-template<>
+template <>
 QueryNodeType EnumUtil::FromString<QueryNodeType>(const char *value) {
 	if (StringUtil::Equals(value, "SELECT_NODE")) {
 		return QueryNodeType::SELECT_NODE;
@@ -5296,9 +5298,9 @@ QueryNodeType EnumUtil::FromString<QueryNodeType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<QueryResultType>(QueryResultType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<QueryResultType>(QueryResultType value) {
+	switch (value) {
 	case QueryResultType::MATERIALIZED_RESULT:
 		return "MATERIALIZED_RESULT";
 	case QueryResultType::STREAM_RESULT:
@@ -5310,7 +5312,7 @@ const char* EnumUtil::ToChars<QueryResultType>(QueryResultType value) {
 	}
 }
 
-template<>
+template <>
 QueryResultType EnumUtil::FromString<QueryResultType>(const char *value) {
 	if (StringUtil::Equals(value, "MATERIALIZED_RESULT")) {
 		return QueryResultType::MATERIALIZED_RESULT;
@@ -5324,9 +5326,9 @@ QueryResultType EnumUtil::FromString<QueryResultType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<QuoteRule>(QuoteRule value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<QuoteRule>(QuoteRule value) {
+	switch (value) {
 	case QuoteRule::QUOTES_RFC:
 		return "QUOTES_RFC";
 	case QuoteRule::QUOTES_OTHER:
@@ -5338,7 +5340,7 @@ const char* EnumUtil::ToChars<QuoteRule>(QuoteRule value) {
 	}
 }
 
-template<>
+template <>
 QuoteRule EnumUtil::FromString<QuoteRule>(const char *value) {
 	if (StringUtil::Equals(value, "QUOTES_RFC")) {
 		return QuoteRule::QUOTES_RFC;
@@ -5352,9 +5354,9 @@ QuoteRule EnumUtil::FromString<QuoteRule>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<RelationType>(RelationType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<RelationType>(RelationType value) {
+	switch (value) {
 	case RelationType::INVALID_RELATION:
 		return "INVALID_RELATION";
 	case RelationType::TABLE_RELATION:
@@ -5410,7 +5412,7 @@ const char* EnumUtil::ToChars<RelationType>(RelationType value) {
 	}
 }
 
-template<>
+template <>
 RelationType EnumUtil::FromString<RelationType>(const char *value) {
 	if (StringUtil::Equals(value, "INVALID_RELATION")) {
 		return RelationType::INVALID_RELATION;
@@ -5490,9 +5492,9 @@ RelationType EnumUtil::FromString<RelationType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<RenderMode>(RenderMode value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<RenderMode>(RenderMode value) {
+	switch (value) {
 	case RenderMode::ROWS:
 		return "ROWS";
 	case RenderMode::COLUMNS:
@@ -5502,7 +5504,7 @@ const char* EnumUtil::ToChars<RenderMode>(RenderMode value) {
 	}
 }
 
-template<>
+template <>
 RenderMode EnumUtil::FromString<RenderMode>(const char *value) {
 	if (StringUtil::Equals(value, "ROWS")) {
 		return RenderMode::ROWS;
@@ -5513,9 +5515,9 @@ RenderMode EnumUtil::FromString<RenderMode>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<ResultModifierType>(ResultModifierType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<ResultModifierType>(ResultModifierType value) {
+	switch (value) {
 	case ResultModifierType::LIMIT_MODIFIER:
 		return "LIMIT_MODIFIER";
 	case ResultModifierType::ORDER_MODIFIER:
@@ -5529,7 +5531,7 @@ const char* EnumUtil::ToChars<ResultModifierType>(ResultModifierType value) {
 	}
 }
 
-template<>
+template <>
 ResultModifierType EnumUtil::FromString<ResultModifierType>(const char *value) {
 	if (StringUtil::Equals(value, "LIMIT_MODIFIER")) {
 		return ResultModifierType::LIMIT_MODIFIER;
@@ -5546,9 +5548,9 @@ ResultModifierType EnumUtil::FromString<ResultModifierType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<SampleMethod>(SampleMethod value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<SampleMethod>(SampleMethod value) {
+	switch (value) {
 	case SampleMethod::SYSTEM_SAMPLE:
 		return "System";
 	case SampleMethod::BERNOULLI_SAMPLE:
@@ -5560,7 +5562,7 @@ const char* EnumUtil::ToChars<SampleMethod>(SampleMethod value) {
 	}
 }
 
-template<>
+template <>
 SampleMethod EnumUtil::FromString<SampleMethod>(const char *value) {
 	if (StringUtil::Equals(value, "System")) {
 		return SampleMethod::SYSTEM_SAMPLE;
@@ -5574,9 +5576,9 @@ SampleMethod EnumUtil::FromString<SampleMethod>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<ScanType>(ScanType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<ScanType>(ScanType value) {
+	switch (value) {
 	case ScanType::TABLE:
 		return "TABLE";
 	case ScanType::PARQUET:
@@ -5586,7 +5588,7 @@ const char* EnumUtil::ToChars<ScanType>(ScanType value) {
 	}
 }
 
-template<>
+template <>
 ScanType EnumUtil::FromString<ScanType>(const char *value) {
 	if (StringUtil::Equals(value, "TABLE")) {
 		return ScanType::TABLE;
@@ -5597,9 +5599,9 @@ ScanType EnumUtil::FromString<ScanType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<SecretDisplayType>(SecretDisplayType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<SecretDisplayType>(SecretDisplayType value) {
+	switch (value) {
 	case SecretDisplayType::REDACTED:
 		return "REDACTED";
 	case SecretDisplayType::UNREDACTED:
@@ -5609,7 +5611,7 @@ const char* EnumUtil::ToChars<SecretDisplayType>(SecretDisplayType value) {
 	}
 }
 
-template<>
+template <>
 SecretDisplayType EnumUtil::FromString<SecretDisplayType>(const char *value) {
 	if (StringUtil::Equals(value, "REDACTED")) {
 		return SecretDisplayType::REDACTED;
@@ -5620,9 +5622,9 @@ SecretDisplayType EnumUtil::FromString<SecretDisplayType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<SecretPersistType>(SecretPersistType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<SecretPersistType>(SecretPersistType value) {
+	switch (value) {
 	case SecretPersistType::DEFAULT:
 		return "DEFAULT";
 	case SecretPersistType::TEMPORARY:
@@ -5634,7 +5636,7 @@ const char* EnumUtil::ToChars<SecretPersistType>(SecretPersistType value) {
 	}
 }
 
-template<>
+template <>
 SecretPersistType EnumUtil::FromString<SecretPersistType>(const char *value) {
 	if (StringUtil::Equals(value, "DEFAULT")) {
 		return SecretPersistType::DEFAULT;
@@ -5648,9 +5650,9 @@ SecretPersistType EnumUtil::FromString<SecretPersistType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<SequenceInfo>(SequenceInfo value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<SequenceInfo>(SequenceInfo value) {
+	switch (value) {
 	case SequenceInfo::SEQ_START:
 		return "SEQ_START";
 	case SequenceInfo::SEQ_INC:
@@ -5668,7 +5670,7 @@ const char* EnumUtil::ToChars<SequenceInfo>(SequenceInfo value) {
 	}
 }
 
-template<>
+template <>
 SequenceInfo EnumUtil::FromString<SequenceInfo>(const char *value) {
 	if (StringUtil::Equals(value, "SEQ_START")) {
 		return SequenceInfo::SEQ_START;
@@ -5691,9 +5693,9 @@ SequenceInfo EnumUtil::FromString<SequenceInfo>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<SetOperationType>(SetOperationType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<SetOperationType>(SetOperationType value) {
+	switch (value) {
 	case SetOperationType::NONE:
 		return "NONE";
 	case SetOperationType::UNION:
@@ -5709,7 +5711,7 @@ const char* EnumUtil::ToChars<SetOperationType>(SetOperationType value) {
 	}
 }
 
-template<>
+template <>
 SetOperationType EnumUtil::FromString<SetOperationType>(const char *value) {
 	if (StringUtil::Equals(value, "NONE")) {
 		return SetOperationType::NONE;
@@ -5729,9 +5731,9 @@ SetOperationType EnumUtil::FromString<SetOperationType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<SetScope>(SetScope value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<SetScope>(SetScope value) {
+	switch (value) {
 	case SetScope::AUTOMATIC:
 		return "AUTOMATIC";
 	case SetScope::LOCAL:
@@ -5745,7 +5747,7 @@ const char* EnumUtil::ToChars<SetScope>(SetScope value) {
 	}
 }
 
-template<>
+template <>
 SetScope EnumUtil::FromString<SetScope>(const char *value) {
 	if (StringUtil::Equals(value, "AUTOMATIC")) {
 		return SetScope::AUTOMATIC;
@@ -5762,9 +5764,9 @@ SetScope EnumUtil::FromString<SetScope>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<SetType>(SetType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<SetType>(SetType value) {
+	switch (value) {
 	case SetType::SET:
 		return "SET";
 	case SetType::RESET:
@@ -5774,7 +5776,7 @@ const char* EnumUtil::ToChars<SetType>(SetType value) {
 	}
 }
 
-template<>
+template <>
 SetType EnumUtil::FromString<SetType>(const char *value) {
 	if (StringUtil::Equals(value, "SET")) {
 		return SetType::SET;
@@ -5785,9 +5787,9 @@ SetType EnumUtil::FromString<SetType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<SettingScope>(SettingScope value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<SettingScope>(SettingScope value) {
+	switch (value) {
 	case SettingScope::GLOBAL:
 		return "GLOBAL";
 	case SettingScope::LOCAL:
@@ -5799,7 +5801,7 @@ const char* EnumUtil::ToChars<SettingScope>(SettingScope value) {
 	}
 }
 
-template<>
+template <>
 SettingScope EnumUtil::FromString<SettingScope>(const char *value) {
 	if (StringUtil::Equals(value, "GLOBAL")) {
 		return SettingScope::GLOBAL;
@@ -5813,9 +5815,9 @@ SettingScope EnumUtil::FromString<SettingScope>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<ShowType>(ShowType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<ShowType>(ShowType value) {
+	switch (value) {
 	case ShowType::SUMMARY:
 		return "SUMMARY";
 	case ShowType::DESCRIBE:
@@ -5825,7 +5827,7 @@ const char* EnumUtil::ToChars<ShowType>(ShowType value) {
 	}
 }
 
-template<>
+template <>
 ShowType EnumUtil::FromString<ShowType>(const char *value) {
 	if (StringUtil::Equals(value, "SUMMARY")) {
 		return ShowType::SUMMARY;
@@ -5836,9 +5838,9 @@ ShowType EnumUtil::FromString<ShowType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<SimplifiedTokenType>(SimplifiedTokenType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<SimplifiedTokenType>(SimplifiedTokenType value) {
+	switch (value) {
 	case SimplifiedTokenType::SIMPLIFIED_TOKEN_IDENTIFIER:
 		return "SIMPLIFIED_TOKEN_IDENTIFIER";
 	case SimplifiedTokenType::SIMPLIFIED_TOKEN_NUMERIC_CONSTANT:
@@ -5856,7 +5858,7 @@ const char* EnumUtil::ToChars<SimplifiedTokenType>(SimplifiedTokenType value) {
 	}
 }
 
-template<>
+template <>
 SimplifiedTokenType EnumUtil::FromString<SimplifiedTokenType>(const char *value) {
 	if (StringUtil::Equals(value, "SIMPLIFIED_TOKEN_IDENTIFIER")) {
 		return SimplifiedTokenType::SIMPLIFIED_TOKEN_IDENTIFIER;
@@ -5879,9 +5881,9 @@ SimplifiedTokenType EnumUtil::FromString<SimplifiedTokenType>(const char *value)
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<SinkCombineResultType>(SinkCombineResultType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<SinkCombineResultType>(SinkCombineResultType value) {
+	switch (value) {
 	case SinkCombineResultType::FINISHED:
 		return "FINISHED";
 	case SinkCombineResultType::BLOCKED:
@@ -5891,7 +5893,7 @@ const char* EnumUtil::ToChars<SinkCombineResultType>(SinkCombineResultType value
 	}
 }
 
-template<>
+template <>
 SinkCombineResultType EnumUtil::FromString<SinkCombineResultType>(const char *value) {
 	if (StringUtil::Equals(value, "FINISHED")) {
 		return SinkCombineResultType::FINISHED;
@@ -5902,9 +5904,9 @@ SinkCombineResultType EnumUtil::FromString<SinkCombineResultType>(const char *va
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<SinkFinalizeType>(SinkFinalizeType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<SinkFinalizeType>(SinkFinalizeType value) {
+	switch (value) {
 	case SinkFinalizeType::READY:
 		return "READY";
 	case SinkFinalizeType::NO_OUTPUT_POSSIBLE:
@@ -5916,7 +5918,7 @@ const char* EnumUtil::ToChars<SinkFinalizeType>(SinkFinalizeType value) {
 	}
 }
 
-template<>
+template <>
 SinkFinalizeType EnumUtil::FromString<SinkFinalizeType>(const char *value) {
 	if (StringUtil::Equals(value, "READY")) {
 		return SinkFinalizeType::READY;
@@ -5930,9 +5932,9 @@ SinkFinalizeType EnumUtil::FromString<SinkFinalizeType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<SinkNextBatchType>(SinkNextBatchType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<SinkNextBatchType>(SinkNextBatchType value) {
+	switch (value) {
 	case SinkNextBatchType::READY:
 		return "READY";
 	case SinkNextBatchType::BLOCKED:
@@ -5942,7 +5944,7 @@ const char* EnumUtil::ToChars<SinkNextBatchType>(SinkNextBatchType value) {
 	}
 }
 
-template<>
+template <>
 SinkNextBatchType EnumUtil::FromString<SinkNextBatchType>(const char *value) {
 	if (StringUtil::Equals(value, "READY")) {
 		return SinkNextBatchType::READY;
@@ -5953,9 +5955,9 @@ SinkNextBatchType EnumUtil::FromString<SinkNextBatchType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<SinkResultType>(SinkResultType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<SinkResultType>(SinkResultType value) {
+	switch (value) {
 	case SinkResultType::NEED_MORE_INPUT:
 		return "NEED_MORE_INPUT";
 	case SinkResultType::FINISHED:
@@ -5967,7 +5969,7 @@ const char* EnumUtil::ToChars<SinkResultType>(SinkResultType value) {
 	}
 }
 
-template<>
+template <>
 SinkResultType EnumUtil::FromString<SinkResultType>(const char *value) {
 	if (StringUtil::Equals(value, "NEED_MORE_INPUT")) {
 		return SinkResultType::NEED_MORE_INPUT;
@@ -5981,9 +5983,9 @@ SinkResultType EnumUtil::FromString<SinkResultType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<SourceResultType>(SourceResultType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<SourceResultType>(SourceResultType value) {
+	switch (value) {
 	case SourceResultType::HAVE_MORE_OUTPUT:
 		return "HAVE_MORE_OUTPUT";
 	case SourceResultType::FINISHED:
@@ -5995,7 +5997,7 @@ const char* EnumUtil::ToChars<SourceResultType>(SourceResultType value) {
 	}
 }
 
-template<>
+template <>
 SourceResultType EnumUtil::FromString<SourceResultType>(const char *value) {
 	if (StringUtil::Equals(value, "HAVE_MORE_OUTPUT")) {
 		return SourceResultType::HAVE_MORE_OUTPUT;
@@ -6009,9 +6011,9 @@ SourceResultType EnumUtil::FromString<SourceResultType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<StatementReturnType>(StatementReturnType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<StatementReturnType>(StatementReturnType value) {
+	switch (value) {
 	case StatementReturnType::QUERY_RESULT:
 		return "QUERY_RESULT";
 	case StatementReturnType::CHANGED_ROWS:
@@ -6023,7 +6025,7 @@ const char* EnumUtil::ToChars<StatementReturnType>(StatementReturnType value) {
 	}
 }
 
-template<>
+template <>
 StatementReturnType EnumUtil::FromString<StatementReturnType>(const char *value) {
 	if (StringUtil::Equals(value, "QUERY_RESULT")) {
 		return StatementReturnType::QUERY_RESULT;
@@ -6037,9 +6039,9 @@ StatementReturnType EnumUtil::FromString<StatementReturnType>(const char *value)
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<StatementType>(StatementType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<StatementType>(StatementType value) {
+	switch (value) {
 	case StatementType::INVALID_STATEMENT:
 		return "INVALID_STATEMENT";
 	case StatementType::SELECT_STATEMENT:
@@ -6103,7 +6105,7 @@ const char* EnumUtil::ToChars<StatementType>(StatementType value) {
 	}
 }
 
-template<>
+template <>
 StatementType EnumUtil::FromString<StatementType>(const char *value) {
 	if (StringUtil::Equals(value, "INVALID_STATEMENT")) {
 		return StatementType::INVALID_STATEMENT;
@@ -6195,9 +6197,9 @@ StatementType EnumUtil::FromString<StatementType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<StatisticsType>(StatisticsType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<StatisticsType>(StatisticsType value) {
+	switch (value) {
 	case StatisticsType::NUMERIC_STATS:
 		return "NUMERIC_STATS";
 	case StatisticsType::STRING_STATS:
@@ -6215,7 +6217,7 @@ const char* EnumUtil::ToChars<StatisticsType>(StatisticsType value) {
 	}
 }
 
-template<>
+template <>
 StatisticsType EnumUtil::FromString<StatisticsType>(const char *value) {
 	if (StringUtil::Equals(value, "NUMERIC_STATS")) {
 		return StatisticsType::NUMERIC_STATS;
@@ -6238,9 +6240,9 @@ StatisticsType EnumUtil::FromString<StatisticsType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<StatsInfo>(StatsInfo value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<StatsInfo>(StatsInfo value) {
+	switch (value) {
 	case StatsInfo::CAN_HAVE_NULL_VALUES:
 		return "CAN_HAVE_NULL_VALUES";
 	case StatsInfo::CANNOT_HAVE_NULL_VALUES:
@@ -6256,7 +6258,7 @@ const char* EnumUtil::ToChars<StatsInfo>(StatsInfo value) {
 	}
 }
 
-template<>
+template <>
 StatsInfo EnumUtil::FromString<StatsInfo>(const char *value) {
 	if (StringUtil::Equals(value, "CAN_HAVE_NULL_VALUES")) {
 		return StatsInfo::CAN_HAVE_NULL_VALUES;
@@ -6276,9 +6278,9 @@ StatsInfo EnumUtil::FromString<StatsInfo>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<StrTimeSpecifier>(StrTimeSpecifier value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<StrTimeSpecifier>(StrTimeSpecifier value) {
+	switch (value) {
 	case StrTimeSpecifier::ABBREVIATED_WEEKDAY_NAME:
 		return "ABBREVIATED_WEEKDAY_NAME";
 	case StrTimeSpecifier::FULL_WEEKDAY_NAME:
@@ -6356,7 +6358,7 @@ const char* EnumUtil::ToChars<StrTimeSpecifier>(StrTimeSpecifier value) {
 	}
 }
 
-template<>
+template <>
 StrTimeSpecifier EnumUtil::FromString<StrTimeSpecifier>(const char *value) {
 	if (StringUtil::Equals(value, "ABBREVIATED_WEEKDAY_NAME")) {
 		return StrTimeSpecifier::ABBREVIATED_WEEKDAY_NAME;
@@ -6469,9 +6471,9 @@ StrTimeSpecifier EnumUtil::FromString<StrTimeSpecifier>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<SubqueryType>(SubqueryType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<SubqueryType>(SubqueryType value) {
+	switch (value) {
 	case SubqueryType::INVALID:
 		return "INVALID";
 	case SubqueryType::SCALAR:
@@ -6487,7 +6489,7 @@ const char* EnumUtil::ToChars<SubqueryType>(SubqueryType value) {
 	}
 }
 
-template<>
+template <>
 SubqueryType EnumUtil::FromString<SubqueryType>(const char *value) {
 	if (StringUtil::Equals(value, "INVALID")) {
 		return SubqueryType::INVALID;
@@ -6507,9 +6509,9 @@ SubqueryType EnumUtil::FromString<SubqueryType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<TableColumnType>(TableColumnType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<TableColumnType>(TableColumnType value) {
+	switch (value) {
 	case TableColumnType::STANDARD:
 		return "STANDARD";
 	case TableColumnType::GENERATED:
@@ -6519,7 +6521,7 @@ const char* EnumUtil::ToChars<TableColumnType>(TableColumnType value) {
 	}
 }
 
-template<>
+template <>
 TableColumnType EnumUtil::FromString<TableColumnType>(const char *value) {
 	if (StringUtil::Equals(value, "STANDARD")) {
 		return TableColumnType::STANDARD;
@@ -6530,9 +6532,9 @@ TableColumnType EnumUtil::FromString<TableColumnType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<TableFilterType>(TableFilterType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<TableFilterType>(TableFilterType value) {
+	switch (value) {
 	case TableFilterType::CONSTANT_COMPARISON:
 		return "CONSTANT_COMPARISON";
 	case TableFilterType::IS_NULL:
@@ -6550,7 +6552,7 @@ const char* EnumUtil::ToChars<TableFilterType>(TableFilterType value) {
 	}
 }
 
-template<>
+template <>
 TableFilterType EnumUtil::FromString<TableFilterType>(const char *value) {
 	if (StringUtil::Equals(value, "CONSTANT_COMPARISON")) {
 		return TableFilterType::CONSTANT_COMPARISON;
@@ -6573,9 +6575,9 @@ TableFilterType EnumUtil::FromString<TableFilterType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<TableReferenceType>(TableReferenceType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<TableReferenceType>(TableReferenceType value) {
+	switch (value) {
 	case TableReferenceType::INVALID:
 		return "INVALID";
 	case TableReferenceType::BASE_TABLE:
@@ -6601,7 +6603,7 @@ const char* EnumUtil::ToChars<TableReferenceType>(TableReferenceType value) {
 	}
 }
 
-template<>
+template <>
 TableReferenceType EnumUtil::FromString<TableReferenceType>(const char *value) {
 	if (StringUtil::Equals(value, "INVALID")) {
 		return TableReferenceType::INVALID;
@@ -6636,9 +6638,9 @@ TableReferenceType EnumUtil::FromString<TableReferenceType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<TableScanType>(TableScanType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<TableScanType>(TableScanType value) {
+	switch (value) {
 	case TableScanType::TABLE_SCAN_REGULAR:
 		return "TABLE_SCAN_REGULAR";
 	case TableScanType::TABLE_SCAN_COMMITTED_ROWS:
@@ -6652,7 +6654,7 @@ const char* EnumUtil::ToChars<TableScanType>(TableScanType value) {
 	}
 }
 
-template<>
+template <>
 TableScanType EnumUtil::FromString<TableScanType>(const char *value) {
 	if (StringUtil::Equals(value, "TABLE_SCAN_REGULAR")) {
 		return TableScanType::TABLE_SCAN_REGULAR;
@@ -6669,9 +6671,9 @@ TableScanType EnumUtil::FromString<TableScanType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<TaskExecutionMode>(TaskExecutionMode value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<TaskExecutionMode>(TaskExecutionMode value) {
+	switch (value) {
 	case TaskExecutionMode::PROCESS_ALL:
 		return "PROCESS_ALL";
 	case TaskExecutionMode::PROCESS_PARTIAL:
@@ -6681,7 +6683,7 @@ const char* EnumUtil::ToChars<TaskExecutionMode>(TaskExecutionMode value) {
 	}
 }
 
-template<>
+template <>
 TaskExecutionMode EnumUtil::FromString<TaskExecutionMode>(const char *value) {
 	if (StringUtil::Equals(value, "PROCESS_ALL")) {
 		return TaskExecutionMode::PROCESS_ALL;
@@ -6692,9 +6694,9 @@ TaskExecutionMode EnumUtil::FromString<TaskExecutionMode>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<TaskExecutionResult>(TaskExecutionResult value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<TaskExecutionResult>(TaskExecutionResult value) {
+	switch (value) {
 	case TaskExecutionResult::TASK_FINISHED:
 		return "TASK_FINISHED";
 	case TaskExecutionResult::TASK_NOT_FINISHED:
@@ -6708,7 +6710,7 @@ const char* EnumUtil::ToChars<TaskExecutionResult>(TaskExecutionResult value) {
 	}
 }
 
-template<>
+template <>
 TaskExecutionResult EnumUtil::FromString<TaskExecutionResult>(const char *value) {
 	if (StringUtil::Equals(value, "TASK_FINISHED")) {
 		return TaskExecutionResult::TASK_FINISHED;
@@ -6725,9 +6727,9 @@ TaskExecutionResult EnumUtil::FromString<TaskExecutionResult>(const char *value)
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<TimestampCastResult>(TimestampCastResult value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<TimestampCastResult>(TimestampCastResult value) {
+	switch (value) {
 	case TimestampCastResult::SUCCESS:
 		return "SUCCESS";
 	case TimestampCastResult::ERROR_INCORRECT_FORMAT:
@@ -6739,7 +6741,7 @@ const char* EnumUtil::ToChars<TimestampCastResult>(TimestampCastResult value) {
 	}
 }
 
-template<>
+template <>
 TimestampCastResult EnumUtil::FromString<TimestampCastResult>(const char *value) {
 	if (StringUtil::Equals(value, "SUCCESS")) {
 		return TimestampCastResult::SUCCESS;
@@ -6753,9 +6755,9 @@ TimestampCastResult EnumUtil::FromString<TimestampCastResult>(const char *value)
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<TransactionType>(TransactionType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<TransactionType>(TransactionType value) {
+	switch (value) {
 	case TransactionType::INVALID:
 		return "INVALID";
 	case TransactionType::BEGIN_TRANSACTION:
@@ -6769,7 +6771,7 @@ const char* EnumUtil::ToChars<TransactionType>(TransactionType value) {
 	}
 }
 
-template<>
+template <>
 TransactionType EnumUtil::FromString<TransactionType>(const char *value) {
 	if (StringUtil::Equals(value, "INVALID")) {
 		return TransactionType::INVALID;
@@ -6786,9 +6788,9 @@ TransactionType EnumUtil::FromString<TransactionType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<TupleDataPinProperties>(TupleDataPinProperties value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<TupleDataPinProperties>(TupleDataPinProperties value) {
+	switch (value) {
 	case TupleDataPinProperties::INVALID:
 		return "INVALID";
 	case TupleDataPinProperties::KEEP_EVERYTHING_PINNED:
@@ -6804,7 +6806,7 @@ const char* EnumUtil::ToChars<TupleDataPinProperties>(TupleDataPinProperties val
 	}
 }
 
-template<>
+template <>
 TupleDataPinProperties EnumUtil::FromString<TupleDataPinProperties>(const char *value) {
 	if (StringUtil::Equals(value, "INVALID")) {
 		return TupleDataPinProperties::INVALID;
@@ -6824,9 +6826,9 @@ TupleDataPinProperties EnumUtil::FromString<TupleDataPinProperties>(const char *
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<UndoFlags>(UndoFlags value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<UndoFlags>(UndoFlags value) {
+	switch (value) {
 	case UndoFlags::EMPTY_ENTRY:
 		return "EMPTY_ENTRY";
 	case UndoFlags::CATALOG_ENTRY:
@@ -6842,7 +6844,7 @@ const char* EnumUtil::ToChars<UndoFlags>(UndoFlags value) {
 	}
 }
 
-template<>
+template <>
 UndoFlags EnumUtil::FromString<UndoFlags>(const char *value) {
 	if (StringUtil::Equals(value, "EMPTY_ENTRY")) {
 		return UndoFlags::EMPTY_ENTRY;
@@ -6862,9 +6864,9 @@ UndoFlags EnumUtil::FromString<UndoFlags>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<UnionInvalidReason>(UnionInvalidReason value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<UnionInvalidReason>(UnionInvalidReason value) {
+	switch (value) {
 	case UnionInvalidReason::VALID:
 		return "VALID";
 	case UnionInvalidReason::TAG_OUT_OF_RANGE:
@@ -6882,7 +6884,7 @@ const char* EnumUtil::ToChars<UnionInvalidReason>(UnionInvalidReason value) {
 	}
 }
 
-template<>
+template <>
 UnionInvalidReason EnumUtil::FromString<UnionInvalidReason>(const char *value) {
 	if (StringUtil::Equals(value, "VALID")) {
 		return UnionInvalidReason::VALID;
@@ -6905,9 +6907,9 @@ UnionInvalidReason EnumUtil::FromString<UnionInvalidReason>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<VectorAuxiliaryDataType>(VectorAuxiliaryDataType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<VectorAuxiliaryDataType>(VectorAuxiliaryDataType value) {
+	switch (value) {
 	case VectorAuxiliaryDataType::ARROW_AUXILIARY:
 		return "ARROW_AUXILIARY";
 	default:
@@ -6915,7 +6917,7 @@ const char* EnumUtil::ToChars<VectorAuxiliaryDataType>(VectorAuxiliaryDataType v
 	}
 }
 
-template<>
+template <>
 VectorAuxiliaryDataType EnumUtil::FromString<VectorAuxiliaryDataType>(const char *value) {
 	if (StringUtil::Equals(value, "ARROW_AUXILIARY")) {
 		return VectorAuxiliaryDataType::ARROW_AUXILIARY;
@@ -6923,9 +6925,9 @@ VectorAuxiliaryDataType EnumUtil::FromString<VectorAuxiliaryDataType>(const char
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<VectorBufferType>(VectorBufferType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<VectorBufferType>(VectorBufferType value) {
+	switch (value) {
 	case VectorBufferType::STANDARD_BUFFER:
 		return "STANDARD_BUFFER";
 	case VectorBufferType::DICTIONARY_BUFFER:
@@ -6951,7 +6953,7 @@ const char* EnumUtil::ToChars<VectorBufferType>(VectorBufferType value) {
 	}
 }
 
-template<>
+template <>
 VectorBufferType EnumUtil::FromString<VectorBufferType>(const char *value) {
 	if (StringUtil::Equals(value, "STANDARD_BUFFER")) {
 		return VectorBufferType::STANDARD_BUFFER;
@@ -6986,9 +6988,9 @@ VectorBufferType EnumUtil::FromString<VectorBufferType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<VectorType>(VectorType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<VectorType>(VectorType value) {
+	switch (value) {
 	case VectorType::FLAT_VECTOR:
 		return "FLAT_VECTOR";
 	case VectorType::FSST_VECTOR:
@@ -7004,7 +7006,7 @@ const char* EnumUtil::ToChars<VectorType>(VectorType value) {
 	}
 }
 
-template<>
+template <>
 VectorType EnumUtil::FromString<VectorType>(const char *value) {
 	if (StringUtil::Equals(value, "FLAT_VECTOR")) {
 		return VectorType::FLAT_VECTOR;
@@ -7024,9 +7026,9 @@ VectorType EnumUtil::FromString<VectorType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<VerificationType>(VerificationType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<VerificationType>(VerificationType value) {
+	switch (value) {
 	case VerificationType::ORIGINAL:
 		return "ORIGINAL";
 	case VerificationType::COPIED:
@@ -7052,7 +7054,7 @@ const char* EnumUtil::ToChars<VerificationType>(VerificationType value) {
 	}
 }
 
-template<>
+template <>
 VerificationType EnumUtil::FromString<VerificationType>(const char *value) {
 	if (StringUtil::Equals(value, "ORIGINAL")) {
 		return VerificationType::ORIGINAL;
@@ -7087,9 +7089,9 @@ VerificationType EnumUtil::FromString<VerificationType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<VerifyExistenceType>(VerifyExistenceType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<VerifyExistenceType>(VerifyExistenceType value) {
+	switch (value) {
 	case VerifyExistenceType::APPEND:
 		return "APPEND";
 	case VerifyExistenceType::APPEND_FK:
@@ -7101,7 +7103,7 @@ const char* EnumUtil::ToChars<VerifyExistenceType>(VerifyExistenceType value) {
 	}
 }
 
-template<>
+template <>
 VerifyExistenceType EnumUtil::FromString<VerifyExistenceType>(const char *value) {
 	if (StringUtil::Equals(value, "APPEND")) {
 		return VerifyExistenceType::APPEND;
@@ -7115,9 +7117,9 @@ VerifyExistenceType EnumUtil::FromString<VerifyExistenceType>(const char *value)
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<WALType>(WALType value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<WALType>(WALType value) {
+	switch (value) {
 	case WALType::INVALID:
 		return "INVALID";
 	case WALType::CREATE_TABLE:
@@ -7175,7 +7177,7 @@ const char* EnumUtil::ToChars<WALType>(WALType value) {
 	}
 }
 
-template<>
+template <>
 WALType EnumUtil::FromString<WALType>(const char *value) {
 	if (StringUtil::Equals(value, "INVALID")) {
 		return WALType::INVALID;
@@ -7258,9 +7260,9 @@ WALType EnumUtil::FromString<WALType>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<WindowAggregationMode>(WindowAggregationMode value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<WindowAggregationMode>(WindowAggregationMode value) {
+	switch (value) {
 	case WindowAggregationMode::WINDOW:
 		return "WINDOW";
 	case WindowAggregationMode::COMBINE:
@@ -7272,7 +7274,7 @@ const char* EnumUtil::ToChars<WindowAggregationMode>(WindowAggregationMode value
 	}
 }
 
-template<>
+template <>
 WindowAggregationMode EnumUtil::FromString<WindowAggregationMode>(const char *value) {
 	if (StringUtil::Equals(value, "WINDOW")) {
 		return WindowAggregationMode::WINDOW;
@@ -7286,9 +7288,9 @@ WindowAggregationMode EnumUtil::FromString<WindowAggregationMode>(const char *va
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<WindowBoundary>(WindowBoundary value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<WindowBoundary>(WindowBoundary value) {
+	switch (value) {
 	case WindowBoundary::INVALID:
 		return "INVALID";
 	case WindowBoundary::UNBOUNDED_PRECEDING:
@@ -7312,7 +7314,7 @@ const char* EnumUtil::ToChars<WindowBoundary>(WindowBoundary value) {
 	}
 }
 
-template<>
+template <>
 WindowBoundary EnumUtil::FromString<WindowBoundary>(const char *value) {
 	if (StringUtil::Equals(value, "INVALID")) {
 		return WindowBoundary::INVALID;
@@ -7344,9 +7346,9 @@ WindowBoundary EnumUtil::FromString<WindowBoundary>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-template<>
-const char* EnumUtil::ToChars<WindowExcludeMode>(WindowExcludeMode value) {
-	switch(value) {
+template <>
+const char *EnumUtil::ToChars<WindowExcludeMode>(WindowExcludeMode value) {
+	switch (value) {
 	case WindowExcludeMode::NO_OTHER:
 		return "NO_OTHER";
 	case WindowExcludeMode::CURRENT_ROW:
@@ -7360,7 +7362,7 @@ const char* EnumUtil::ToChars<WindowExcludeMode>(WindowExcludeMode value) {
 	}
 }
 
-template<>
+template <>
 WindowExcludeMode EnumUtil::FromString<WindowExcludeMode>(const char *value) {
 	if (StringUtil::Equals(value, "NO_OTHER")) {
 		return WindowExcludeMode::NO_OTHER;
@@ -7377,5 +7379,4 @@ WindowExcludeMode EnumUtil::FromString<WindowExcludeMode>(const char *value) {
 	throw NotImplementedException(StringUtil::Format("Enum value: '%s' not implemented", value));
 }
 
-}
-
+} // namespace duckdb

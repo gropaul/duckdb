@@ -27,7 +27,9 @@ add_library_unity(
   remove_duplicate_groups.cpp
   remove_unused_columns.cpp
   statistics_propagator.cpp
-  topn_optimizer.cpp)
+  topn_optimizer.cpp
+  factorization_optimizer.cpp
+)
 set(ALL_OBJECT_FILES
     ${ALL_OBJECT_FILES} $<TARGET_OBJECTS:duckdb_optimizer>
     PARENT_SCOPE)

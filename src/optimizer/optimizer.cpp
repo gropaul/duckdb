@@ -10,6 +10,7 @@
 #include "duckdb/optimizer/cse_optimizer.hpp"
 #include "duckdb/optimizer/deliminator.hpp"
 #include "duckdb/optimizer/expression_heuristics.hpp"
+#include "duckdb/optimizer/factorization_optimizer.hpp"
 #include "duckdb/optimizer/filter_pullup.hpp"
 #include "duckdb/optimizer/filter_pushdown.hpp"
 #include "duckdb/optimizer/in_clause_rewriter.hpp"
@@ -192,6 +193,11 @@ unique_ptr<LogicalOperator> Optimizer::Optimize(unique_ptr<LogicalOperator> plan
 	RunOptimizer(OptimizerType::REORDER_FILTER, [&]() {
 		ExpressionHeuristics expression_heuristics(*this);
 		plan = expression_heuristics.Rewrite(std::move(plan));
+	});
+
+	RunOptimizer(OptimizerType::FACTORIZATION, [&]() {
+		FactorizationOptimizer factorization_optimizer;
+		plan = factorization_optimizer.Optimize(std::move(plan));
 	});
 
 	for (auto &optimizer_extension : DBConfig::GetConfig(context).optimizer_extensions) {
