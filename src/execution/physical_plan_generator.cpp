@@ -108,6 +108,9 @@ unique_ptr<PhysicalOperator> PhysicalPlanGenerator::CreatePlan(LogicalOperator &
 	case LogicalOperatorType::LOGICAL_DUMMY_SCAN:
 		plan = CreatePlan(op.Cast<LogicalDummyScan>());
 		break;
+	case LogicalOperatorType::LOGICAL_FACT_EXPAND:
+		plan = CreatePlan(op.Cast<LogicalFactExpand>());
+		break;
 	case LogicalOperatorType::LOGICAL_ANY_JOIN:
 		plan = CreatePlan(op.Cast<LogicalAnyJoin>());
 		break;

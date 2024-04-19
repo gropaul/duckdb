@@ -20,6 +20,7 @@ add_library_unity(
   logical_empty_result.cpp
   logical_expression_get.cpp
   logical_extension_operator.cpp
+  logical_fact_expand.cpp
   logical_filter.cpp
   logical_get.cpp
   logical_insert.cpp

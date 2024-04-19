@@ -3221,6 +3221,8 @@ const char *EnumUtil::ToChars<LogicalOperatorType>(LogicalOperatorType value) {
 		return "LOGICAL_EXPRESSION_GET";
 	case LogicalOperatorType::LOGICAL_DUMMY_SCAN:
 		return "LOGICAL_DUMMY_SCAN";
+	case LogicalOperatorType::LOGICAL_FACT_EXPAND:
+		return "LOGICAL_FACT_EXPAND";
 	case LogicalOperatorType::LOGICAL_EMPTY_RESULT:
 		return "LOGICAL_EMPTY_RESULT";
 	case LogicalOperatorType::LOGICAL_CTE_REF:

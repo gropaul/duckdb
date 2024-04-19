@@ -354,6 +354,10 @@ ClientContext::CreatePreparedStatementInternal(ClientContextLock &lock, const st
 #endif
 	}
 
+	if (result->types.size() == plan->types.size()) {
+		result->types = plan->types;
+	}
+
 	profiler.StartPhase("physical_planner");
 	// now convert logical query plan into a physical query plan
 	PhysicalPlanGenerator physical_planner(*this);

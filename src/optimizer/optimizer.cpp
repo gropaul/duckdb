@@ -196,8 +196,8 @@ unique_ptr<LogicalOperator> Optimizer::Optimize(unique_ptr<LogicalOperator> plan
 	});
 
 	RunOptimizer(OptimizerType::FACTORIZATION, [&]() {
-		FactorizationOptimizer factorization_optimizer;
-		plan = factorization_optimizer.Optimize(std::move(plan));
+		FactorizationOptimizer factorization_optimizer(binder);
+		factorization_optimizer.Optimize(plan);
 	});
 
 	for (auto &optimizer_extension : DBConfig::GetConfig(context).optimizer_extensions) {
