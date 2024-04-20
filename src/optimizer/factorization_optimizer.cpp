@@ -33,10 +33,10 @@ void FactorizationOptimizer::OptimizeInternal(unique_ptr<duckdb::LogicalOperator
 
 	vector<unique_ptr<LogicalOperator>> &children = op->children;
 
-	if (!CanProcessFactVectors(op)) {
+	if (!op->CanProcessFactVectors()) {
 		for (auto &child : children) {
 
-			if (child->type == LogicalOperatorType::LOGICAL_COMPARISON_JOIN) {
+			if (child->EmitsFactVectors()) {
 				// between every operator that can't handle factorization and a factorizable operator, we need to insert
 				// a FactorizationExpand
 				const auto table_index = binder.GenerateTableIndex();

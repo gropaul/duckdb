@@ -41,6 +41,12 @@ public:
 public:
 	vector<ColumnBinding> GetColumnBindings() override;
 
+	vector<LogicalType> GetRHSTypes();
+	vector<LogicalType> GetOriginalRHSTypes();
+
+	vector<ColumnBinding> GetRHSBindings();
+	vector<ColumnBinding> GetOriginalRHSBindings();
+
 protected:
 	void ResolveTypes() override;
 };

@@ -41,6 +41,12 @@ public:
 	static unique_ptr<LogicalOperator> Deserialize(Deserializer &deserializer);
 
 public:
+
+	//! This operator emits factorized vectors
+	bool EmitsFactVectors() const override {
+		return true;
+	}
+
 	static unique_ptr<LogicalOperator> CreateJoin(ClientContext &context, JoinType type, JoinRefType ref_type,
 	                                              unique_ptr<LogicalOperator> left_child,
 	                                              unique_ptr<LogicalOperator> right_child,

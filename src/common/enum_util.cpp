@@ -3572,6 +3572,8 @@ const char *EnumUtil::ToChars<LogicalTypeId>(LogicalTypeId value) {
 		return "VALIDITY";
 	case LogicalTypeId::UUID:
 		return "UUID";
+	case LogicalTypeId::FACT_POINTER:
+		return "FACT_POINTER";
 	case LogicalTypeId::STRUCT:
 		return "STRUCT";
 	case LogicalTypeId::LIST:
@@ -3710,6 +3712,9 @@ LogicalTypeId EnumUtil::FromString<LogicalTypeId>(const char *value) {
 	}
 	if (StringUtil::Equals(value, "STRUCT")) {
 		return LogicalTypeId::STRUCT;
+	}
+	if (StringUtil::Equals(value, "FACT_POINTER")) {
+		return LogicalTypeId::FACT_POINTER;
 	}
 	if (StringUtil::Equals(value, "LIST")) {
 		return LogicalTypeId::LIST;

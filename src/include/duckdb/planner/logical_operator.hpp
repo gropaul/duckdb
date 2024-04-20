@@ -71,6 +71,14 @@ public:
 		return true;
 	}
 
+	virtual bool EmitsFactVectors() const {
+		return false;
+	}
+
+	virtual bool CanProcessFactVectors() const {
+		return false;
+	}
+
 	//! Allows LogicalOperators to opt out of serialization
 	virtual bool SupportSerialization() const {
 		return true;

@@ -26,7 +26,8 @@ enum class ExtraTypeInfoType : uint8_t {
 	AGGREGATE_STATE_TYPE_INFO = 8,
 	ARRAY_TYPE_INFO = 9,
 	ANY_TYPE_INFO = 10,
-	INTEGER_LITERAL_TYPE_INFO = 11
+	INTEGER_LITERAL_TYPE_INFO = 11,
+	FACT_POINTER_TYPE_INFO = 12
 };
 
 struct ExtraTypeInfo {
@@ -105,6 +106,13 @@ protected:
 
 private:
 	ListTypeInfo();
+};
+
+
+struct FactPointerTypeInfo : public ExtraTypeInfo {
+	explicit FactPointerTypeInfo(vector<LogicalType> child_types_p);
+
+	vector<LogicalType> child_types;
 };
 
 struct StructTypeInfo : public ExtraTypeInfo {

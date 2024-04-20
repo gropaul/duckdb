@@ -128,6 +128,7 @@ PhysicalType LogicalType::GetInternalType() {
 		return PhysicalType::LIST;
 	case LogicalTypeId::ARRAY:
 		return PhysicalType::ARRAY;
+	case LogicalTypeId::FACT_POINTER:
 	case LogicalTypeId::POINTER:
 		// LCOV_EXCL_START
 		if (sizeof(uintptr_t) == sizeof(uint32_t)) {
@@ -1011,6 +1012,8 @@ static idx_t GetLogicalTypeScore(const LogicalType &type) {
 		return 101;
 	case LogicalTypeId::UUID:
 		return 102;
+	case LogicalTypeId::FACT_POINTER:
+		return 124;
 	// nested types
 	case LogicalTypeId::STRUCT:
 		return 125;
@@ -1278,6 +1281,11 @@ bool StructType::IsUnnamed(const LogicalType &type) {
 		return false;
 	}
 	return child_types[0].first.empty();
+}
+
+LogicalType LogicalType::FACT_POINTER(vector<LogicalType> &children) {
+	auto info = make_shared<FactPointerTypeInfo>(children);
+	return LogicalType(LogicalTypeId::FACT_POINTER, std::move(info));
 }
 
 LogicalType LogicalType::STRUCT(child_list_t<LogicalType> children) {

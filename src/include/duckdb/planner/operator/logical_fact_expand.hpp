@@ -31,6 +31,10 @@ public:
 	vector<idx_t> GetTableIndex() const override;
 	string GetName() const override;
 
+	bool CanProcessFactVectors() const override {
+		return true;
+	}
+
 protected:
 	void ResolveTypes() override;
 };

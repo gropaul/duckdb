@@ -212,14 +212,16 @@ enum class LogicalTypeId : uint8_t {
 	TIMESTAMP_TZ = 32,
 	TIME_TZ = 34,
 	BIT = 36,
-	STRING_LITERAL = 37, /* string literals, used for constant strings - only exists while binding */
-	INTEGER_LITERAL = 38,/* integer literals, used for constant integers - only exists while binding */
+	STRING_LITERAL = 37,  /* string literals, used for constant strings - only exists while binding */
+	INTEGER_LITERAL = 38, /* integer literals, used for constant integers - only exists while binding */
 
 	UHUGEINT = 49,
 	HUGEINT = 50,
 	POINTER = 51,
 	VALIDITY = 53,
 	UUID = 54,
+
+	FACT_POINTER = 60,
 
 	STRUCT = 100,
 	LIST = 101,
@@ -384,8 +386,9 @@ public:
 	static constexpr const LogicalTypeId INVALID = LogicalTypeId::INVALID;
 	static constexpr const LogicalTypeId ROW_TYPE = LogicalTypeId::BIGINT;
 
+	DUCKDB_API static LogicalType FACT_POINTER(vector<LogicalType> &children); // NOLINT
 	// explicitly allowing these functions to be capitalized to be in-line with the remaining functions
-	DUCKDB_API static LogicalType DECIMAL(uint8_t width, uint8_t scale);                 // NOLINT
+	DUCKDB_API static LogicalType DECIMAL(uint8_t width, uint8_t scale);         // NOLINT
 	DUCKDB_API static LogicalType VARCHAR_COLLATION(string collation);           // NOLINT
 	DUCKDB_API static LogicalType LIST(const LogicalType &child);                // NOLINT
 	DUCKDB_API static LogicalType STRUCT(child_list_t<LogicalType> children);    // NOLINT

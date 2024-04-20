@@ -1,9 +1,10 @@
 #include "duckdb/common/extra_type_info.hpp"
-#include "duckdb/common/serializer/deserializer.hpp"
+
+#include "duckdb/catalog/catalog_entry/schema_catalog_entry.hpp"
 #include "duckdb/common/enum_util.hpp"
 #include "duckdb/common/numeric_utils.hpp"
+#include "duckdb/common/serializer/deserializer.hpp"
 #include "duckdb/common/serializer/serializer.hpp"
-#include "duckdb/catalog/catalog_entry/schema_catalog_entry.hpp"
 #include "duckdb/common/string_map_set.hpp"
 
 namespace duckdb {
@@ -94,6 +95,13 @@ bool ListTypeInfo::EqualsInternal(ExtraTypeInfo *other_p) const {
 }
 
 //===--------------------------------------------------------------------===//
+// Fact Pointer Type Info
+//===--------------------------------------------------------------------===//
+FactPointerTypeInfo::FactPointerTypeInfo(vector<LogicalType> child_types_p)
+    : ExtraTypeInfo(ExtraTypeInfoType::FACT_POINTER_TYPE_INFO), child_types(child_types_p) {
+}
+
+// ===--------------------------------------------------------------------===//
 // Struct Type Info
 //===--------------------------------------------------------------------===//
 StructTypeInfo::StructTypeInfo() : ExtraTypeInfo(ExtraTypeInfoType::STRUCT_TYPE_INFO) {
