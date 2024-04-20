@@ -12,6 +12,7 @@
 #include "duckdb/common/constants.hpp"
 #include "duckdb/common/optional_ptr.hpp"
 #include "duckdb/common/vector.hpp"
+#include "duckdb/planner/column_binding.hpp"
 
 #include <limits>
 
@@ -170,7 +171,7 @@ enum class PhysicalType : uint8_t {
 	/// DuckDB Extensions
 	VARCHAR = 200, // our own string representation, different from STRING and LARGE_STRING above
 	UINT128 = 203, // 128-bit unsigned integers
-	INT128 = 204, // 128-bit integers
+	INT128 = 204,  // 128-bit integers
 	UNKNOWN = 205, // Unknown physical type of user defined types
 	/// Boolean as 1 bit, LSB bit-packed ordering
 	BIT = 206,
@@ -321,29 +322,32 @@ struct LogicalType {
 	DUCKDB_API bool HasAlias() const;
 	DUCKDB_API string GetAlias() const;
 
-	//! Returns the maximum logical type when combining the two types - or throws an exception if combining is not possible
-	DUCKDB_API static LogicalType MaxLogicalType(ClientContext &context, const LogicalType &left, const LogicalType &right);
-	DUCKDB_API static bool TryGetMaxLogicalType(ClientContext &context, const LogicalType &left, const LogicalType &right, LogicalType &result);
-	//! Forcibly returns a maximum logical type - similar to MaxLogicalType but never throws. As a fallback either left or right are returned.
+	//! Returns the maximum logical type when combining the two types - or throws an exception if combining is not
+	//! possible
+	DUCKDB_API static LogicalType MaxLogicalType(ClientContext &context, const LogicalType &left,
+	                                             const LogicalType &right);
+	DUCKDB_API static bool TryGetMaxLogicalType(ClientContext &context, const LogicalType &left,
+	                                            const LogicalType &right, LogicalType &result);
+	//! Forcibly returns a maximum logical type - similar to MaxLogicalType but never throws. As a fallback either left
+	//! or right are returned.
 	DUCKDB_API static LogicalType ForceMaxLogicalType(const LogicalType &left, const LogicalType &right);
 	//! Normalize a type - removing literals
 	DUCKDB_API static LogicalType NormalizeType(const LogicalType &type);
 
-
-		//! Gets the decimal properties of a numeric type. Fails if the type is not numeric.
+	//! Gets the decimal properties of a numeric type. Fails if the type is not numeric.
 	DUCKDB_API bool GetDecimalProperties(uint8_t &width, uint8_t &scale) const;
 
 	DUCKDB_API void Verify() const;
 
 	DUCKDB_API bool IsValid() const;
 
-	template<class F>
+	template <class F>
 	bool Contains(F &&predicate) const;
 	bool Contains(LogicalTypeId type_id) const;
 
 private:
-	LogicalTypeId id_; // NOLINT: allow this naming for legacy reasons
-	PhysicalType physical_type_; // NOLINT: allow this naming for legacy reasons
+	LogicalTypeId id_;                    // NOLINT: allow this naming for legacy reasons
+	PhysicalType physical_type_;          // NOLINT: allow this naming for legacy reasons
 	shared_ptr<ExtraTypeInfo> type_info_; // NOLINT: allow this naming for legacy reasons
 
 private:
@@ -386,7 +390,7 @@ public:
 	static constexpr const LogicalTypeId INVALID = LogicalTypeId::INVALID;
 	static constexpr const LogicalTypeId ROW_TYPE = LogicalTypeId::BIGINT;
 
-	DUCKDB_API static LogicalType FACT_POINTER(vector<LogicalType> &children); // NOLINT
+	DUCKDB_API static LogicalType FACT_POINTER(vector<LogicalType> &children, vector<ColumnBinding> &child_binding);
 	// explicitly allowing these functions to be capitalized to be in-line with the remaining functions
 	DUCKDB_API static LogicalType DECIMAL(uint8_t width, uint8_t scale);         // NOLINT
 	DUCKDB_API static LogicalType VARCHAR_COLLATION(string collation);           // NOLINT
@@ -403,7 +407,7 @@ public:
 	// ANY but with special rules (default is LogicalType::ANY, 5)
 	DUCKDB_API static LogicalType ANY_PARAMS(LogicalType target, idx_t cast_score = 5); // NOLINT
 	//! Integer literal of the specified value
-	DUCKDB_API static LogicalType INTEGER_LITERAL(const Value &constant);               // NOLINT
+	DUCKDB_API static LogicalType INTEGER_LITERAL(const Value &constant); // NOLINT
 	// DEPRECATED - provided for backwards compatibility
 	DUCKDB_API static LogicalType ENUM(const string &enum_name, Vector &ordered_data, idx_t size); // NOLINT
 	DUCKDB_API static LogicalType USER(const string &user_type_name);                              // NOLINT
@@ -537,27 +541,26 @@ struct aggregate_state_t {
 	vector<LogicalType> bound_argument_types;
 };
 
-template<class F>
+template <class F>
 bool LogicalType::Contains(F &&predicate) const {
-	if(predicate(*this)) {
+	if (predicate(*this)) {
 		return true;
 	}
-	switch(id()) {
+	switch (id()) {
 	case LogicalTypeId::STRUCT: {
-		for(const auto &child : StructType::GetChildTypes(*this)) {
-			if(child.second.Contains(predicate)) {
+		for (const auto &child : StructType::GetChildTypes(*this)) {
+			if (child.second.Contains(predicate)) {
 				return true;
 			}
 		}
-		}
-		break;
+	} break;
 	case LogicalTypeId::LIST:
 		return ListType::GetChildType(*this).Contains(predicate);
 	case LogicalTypeId::MAP:
 		return MapType::KeyType(*this).Contains(predicate) || MapType::ValueType(*this).Contains(predicate);
 	case LogicalTypeId::UNION:
-		for(const auto &child : UnionType::CopyMemberTypes(*this)) {
-			if(child.second.Contains(predicate)) {
+		for (const auto &child : UnionType::CopyMemberTypes(*this)) {
+			if (child.second.Contains(predicate)) {
 				return true;
 			}
 		}

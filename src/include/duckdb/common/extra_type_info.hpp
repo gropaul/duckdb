@@ -110,9 +110,10 @@ private:
 
 
 struct FactPointerTypeInfo : public ExtraTypeInfo {
-	explicit FactPointerTypeInfo(vector<LogicalType> child_types_p);
+	explicit FactPointerTypeInfo(vector<LogicalType> child_types_p, vector<ColumnBinding> child_bindings_p);
 
 	vector<LogicalType> child_types;
+	vector<ColumnBinding> child_bindings;
 };
 
 struct StructTypeInfo : public ExtraTypeInfo {

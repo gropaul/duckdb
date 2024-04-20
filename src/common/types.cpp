@@ -1283,8 +1283,8 @@ bool StructType::IsUnnamed(const LogicalType &type) {
 	return child_types[0].first.empty();
 }
 
-LogicalType LogicalType::FACT_POINTER(vector<LogicalType> &children) {
-	auto info = make_shared<FactPointerTypeInfo>(children);
+LogicalType LogicalType::FACT_POINTER(vector<LogicalType> &children, vector<ColumnBinding> &bindings) {
+	auto info = make_shared<FactPointerTypeInfo>(children, bindings);
 	return LogicalType(LogicalTypeId::FACT_POINTER, std::move(info));
 }
 

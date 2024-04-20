@@ -43,7 +43,7 @@ public:
 public:
 
 	//! This operator emits factorized vectors
-	bool EmitsFactVectors() const override {
+	bool CanEmitFactVectors() const override {
 		return true;
 	}
 

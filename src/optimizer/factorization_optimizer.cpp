@@ -36,17 +36,31 @@ void FactorizationOptimizer::OptimizeInternal(unique_ptr<duckdb::LogicalOperator
 	if (!op->CanProcessFactVectors()) {
 		for (auto &child : children) {
 
-			if (child->EmitsFactVectors()) {
+			if (child->CanEmitFactVectors()) {
+
+				child->ResolveOperatorTypes();
+				auto flat_bindings = child->GetColumnBindings();
+				auto flat_types = child->types;
+
+				// allow the child to emit fact vectors
+				child->SetEmitFactVector(true);
+
+				child->ResolveOperatorTypes();
+				auto fact_bindings = child->GetColumnBindings();
+				auto fact_types = child->types;
+
 				// between every operator that can't handle factorization and a factorizable operator, we need to insert
 				// a FactorizationExpand
 				const auto table_index = binder.GenerateTableIndex();
 
-				auto logical_fact_expand = make_uniq<LogicalFactExpand>(table_index, child);
+				auto logical_fact_expand = make_uniq<LogicalFactExpand>(table_index, flat_bindings, flat_types);
 
 				// insert the FactExpand between the two operators
 				auto &fact_expand = *logical_fact_expand;
 				fact_expand.children.push_back(std::move(child));
 				child = std::move(logical_fact_expand);
+
+
 			}
 		}
 	}

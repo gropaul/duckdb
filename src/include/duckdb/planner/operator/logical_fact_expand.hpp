@@ -18,11 +18,11 @@ public:
 	static constexpr const LogicalOperatorType TYPE = LogicalOperatorType::LOGICAL_FACT_EXPAND;
 
 public:
-	LogicalFactExpand(idx_t table_index, const unique_ptr<LogicalOperator> &child);
+	LogicalFactExpand(idx_t table_index, vector<ColumnBinding> &flat_bindings, vector<LogicalType> &flat_types);
 
 private:
-	vector<ColumnBinding> child_column_bindings;
-	vector<LogicalType> child_types;
+	vector<ColumnBinding> flat_bindings;
+	vector<LogicalType> flat_types;
 	idx_t table_index;
 
 public:

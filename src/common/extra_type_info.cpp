@@ -97,8 +97,8 @@ bool ListTypeInfo::EqualsInternal(ExtraTypeInfo *other_p) const {
 //===--------------------------------------------------------------------===//
 // Fact Pointer Type Info
 //===--------------------------------------------------------------------===//
-FactPointerTypeInfo::FactPointerTypeInfo(vector<LogicalType> child_types_p)
-    : ExtraTypeInfo(ExtraTypeInfoType::FACT_POINTER_TYPE_INFO), child_types(child_types_p) {
+FactPointerTypeInfo::FactPointerTypeInfo(vector<LogicalType> child_types_p, vector<ColumnBinding> child_bindings_p)
+    : ExtraTypeInfo(ExtraTypeInfoType::FACT_POINTER_TYPE_INFO), child_types(child_types_p), child_bindings(child_bindings_p) {
 }
 
 // ===--------------------------------------------------------------------===//

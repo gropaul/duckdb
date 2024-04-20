@@ -50,6 +50,10 @@ void LogicalJoin::ResolveTypes() {
 	types.insert(types.end(), right_types.begin(), right_types.end());
 }
 
+void LogicalJoin::SetEmitFactVector(bool emit_fact_vector_p) {
+	emit_fact_vectors = emit_fact_vector_p;
+}
+
 vector<LogicalType> LogicalJoin::GetOriginalRHSTypes() {
 	auto right_types = MapTypes(children[1]->types, right_projection_map);
 	return right_types;
@@ -57,8 +61,9 @@ vector<LogicalType> LogicalJoin::GetOriginalRHSTypes() {
 
 vector<LogicalType> LogicalJoin::GetRHSTypes() {
 	vector<LogicalType> rhs_types = GetOriginalRHSTypes();
-    if (EmitsFactVectors()){
-		return {LogicalType::FACT_POINTER(rhs_types)};
+	vector<ColumnBinding> rhs_bindings = GetOriginalRHSBindings();
+    if (this->emit_fact_vectors){
+		return {LogicalType::FACT_POINTER(rhs_types, rhs_bindings)};
 	} else {
 		return rhs_types;
 	}
@@ -71,7 +76,7 @@ vector<ColumnBinding> LogicalJoin::GetOriginalRHSBindings() {
 
 vector<ColumnBinding> LogicalJoin::GetRHSBindings() {
 	auto right_bindings = GetOriginalRHSBindings();
-	if (EmitsFactVectors()){
+	if (this->emit_fact_vectors){
 		return {ColumnBinding(right_bindings[0].table_index, 0)};
 	} else {
 		return right_bindings;

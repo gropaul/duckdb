@@ -4,19 +4,18 @@
 
 namespace duckdb {
 
-LogicalFactExpand::LogicalFactExpand(idx_t table_index, const unique_ptr<LogicalOperator> &child)
-    : LogicalOperator(LogicalOperatorType::LOGICAL_FACT_EXPAND), child_column_bindings(child->GetColumnBindings()),
-      table_index(table_index) {
-	child->ResolveOperatorTypes();
-	child_types = child->types;
+LogicalFactExpand::LogicalFactExpand(idx_t table_index, vector<ColumnBinding> &flat_bindings_p,
+                                     vector<LogicalType> &flat_types_p)
+    : LogicalOperator(LogicalOperatorType::LOGICAL_FACT_EXPAND), flat_bindings(flat_bindings_p),
+      flat_types(flat_types_p), table_index(table_index) {
 }
 
 vector<ColumnBinding> LogicalFactExpand::GetColumnBindings() {
-	return child_column_bindings;
+	return flat_bindings;
 }
 
 void LogicalFactExpand::ResolveTypes() {
-	types = child_types;
+	types = flat_types;
 }
 
 vector<idx_t> LogicalFactExpand::GetTableIndex() const {

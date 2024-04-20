@@ -47,7 +47,10 @@ public:
 	vector<ColumnBinding> GetRHSBindings();
 	vector<ColumnBinding> GetOriginalRHSBindings();
 
+	void SetEmitFactVector(bool emit_fact_vector_p) override;
+
 protected:
+	bool emit_fact_vectors = false;
 	void ResolveTypes() override;
 };
 

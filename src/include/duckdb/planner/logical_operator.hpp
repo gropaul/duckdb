@@ -71,8 +71,14 @@ public:
 		return true;
 	}
 
-	virtual bool EmitsFactVectors() const {
+	virtual bool CanEmitFactVectors() const {
 		return false;
+	}
+
+	virtual void SetEmitFactVector(bool emit_fact_vector) {
+		D_ASSERT(CanEmitFactVectors());
+		D_ASSERT(false);
+		// must be implemented by the operator
 	}
 
 	virtual bool CanProcessFactVectors() const {
