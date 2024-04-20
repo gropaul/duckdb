@@ -43,7 +43,7 @@ void FactorizationOptimizer::OptimizeInternal(unique_ptr<duckdb::LogicalOperator
 				auto flat_types = child->types;
 
 				// allow the child to emit fact vectors
-				child->SetEmitFactVector(true);
+				child->SetEmitFactVectors(true);
 
 				child->ResolveOperatorTypes();
 				auto fact_bindings = child->GetColumnBindings();

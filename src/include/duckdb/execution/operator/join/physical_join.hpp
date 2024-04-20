@@ -22,6 +22,7 @@ public:
 	PhysicalJoin(LogicalOperator &op, PhysicalOperatorType type, JoinType join_type, idx_t estimated_cardinality);
 
 	JoinType join_type;
+	bool emit_fact_vector = false;
 
 public:
 	bool EmptyResultIfRHSIsEmpty() const;

@@ -108,12 +108,17 @@ private:
 	ListTypeInfo();
 };
 
-
 struct FactPointerTypeInfo : public ExtraTypeInfo {
-	explicit FactPointerTypeInfo(vector<LogicalType> child_types_p, vector<ColumnBinding> child_bindings_p);
+	explicit FactPointerTypeInfo(vector<LogicalType> flat_types_p, vector<ColumnBinding> flat_bindings_p);
 
-	vector<LogicalType> child_types;
-	vector<ColumnBinding> child_bindings;
+	vector<LogicalType> flat_types;
+	vector<ColumnBinding> flat_bindings;
+
+public:
+	void Serialize(Serializer &serializer) const override;
+	static shared_ptr<ExtraTypeInfo> Deserialize(Deserializer &deserializer);
+
+	FactPointerTypeInfo();
 };
 
 struct StructTypeInfo : public ExtraTypeInfo {

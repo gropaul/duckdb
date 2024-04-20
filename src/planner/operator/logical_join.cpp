@@ -50,8 +50,12 @@ void LogicalJoin::ResolveTypes() {
 	types.insert(types.end(), right_types.begin(), right_types.end());
 }
 
-void LogicalJoin::SetEmitFactVector(bool emit_fact_vector_p) {
+void LogicalJoin::SetEmitFactVectors(bool emit_fact_vector_p) {
 	emit_fact_vectors = emit_fact_vector_p;
+}
+
+bool LogicalJoin::GetEmitFactVectors() {
+	return emit_fact_vectors;
 }
 
 vector<LogicalType> LogicalJoin::GetOriginalRHSTypes() {

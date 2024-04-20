@@ -24,6 +24,11 @@ PhysicalFactExpand::PhysicalFactExpand(vector<LogicalType> types, idx_t estimate
 OperatorResultType PhysicalFactExpand::Execute(ExecutionContext &context, DataChunk &input, DataChunk &chunk,
                                                GlobalOperatorState &gstate, OperatorState &state_p) const {
 	auto &state = state_p.Cast<FactExpandState>();
+
+	auto fact_vector = input.data[2];
+	auto size = input.size();
+	fact_vector.Print(size);
+	// todo: Implement fact value to make this work
 	// No-op: just reference the input
 	chunk.Reference(input);
 	return OperatorResultType::NEED_MORE_INPUT;

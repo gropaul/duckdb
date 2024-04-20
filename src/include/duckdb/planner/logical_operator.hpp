@@ -75,7 +75,12 @@ public:
 		return false;
 	}
 
-	virtual void SetEmitFactVector(bool emit_fact_vector) {
+	virtual bool GetEmitFactVectors() {
+		return false;
+		// must be implemented by the operator
+	}
+
+	virtual void SetEmitFactVectors(bool emit_fact_vector) {
 		D_ASSERT(CanEmitFactVectors());
 		D_ASSERT(false);
 		// must be implemented by the operator

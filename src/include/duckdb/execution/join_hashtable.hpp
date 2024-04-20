@@ -156,7 +156,7 @@ public:
 	};
 
 	JoinHashTable(BufferManager &buffer_manager, const vector<JoinCondition> &conditions,
-	              vector<LogicalType> build_types, JoinType type, const vector<idx_t> &output_columns);
+	              vector<LogicalType> build_types, JoinType type, const vector<idx_t> &output_columns, const bool emit_fact_vectors);
 	~JoinHashTable();
 
 	//! Add the given data to the HT
@@ -195,6 +195,9 @@ public:
 		return *data_collection;
 	}
 
+
+	//! Whether to emit fact vectors from the HT
+	bool emit_fact_vectors;
 	//! BufferManager
 	BufferManager &buffer_manager;
 	//! The join conditions
@@ -377,6 +380,8 @@ public:
 	static idx_t PointerTableSize(idx_t count) {
 		return PointerTableCapacity(count) * sizeof(data_ptr_t);
 	}
+
+	static void GetChainLengths(Vector &row_pointer_v, const idx_t count, const idx_t pointer_offset);
 
 	//! Get total size of HT if all partitions would be built
 	idx_t GetTotalSize(vector<unique_ptr<JoinHashTable>> &local_hts, idx_t &max_partition_size,

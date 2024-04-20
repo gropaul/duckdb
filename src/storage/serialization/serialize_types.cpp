@@ -51,6 +51,9 @@ shared_ptr<ExtraTypeInfo> ExtraTypeInfo::Deserialize(Deserializer &deserializer)
 	case ExtraTypeInfoType::STRUCT_TYPE_INFO:
 		result = StructTypeInfo::Deserialize(deserializer);
 		break;
+	case ExtraTypeInfoType::FACT_POINTER_TYPE_INFO:
+		result = FactPointerTypeInfo::Deserialize(deserializer);
+		break;
 	case ExtraTypeInfoType::USER_TYPE_INFO:
 		result = UserTypeInfo::Deserialize(deserializer);
 		break;
@@ -147,6 +150,22 @@ shared_ptr<ExtraTypeInfo> StringTypeInfo::Deserialize(Deserializer &deserializer
 	deserializer.ReadPropertyWithDefault<string>(200, "collation", result->collation);
 	return std::move(result);
 }
+
+void FactPointerTypeInfo::Serialize(Serializer &serializer) const {
+	ExtraTypeInfo::Serialize(serializer);
+	serializer.WritePropertyWithDefault<vector<LogicalType>>(200, "flat_types", flat_types);
+	serializer.WritePropertyWithDefault<vector<ColumnBinding>>(201, "flat_bindings", flat_bindings);
+}
+
+shared_ptr<ExtraTypeInfo> FactPointerTypeInfo::Deserialize(Deserializer &deserializer) {
+	auto result = duckdb::shared_ptr<FactPointerTypeInfo>(new FactPointerTypeInfo());
+	deserializer.ReadPropertyWithDefault<vector<LogicalType>>(200, "flat_types", result->flat_types);
+	deserializer.ReadPropertyWithDefault<vector<ColumnBinding>>(201, "flat_bindings", result->flat_bindings);
+
+	return std::move(result);
+}
+
+
 
 void StructTypeInfo::Serialize(Serializer &serializer) const {
 	ExtraTypeInfo::Serialize(serializer);

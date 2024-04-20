@@ -649,6 +649,7 @@ Value Vector::GetValueInternal(const Vector &v_p, idx_t index_p) {
 			throw InternalException("ENUM can only have unsigned integers as physical types");
 		}
 	}
+	case LogicalTypeId::FACT_POINTER:
 	case LogicalTypeId::POINTER:
 		return Value::POINTER(reinterpret_cast<uintptr_t *>(data)[index]);
 	case LogicalTypeId::FLOAT:
