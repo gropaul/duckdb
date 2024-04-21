@@ -650,6 +650,7 @@ Value Vector::GetValueInternal(const Vector &v_p, idx_t index_p) {
 		}
 	}
 	case LogicalTypeId::FACT_POINTER:
+		return Value::FACT_POINTER(type, reinterpret_cast<uintptr_t *>(data)[index]);
 	case LogicalTypeId::POINTER:
 		return Value::POINTER(reinterpret_cast<uintptr_t *>(data)[index]);
 	case LogicalTypeId::FLOAT:

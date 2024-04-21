@@ -580,6 +580,14 @@ Value Value::HASH(hash_t value) {
 	return result;
 }
 
+Value Value::FACT_POINTER(const LogicalType &type, uintptr_t value) {
+	D_ASSERT(type.id() == LogicalTypeId::FACT_POINTER);
+	Value result(type);
+	result.value_.pointer = value;
+	result.is_null = false;
+	return result;
+}
+
 Value Value::POINTER(uintptr_t value) {
 	Value result(LogicalType::POINTER);
 	result.value_.pointer = value;

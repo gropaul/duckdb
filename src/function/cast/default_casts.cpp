@@ -99,6 +99,7 @@ BoundCastInfo DefaultCasts::GetDefaultCastFunction(BindCastInput &input, const L
 	case LogicalTypeId::FLOAT:
 	case LogicalTypeId::DOUBLE:
 		return NumericCastSwitch(input, source, target);
+	case LogicalTypeId::FACT_POINTER:
 	case LogicalTypeId::POINTER:
 		return PointerCastSwitch(input, source, target);
 	case LogicalTypeId::UUID:

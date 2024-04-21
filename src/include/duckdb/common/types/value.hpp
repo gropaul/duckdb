@@ -117,6 +117,8 @@ public:
 	DUCKDB_API static Value UUID(hugeint_t value);
 	//! Create a hash Value from a specified value
 	DUCKDB_API static Value HASH(hash_t value);
+	//! Create a pointer to a factor for the factorized representation
+	DUCKDB_API static Value FACT_POINTER(const LogicalType &type, uintptr_t value);
 	//! Create a pointer Value from a specified value
 	DUCKDB_API static Value POINTER(uintptr_t value);
 	//! Create a date Value from a specified date
