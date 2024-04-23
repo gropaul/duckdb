@@ -1104,5 +1104,9 @@ string PhysicalHashJoin::ParamsToString() const {
 	result += StringUtil::Format("EC: %llu\n", estimated_cardinality);
 	return result;
 }
+TupleDataCollection *PhysicalHashJoin::GetHTDataCollection() const {
+	auto &sink = sink_state->Cast<HashJoinGlobalSinkState>();
+	return &sink.hash_table->GetDataCollection();
+}
 
 } // namespace duckdb
