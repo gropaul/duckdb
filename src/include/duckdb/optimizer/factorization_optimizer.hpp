@@ -29,6 +29,11 @@ private:
 	void OptimizeInternal(unique_ptr<duckdb::LogicalOperator> &op);
 
 	bool CanProcessFactVectors(unique_ptr<duckdb::LogicalOperator> &op);
+	bool CanEmitFactVectors(unique_ptr<duckdb::LogicalOperator> &op);
+
+	void SetEmitFactVectors(unique_ptr<duckdb::LogicalOperator> &op, bool emit);
+	bool GetEmitFactVectors(unique_ptr<duckdb::LogicalOperator> &op);
+
 
 };
 

@@ -8,7 +8,9 @@ namespace duckdb {
 
 PhysicalJoin::PhysicalJoin(LogicalOperator &op, PhysicalOperatorType type, JoinType join_type,
                            idx_t estimated_cardinality)
-    : CachingPhysicalOperator(type, op.types, estimated_cardinality), join_type(join_type), emit_fact_vector(op.GetEmitFactVectors()) {
+    : CachingPhysicalOperator(type, op.types, estimated_cardinality), join_type(join_type) {
+	auto join_op = reinterpret_cast<LogicalJoin *>(&op);
+	this->emit_fact_vector = join_op->GetEmitFactVectors();
 }
 
 bool PhysicalJoin::EmptyResultIfRHSIsEmpty() const {

@@ -29,21 +29,47 @@ bool FactorizationOptimizer::CanProcessFactVectors(unique_ptr<duckdb::LogicalOpe
 	return false;
 }
 
+bool FactorizationOptimizer::CanEmitFactVectors(unique_ptr<duckdb::LogicalOperator> &op) {
+	if (op->type == LogicalOperatorType::LOGICAL_COMPARISON_JOIN) {
+		return true;
+	}
+	return false;
+}
+
+void FactorizationOptimizer::SetEmitFactVectors(unique_ptr<duckdb::LogicalOperator> &op, bool emit) {
+	if (op->type == LogicalOperatorType::LOGICAL_COMPARISON_JOIN) {
+		auto join = reinterpret_cast<LogicalComparisonJoin *>(op.get());
+		join->SetEmitFactVectors(emit);
+		return;
+	}
+
+	throw NotImplementedException("SetEmitFactVectors not implemented for this operator");
+}
+
+bool FactorizationOptimizer::GetEmitFactVectors(unique_ptr<duckdb::LogicalOperator> &op) {
+	if (op->type == LogicalOperatorType::LOGICAL_COMPARISON_JOIN) {
+		auto join = reinterpret_cast<LogicalComparisonJoin *>(op.get());
+		return join->GetEmitFactVectors();
+	}
+	throw NotImplementedException("GetEmitFactVectors not implemented for this operator");
+}
+
+
 void FactorizationOptimizer::OptimizeInternal(unique_ptr<duckdb::LogicalOperator> &op) {
 
 	vector<unique_ptr<LogicalOperator>> &children = op->children;
 
-	if (!op->CanProcessFactVectors()) {
+	if (!CanProcessFactVectors(op)) {
 		for (auto &child : children) {
 
-			if (child->CanEmitFactVectors()) {
+			if (CanEmitFactVectors(child)) {
 
 				child->ResolveOperatorTypes();
 				auto flat_bindings = child->GetColumnBindings();
 				auto flat_types = child->types;
 
 				// allow the child to emit fact vectors
-				child->SetEmitFactVectors(true);
+				SetEmitFactVectors(child, true);
 
 				child->ResolveOperatorTypes();
 				auto fact_bindings = child->GetColumnBindings();
@@ -59,8 +85,6 @@ void FactorizationOptimizer::OptimizeInternal(unique_ptr<duckdb::LogicalOperator
 				auto &fact_expand = *logical_fact_expand;
 				fact_expand.children.push_back(std::move(child));
 				child = std::move(logical_fact_expand);
-
-
 			}
 		}
 	}

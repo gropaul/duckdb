@@ -71,25 +71,6 @@ public:
 		return true;
 	}
 
-	virtual bool CanEmitFactVectors() const {
-		return false;
-	}
-
-	virtual bool GetEmitFactVectors() {
-		return false;
-		// must be implemented by the operator
-	}
-
-	virtual void SetEmitFactVectors(bool emit_fact_vector) {
-		D_ASSERT(CanEmitFactVectors());
-		D_ASSERT(false);
-		// must be implemented by the operator
-	}
-
-	virtual bool CanProcessFactVectors() const {
-		return false;
-	}
-
 	//! Allows LogicalOperators to opt out of serialization
 	virtual bool SupportSerialization() const {
 		return true;
