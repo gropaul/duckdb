@@ -144,7 +144,7 @@ bool PerfectHashJoinExecutor::TemplatedFillSelectionVectorBuild(Vector &source, 
 class PerfectHashJoinState : public OperatorState {
 public:
 	PerfectHashJoinState(ClientContext &context, const PhysicalHashJoin &join) : probe_executor(context) {
-		join_keys.Initialize(Allocator::Get(context), join.condition_types);
+		join_keys.Initialize(Allocator::Get(context), join.condition_types_lhs);
 		for (auto &cond : join.conditions) {
 			probe_executor.AddExpression(*cond.left);
 		}

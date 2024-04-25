@@ -35,7 +35,8 @@ public:
 	unique_ptr<JoinHashTable> InitializeHashTable(ClientContext &context) const;
 
 	//! The types of the join keys
-	vector<LogicalType> condition_types;
+	vector<LogicalType> condition_types_lhs;
+	vector<LogicalType> condition_types_rhs;
 
 	//! The indices for getting the payload columns
 	vector<idx_t> payload_column_idxs;

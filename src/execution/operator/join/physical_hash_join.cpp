@@ -35,7 +35,9 @@ PhysicalHashJoin::PhysicalHashJoin(LogicalOperator &op, unique_ptr<PhysicalOpera
 	unordered_map<idx_t, idx_t> build_columns_in_conditions;
 	for (idx_t cond_idx = 0; cond_idx < conditions.size(); cond_idx++) {
 		auto &condition = conditions[cond_idx];
-		condition_types.push_back(condition.left->return_type);
+		// todo: super hacky hack, was (condition.left->return_type) before, but if we get fact on the left we still want the flat on the right
+		condition_types_lhs.push_back(condition.left->return_type);
+		condition_types_rhs.push_back(condition.right->return_type);
 		if (condition.right->GetExpressionClass() == ExpressionClass::BOUND_REF) {
 			build_columns_in_conditions.emplace(condition.right->Cast<BoundReferenceExpression>().index, cond_idx);
 		}
@@ -66,7 +68,7 @@ PhysicalHashJoin::PhysicalHashJoin(LogicalOperator &op, unique_ptr<PhysicalOpera
 			// This rhs column is not a join key
 			payload_column_idxs.push_back(rhs_col);
 			payload_types.push_back(rhs_col_type);
-			rhs_output_columns.push_back(condition_types.size() + payload_types.size() - 1);
+			rhs_output_columns.push_back(condition_types_lhs.size() + payload_types.size() - 1);
 		} else {
 			// This rhs column is a join key
 			rhs_output_columns.push_back(it->second);
@@ -100,7 +102,7 @@ public:
 		external = ClientConfig::GetConfig(context).force_external;
 		// Set probe types
 		const auto &payload_types = op.children[0]->types;
-		probe_types.insert(probe_types.end(), op.condition_types.begin(), op.condition_types.end());
+		probe_types.insert(probe_types.end(), op.condition_types_lhs.begin(), op.condition_types_lhs.end());
 		probe_types.insert(probe_types.end(), payload_types.begin(), payload_types.end());
 		probe_types.emplace_back(LogicalType::HASH);
 	}
@@ -147,7 +149,7 @@ public:
 		for (auto &cond : op.conditions) {
 			join_key_executor.AddExpression(*cond.right);
 		}
-		join_keys.Initialize(allocator, op.condition_types);
+		join_keys.Initialize(allocator, op.condition_types_rhs);
 
 		if (!op.payload_types.empty()) {
 			payload_chunk.Initialize(allocator, op.payload_types);
@@ -550,11 +552,12 @@ unique_ptr<OperatorState> PhysicalHashJoin::GetOperatorState(ExecutionContext &c
 	if (sink.perfect_join_executor) {
 		state->perfect_hash_join_state = sink.perfect_join_executor->GetOperatorState(context);
 	} else {
-		state->join_keys.Initialize(allocator, condition_types);
+		// todo: Split LHS and RHS condition types
+		state->join_keys.Initialize(allocator, condition_types_lhs);
 		for (auto &cond : conditions) {
 			state->probe_executor.AddExpression(*cond.left);
 		}
-		TupleDataCollection::InitializeChunkState(state->join_key_state, condition_types);
+		TupleDataCollection::InitializeChunkState(state->join_key_state, condition_types_rhs);
 	}
 	if (sink.external) {
 		state->spill_chunk.Initialize(allocator, sink.probe_types);
@@ -903,13 +906,13 @@ HashJoinLocalSourceState::HashJoinLocalSourceState(const PhysicalHashJoin &op, A
 
 	auto &sink = op.sink_state->Cast<HashJoinGlobalSinkState>();
 	probe_chunk.Initialize(allocator, sink.probe_types);
-	join_keys.Initialize(allocator, op.condition_types);
+	join_keys.Initialize(allocator, op.condition_types_lhs);
 	payload.Initialize(allocator, op.children[0]->types);
-	TupleDataCollection::InitializeChunkState(join_key_state, op.condition_types);
+	TupleDataCollection::InitializeChunkState(join_key_state, op.condition_types_lhs);
 
 	// Store the indices of the columns to reference them easily
 	idx_t col_idx = 0;
-	for (; col_idx < op.condition_types.size(); col_idx++) {
+	for (; col_idx < op.condition_types_lhs.size(); col_idx++) {
 		join_key_indices.push_back(col_idx);
 	}
 	for (; col_idx < sink.probe_types.size() - 1; col_idx++) {

@@ -59,6 +59,11 @@ enum class ExpressionType : uint8_t {
 	COMPARE_BOUNDARY_END = COMPARE_NOT_DISTINCT_FROM,
 
 	// -----------------------------
+	// Factorized Comparison Operators
+	// -----------------------------
+	COMPARE_FACT_EQUAL = 45,
+
+	// -----------------------------
 	// Conjunction Operators
 	// -----------------------------
 	CONJUNCTION_AND = 50,

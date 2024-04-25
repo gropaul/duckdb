@@ -214,11 +214,15 @@ public:
 	vector<ExpressionType> equality_predicates;
 	//! The comparison predicates that contain non-equality predicates
 	vector<ExpressionType> non_equality_predicates;
+	//! The comparison predicates that contain factorized predicate evaluation
+	vector<ExpressionType> factorized_predicates;
 
 	//! The column indices of the equality predicates to be used to compare the rows
 	vector<column_t> equality_predicate_columns;
 	//! The column indices of the non-equality predicates to be used to compare the rows
 	vector<column_t> non_equality_predicate_columns;
+	//! The column indices of the factorized predicates
+	vector<column_t> factorized_predicate_columns;
 	//! Data column layout
 	TupleDataLayout layout;
 	//! Matches the equal condition rows during the build phase of the hash join to prevent

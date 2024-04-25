@@ -145,6 +145,8 @@ bool PhysicalPlanGenerator::HasEquality(vector<JoinCondition> &conds, idx_t &ran
 		case ExpressionType::COMPARE_NOTEQUAL:
 		case ExpressionType::COMPARE_DISTINCT_FROM:
 			break;
+		case ExpressionType::COMPARE_FACT_EQUAL:
+			break;
 		default:
 			throw NotImplementedException("Unimplemented comparison join");
 		}

@@ -60,14 +60,14 @@ public:
 };
 
 SingleScanStructure::SingleScanStructure(Vector &pointers_v, const idx_t &count, const idx_t &pointer_offset_p)
-    : current_pointers_v(LogicalType::POINTER), start_pointers_v(LogicalType::POINTER),
-      pointer_offset(pointer_offset_p) {
+    : current_pointers_v(LogicalType::POINTER), pointer_offset(pointer_offset_p),
+      original_pointers_v(LogicalType::POINTER) {
 
 	UnifiedVectorFormat pointers_v_unified;
 	pointers_v.ToUnifiedFormat(count, pointers_v_unified);
 
 	auto current_pointers = FlatVector::GetData<data_ptr_t>(current_pointers_v);
-	auto start_pointers = FlatVector::GetData<data_ptr_t>(start_pointers_v);
+	auto start_pointers = FlatVector::GetData<data_ptr_t>(original_pointers_v);
 
 	auto pointers = UnifiedVectorFormat::GetData<data_ptr_t>(pointers_v_unified);
 
@@ -92,19 +92,37 @@ void SingleScanStructure::AdvancePointers(duckdb::SelectionVector &sel, duckdb::
 	count = new_count;
 }
 
-void SingleScanStructure::Reset() {
-    throw NotImplementedException("SingleScanStructure::Reset() is not implemented");
+void SingleScanStructure::GetCurrentActivePointers(const idx_t original_count, SelectionVector &sel, idx_t &count) {
+	// now for all the pointers, we move on to the next set of pointers
+	count = 0;
+	auto ptrs = FlatVector::GetData<data_ptr_t>(this->current_pointers_v);
+	for (idx_t i = 0; i < original_count; i++) {
+		if (ptrs[i]) {
+			sel.set_index(count++, i);
+		}
+	}
+}
+
+void SingleScanStructure::ResetPointers(const SelectionVector &sel, const idx_t &count) {
+	// reset the pointers to the start
+	auto current_pointers = FlatVector::GetData<data_ptr_t>(current_pointers_v);
+	auto original_pointers = FlatVector::GetData<data_ptr_t>(original_pointers_v);
+
+	for (idx_t i = 0; i < count; i++) {
+		idx_t row_index = sel.get_index(i);
+		current_pointers[row_index] = original_pointers[row_index];
+	}
 }
 
 CombinedScanStructure::CombinedScanStructure(DataChunk &input, const TupleDataCollection &data_collection_p)
-    : sel(STANDARD_VECTOR_SIZE), original_sel(STANDARD_VECTOR_SIZE), data_collection(data_collection_p) {
+    : sel(STANDARD_VECTOR_SIZE), original_count(input.size()), data_collection(data_collection_p) {
 
 	// set the selection to the whole input chunk
-	SetOriginalSelection(*FlatVector::IncrementalSelectionVector(), input.size());
-	ResetSelection();
-
 	const idx_t pointer_offset = data_collection.GetLayout().GetOffsets().back();
 	idx_t current_result_vector_idx = 0;
+
+	// initialize the selection vector
+	SetSelection(*FlatVector::IncrementalSelectionVector(), input.size());
 
 	// iterate over the vectors in the input chunk
 	for (column_t input_col_idx = 0; input_col_idx < input.ColumnCount(); input_col_idx++) {
@@ -145,24 +163,15 @@ CombinedScanStructure::CombinedScanStructure(DataChunk &input, const TupleDataCo
 	fact_vector_count = this->fact_column_mappings.size();
 }
 
-void CombinedScanStructure::ResetSelection() {
-	// copy the count and the selection into the CombinedScanStructure
-	this->count = this->original_count;
-	for (idx_t i = 0; i < this->original_count; i++) {
-		idx_t other_sel = original_sel.get_index(i);
-		sel.set_index(i, other_sel);
-	}
-}
+void CombinedScanStructure::SetSelection(const SelectionVector &new_sel, const idx_t &new_count) {
+	// reset the pointers to the start
 
-void CombinedScanStructure::SetOriginalSelection(const SelectionVector &new_sel, const duckdb::idx_t new_sel_count) {
-	// copy the count and the selection into the CombinedScanStructure
-	this->original_count = new_sel_count;
-	for (idx_t i = 0; i < new_sel_count; i++) {
-		idx_t other_sel = new_sel.get_index(i);
-		original_sel.set_index(i, other_sel);
+	for (idx_t i = 0; i < new_count; i++) {
+		sel.set_index(i, new_sel.get_index(i));
 	}
-}
 
+	count = new_count;
+}
 void CombinedScanStructure::AdvancePointers() {
 	// Always advance the scan structure the most to the left. If it is exhausted, advance the
 	// next scan structure and reset the one before
@@ -178,17 +187,23 @@ void CombinedScanStructure::AdvancePointers() {
 		// if there is nothing found by the current scan structure
 		if (this->count == 0) {
 
-			current_vector_idx++;
 			// we are at the final vector and therefore done
-			if (current_vector_idx >= fact_vector_count) {
+			if (current_vector_idx == fact_vector_count -1) {
 				break;
 			}
+
 			// we have to increment the next one and reset the selection
-			else {
-				// reset this structure to start from new, also reset the selection
-				scan_structure->Reset();
-				ResetSelection();
-			}
+			// reset this structure to the current selection of the previous structure
+			auto &next_scan_structure = this->scan_structures[current_vector_idx + 1];
+
+			// set the current selection to the active pointers of the next scan structure
+			next_scan_structure->GetCurrentActivePointers(this->original_count, this->sel, this->count);
+			// reset the current scan structure to the selection of the next scan structure
+			scan_structure->ResetPointers(this->sel, this->count);
+
+			current_vector_idx++;
+
+
 		}
 		// our current structure has still some pointers that need to be processed.
 		else {
@@ -246,7 +261,6 @@ void CombinedScanStructure::Gather(DataChunk &input, DataChunk &result) {
 			result.data[result_column_idx].Slice(slice_sel, this->count);
 		}
 	}
-
 }
 
 void CombinedScanStructure::Next(DataChunk &input, DataChunk &result) {

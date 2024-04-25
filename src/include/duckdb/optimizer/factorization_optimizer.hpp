@@ -10,6 +10,8 @@
 
 #include "duckdb/common/constants.hpp"
 
+#include <utility>
+
 namespace duckdb {
 class LogicalOperator;
 class Optimizer;
@@ -23,18 +25,48 @@ public:
 	//! Whether we can perform the optimization on this operator
 	static bool CanOptimize(LogicalOperator &op);
 
+	struct OperatorFactEmitInfo {
+
+		explicit OperatorFactEmitInfo(bool is_able_p): is_able(is_able_p), is_emitting_fact_vectors(false) {
+		}
+
+		OperatorFactEmitInfo(bool is_able_p, bool is_emitting_fact_vectors_p, vector<LogicalType> flat_types_p,
+		                     vector<LogicalType> fact_types_p, vector<ColumnBinding> flat_bindings_p,
+		                     vector<ColumnBinding> fact_bindings_p)
+		    : is_able(is_able_p), is_emitting_fact_vectors(is_emitting_fact_vectors_p),
+		      types_before(std::move(flat_types_p)), types_after(std::move(fact_types_p)),
+		      bindings_before(std::move(flat_bindings_p)), bindings_after(std::move(fact_bindings_p)) {
+		}
+
+		bool is_able;
+		bool is_emitting_fact_vectors;
+		vector<LogicalType> types_before;
+		vector<LogicalType> types_after;
+
+		vector<ColumnBinding> bindings_before;
+		vector<ColumnBinding> bindings_after;
+	};
+
+	struct OperatorFactProcessingInfo {
+
+		explicit OperatorFactProcessingInfo(vector<bool> flat_child_p) : flat_child(std::move(flat_child_p)) {
+		}
+
+		vector<bool> flat_child;
+	};
+
 private:
 	Binder &binder;
 	optional_ptr<LogicalOperator> root;
-	void OptimizeInternal(unique_ptr<duckdb::LogicalOperator> &op);
+	OperatorFactEmitInfo OptimizeInternal(unique_ptr<LogicalOperator> &op, optional_ptr<LogicalOperator> parent);
 
-	bool CanProcessFactVectors(unique_ptr<duckdb::LogicalOperator> &op);
-	bool CanEmitFactVectors(unique_ptr<duckdb::LogicalOperator> &op);
+	OperatorFactProcessingInfo CanProcessFactVectors(const unique_ptr<duckdb::LogicalOperator> &op,
+	                                                 const vector<OperatorFactEmitInfo> &children_info);
+	OperatorFactEmitInfo CanEmitFactVectors(const unique_ptr<duckdb::LogicalOperator> &op,
+	                                        const vector<OperatorFactEmitInfo> &children_info);
 
-	void SetEmitFactVectors(unique_ptr<duckdb::LogicalOperator> &op, bool emit);
-	bool GetEmitFactVectors(unique_ptr<duckdb::LogicalOperator> &op);
-
-
+	OperatorFactEmitInfo EmitFactVectors(unique_ptr<LogicalOperator> &op, optional_ptr<LogicalOperator> parent);
+	void AddFactExpandBeforeOperator(unique_ptr<duckdb::LogicalOperator> &child, OperatorFactEmitInfo &child_info);
 };
 
 } // namespace duckdb

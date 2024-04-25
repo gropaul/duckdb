@@ -26,18 +26,22 @@ public:
 	struct SingleScanStructure {
 
 		Vector current_pointers_v;
-		Vector start_pointers_v;
 
 		bool finished;
 		//! Next pointer offset in tuple, also used for the position of the hash, which then gets overwritten by the
 		//! pointer
 		idx_t pointer_offset;
 
+		// when we reset one list to start with the next element of the next list, we also need to reset the selectino
+		Vector original_pointers_v;
+
 		explicit SingleScanStructure(Vector &pointers_v, const idx_t &count, const idx_t &pointer_offset_p);
 
 		void AdvancePointers(duckdb::SelectionVector &found_sel, duckdb::idx_t &found_count);
 
-		void Reset();
+		void GetCurrentActivePointers(const idx_t original_count, duckdb::SelectionVector &sel, duckdb::idx_t &count);
+
+		void ResetPointers(const SelectionVector &sel, const idx_t &count);
 	};
 
 	struct CombinedScanStructure {
@@ -58,18 +62,16 @@ public:
 		idx_t count;
 		SelectionVector sel;
 
-		// when we reset one list to start with the next element of the next list, we also need to reset the selectino
+		// how many pointers we have in the chain in the beginning
 		idx_t original_count;
-		SelectionVector original_sel;
 
 		// data source
 		const TupleDataCollection &data_collection;
 
 		explicit CombinedScanStructure(DataChunk &input, const TupleDataCollection &data_collection);
-		void ResetSelection();
-		void SetOriginalSelection(const duckdb::SelectionVector &sel, const duckdb::idx_t new_sel_count);
 		void Next(DataChunk &input, DataChunk &result);
 		void Gather(DataChunk &input, DataChunk &result);
+		void SetSelection(const SelectionVector &original_sel, const idx_t &original_count);
 
 		//! Are pointer chains all pointing to NULL?
 		bool PointersExhausted() const;

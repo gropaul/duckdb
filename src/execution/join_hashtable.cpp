@@ -38,10 +38,10 @@ JoinHashTable::JoinHashTable(BufferManager &buffer_manager_p, const vector<JoinC
 
 	for (idx_t i = 0; i < conditions.size(); ++i) {
 		auto &condition = conditions[i];
-		D_ASSERT(condition.left->return_type == condition.right->return_type);
-		auto type = condition.left->return_type;
+		auto type = condition.right->return_type;
 		if (condition.comparison == ExpressionType::COMPARE_EQUAL ||
 		    condition.comparison == ExpressionType::COMPARE_NOT_DISTINCT_FROM) {
+			D_ASSERT(condition.left->return_type == condition.right->return_type);
 
 			// ensure that all equality conditions are at the front,
 			// and that all other conditions are at the back
@@ -50,8 +50,12 @@ JoinHashTable::JoinHashTable(BufferManager &buffer_manager_p, const vector<JoinC
 			equality_predicates.push_back(condition.comparison);
 			equality_predicate_columns.push_back(i);
 
+		} else if (condition.comparison == ExpressionType::COMPARE_FACT_EQUAL) {
+			factorized_predicates.push_back(condition.comparison);
+			factorized_predicate_columns.push_back(i);
 		} else {
-			// all non-equality conditions are at the back
+			D_ASSERT(condition.left->return_type == condition.right->return_type);
+			// all non-equality non-factorized conditions are at the back
 			non_equality_predicates.push_back(condition.comparison);
 			non_equality_predicate_columns.push_back(i);
 		}
