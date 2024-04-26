@@ -27,24 +27,26 @@ public:
 
 	struct OperatorFactEmitInfo {
 
-		explicit OperatorFactEmitInfo(bool is_able_p): is_able(is_able_p), is_emitting_fact_vectors(false) {
+		explicit OperatorFactEmitInfo(bool is_able_p) : is_able(is_able_p), is_emitting_new_fact_vectors(false) {
 		}
 
 		OperatorFactEmitInfo(bool is_able_p, bool is_emitting_fact_vectors_p, vector<LogicalType> flat_types_p,
 		                     vector<LogicalType> fact_types_p, vector<ColumnBinding> flat_bindings_p,
 		                     vector<ColumnBinding> fact_bindings_p)
-		    : is_able(is_able_p), is_emitting_fact_vectors(is_emitting_fact_vectors_p),
+		    : is_able(is_able_p), is_emitting_new_fact_vectors(is_emitting_fact_vectors_p),
 		      types_before(std::move(flat_types_p)), types_after(std::move(fact_types_p)),
 		      bindings_before(std::move(flat_bindings_p)), bindings_after(std::move(fact_bindings_p)) {
 		}
 
 		bool is_able;
-		bool is_emitting_fact_vectors;
+		bool is_emitting_new_fact_vectors;
 		vector<LogicalType> types_before;
 		vector<LogicalType> types_after;
 
 		vector<ColumnBinding> bindings_before;
 		vector<ColumnBinding> bindings_after;
+
+
 	};
 
 	struct OperatorFactProcessingInfo {
@@ -56,17 +58,22 @@ public:
 	};
 
 private:
+	idx_t current_emitter_count;
+
 	Binder &binder;
 	optional_ptr<LogicalOperator> root;
-	OperatorFactEmitInfo OptimizeInternal(unique_ptr<LogicalOperator> &op, optional_ptr<LogicalOperator> parent);
+	OperatorFactEmitInfo OptimizeInternal(unique_ptr<LogicalOperator> &op, optional_ptr<LogicalOperator> parent,
+	                                      idx_t child_idx);
 
-	OperatorFactProcessingInfo CanProcessFactVectors(const unique_ptr<duckdb::LogicalOperator> &op,
+	OperatorFactProcessingInfo CanProcessFactVectors(const duckdb::LogicalOperator *op,
 	                                                 const vector<OperatorFactEmitInfo> &children_info);
 	OperatorFactEmitInfo CanEmitFactVectors(const unique_ptr<duckdb::LogicalOperator> &op,
 	                                        const vector<OperatorFactEmitInfo> &children_info);
 
-	OperatorFactEmitInfo EmitFactVectors(unique_ptr<LogicalOperator> &op, optional_ptr<LogicalOperator> parent);
-	void AddFactExpandBeforeOperator(unique_ptr<duckdb::LogicalOperator> &child, OperatorFactEmitInfo &child_info);
+	OperatorFactEmitInfo EmitFactVectors(unique_ptr<LogicalOperator> &op, optional_ptr<LogicalOperator> parent,
+	                                     idx_t parent_child_idx, OperatorFactEmitInfo &proposed_emit_info);
+	void AddFactExpandBeforeOperator(unique_ptr<duckdb::LogicalOperator> &child);
+	bool OperatorCanProcessFactVectors(const LogicalOperator &op, idx_t child_idx, OperatorFactEmitInfo &child_info);
 };
 
 } // namespace duckdb

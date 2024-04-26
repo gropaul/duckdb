@@ -1,13 +1,15 @@
+#include <utility>
+
 #include "duckdb/planner/operator/logical_fact_expand.hpp"
 
 #include "duckdb/main/config.hpp"
 
 namespace duckdb {
 
-LogicalFactExpand::LogicalFactExpand(idx_t table_index, vector<ColumnBinding> &flat_bindings_p,
-                                     vector<LogicalType> &flat_types_p)
+LogicalFactExpand::LogicalFactExpand(idx_t table_index, vector<ColumnBinding> flat_bindings_p,
+                                     vector<LogicalType> flat_types_p, vector<FactExpandCondition> conditions_p)
     : LogicalOperator(LogicalOperatorType::LOGICAL_FACT_EXPAND), flat_bindings(flat_bindings_p),
-      flat_types(flat_types_p), table_index(table_index) {
+      flat_types(flat_types_p), table_index(table_index), conditions(std::move(conditions_p)) {
 }
 
 vector<ColumnBinding> LogicalFactExpand::GetColumnBindings() {

@@ -56,8 +56,7 @@ public:
 public:
 	string ParamsToString() const override;
 
-	TupleDataCollection* GetHTDataCollection() const;
-
+	TupleDataCollection *GetHTDataCollection(const idx_t emitter_id);
 public:
 	// Operator Interface
 	unique_ptr<OperatorState> GetOperatorState(ExecutionContext &context) const override;

@@ -156,7 +156,8 @@ public:
 	};
 
 	JoinHashTable(BufferManager &buffer_manager, const vector<JoinCondition> &conditions,
-	              vector<LogicalType> build_types, JoinType type, const vector<idx_t> &output_columns, const bool emit_fact_vectors);
+	              vector<LogicalType> build_types, JoinType type, const vector<idx_t> &output_columns,
+	              const bool emit_fact_vectors, const idx_t emitter_id);
 	~JoinHashTable();
 
 	//! Add the given data to the HT
@@ -198,6 +199,8 @@ public:
 
 	//! Whether to emit fact vectors from the HT
 	bool emit_fact_vectors;
+	//! The emitter id of the HT
+	idx_t emitter_id;
 	//! BufferManager
 	BufferManager &buffer_manager;
 	//! The join conditions

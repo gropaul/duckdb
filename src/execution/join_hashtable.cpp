@@ -31,8 +31,8 @@ JoinHashTable::InsertState::InsertState(const unique_ptr<TupleDataCollection> &d
 }
 
 JoinHashTable::JoinHashTable(BufferManager &buffer_manager_p, const vector<JoinCondition> &conditions_p,
-                             vector<LogicalType> btypes, JoinType type_p, const vector<idx_t> &output_columns_p, const bool emit_fact_vector_p)
-    : emit_fact_vectors(emit_fact_vector_p), buffer_manager(buffer_manager_p), conditions(conditions_p),
+                             vector<LogicalType> btypes, JoinType type_p, const vector<idx_t> &output_columns_p, const bool emit_fact_vector_p, const idx_t emitter_id_p)
+    : emit_fact_vectors(emit_fact_vector_p), emitter_id(emitter_id_p), buffer_manager(buffer_manager_p), conditions(conditions_p),
       build_types(std::move(btypes)), output_columns(output_columns_p), entry_size(0), tuple_size(0), vfound(Value::BOOLEAN(false)),
       join_type(type_p), finalized(false), has_null(false), radix_bits(INITIAL_RADIX_BITS), partition_start(0), partition_end(0) {
 

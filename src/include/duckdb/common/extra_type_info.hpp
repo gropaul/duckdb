@@ -109,10 +109,12 @@ private:
 };
 
 struct FactPointerTypeInfo : public ExtraTypeInfo {
-	explicit FactPointerTypeInfo(vector<LogicalType> flat_types_p, vector<ColumnBinding> flat_bindings_p);
+	explicit FactPointerTypeInfo(vector<LogicalType> flat_types_p, vector<ColumnBinding> flat_bindings_p, idx_t emitter_id_p);
 
 	vector<LogicalType> flat_types;
 	vector<ColumnBinding> flat_bindings;
+
+	idx_t emitter_id;
 
 public:
 	void Serialize(Serializer &serializer) const override;

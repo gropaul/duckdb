@@ -23,6 +23,7 @@ public:
 
 	JoinType join_type;
 	bool emit_fact_vector = false;
+	idx_t emitter_id = 0;
 
 public:
 	bool EmptyResultIfRHSIsEmpty() const;

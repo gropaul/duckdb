@@ -390,7 +390,7 @@ public:
 	static constexpr const LogicalTypeId INVALID = LogicalTypeId::INVALID;
 	static constexpr const LogicalTypeId ROW_TYPE = LogicalTypeId::BIGINT;
 
-	DUCKDB_API static LogicalType FACT_POINTER(vector<LogicalType> &children, vector<ColumnBinding> &child_binding);
+	DUCKDB_API static LogicalType FACT_POINTER(vector<LogicalType> &children, vector<ColumnBinding> &child_binding, idx_t emitter_id);
 	// explicitly allowing these functions to be capitalized to be in-line with the remaining functions
 	DUCKDB_API static LogicalType DECIMAL(uint8_t width, uint8_t scale);         // NOLINT
 	DUCKDB_API static LogicalType VARCHAR_COLLATION(string collation);           // NOLINT

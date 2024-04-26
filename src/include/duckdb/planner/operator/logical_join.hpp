@@ -47,11 +47,12 @@ public:
 	vector<ColumnBinding> GetRHSBindings();
 	vector<ColumnBinding> GetOriginalRHSBindings();
 
-	void SetEmitFactVectors(bool emit_fact_vector_p);
-	bool GetEmitFactVectors();
+	void SetEmitFactVectors(bool emit_fact_vector_p, idx_t emitter_id_p);
 
-protected:
 	bool emit_fact_vectors = false;
+	idx_t emitter_id = 0;
+protected:
+
 	void ResolveTypes() override;
 };
 

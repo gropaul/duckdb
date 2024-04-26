@@ -1,3 +1,5 @@
+#include <utility>
+
 #include "duckdb/common/extra_type_info.hpp"
 
 #include "duckdb/catalog/catalog_entry/schema_catalog_entry.hpp"
@@ -101,9 +103,9 @@ bool ListTypeInfo::EqualsInternal(ExtraTypeInfo *other_p) const {
 FactPointerTypeInfo::FactPointerTypeInfo() : ExtraTypeInfo(ExtraTypeInfoType::FACT_POINTER_TYPE_INFO) {
 }
 
-FactPointerTypeInfo::FactPointerTypeInfo(vector<LogicalType> flat_types_p, vector<ColumnBinding> flat_bindings_p)
-    : ExtraTypeInfo(ExtraTypeInfoType::FACT_POINTER_TYPE_INFO), flat_types(flat_types_p),
-      flat_bindings(flat_bindings_p) {
+FactPointerTypeInfo::FactPointerTypeInfo(vector<LogicalType> flat_types_p, vector<ColumnBinding> flat_bindings_p, idx_t emitter_id_p)
+    : ExtraTypeInfo(ExtraTypeInfoType::FACT_POINTER_TYPE_INFO), flat_types(std::move(flat_types_p)), flat_bindings(flat_bindings_p),
+      emitter_id(emitter_id_p) {
 }
 
 // ===--------------------------------------------------------------------===//
