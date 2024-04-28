@@ -34,11 +34,25 @@ public:
 	explicit aggr_ht_entry_t(hash_t value_p) : value(value_p) {
 	}
 
+	// Add a default constructor for 32 bit linux test case
+	aggr_ht_entry_t() : value(0) {
+	}
+
 	inline bool IsOccupied() const {
 		return value != 0;
 	}
 
+	// Returns a pointer based on the stored value without checking cell occupancy.
+	// This can return a nullptr if the cell is not occupied.
+	inline data_ptr_t GetPointerOrNull() const {
+		return reinterpret_cast<data_ptr_t>(value & POINTER_MASK);
+	}
+
+	// Will only return if cell is occupied
 	inline data_ptr_t GetPointer() const {
+		if (!IsOccupied()) {
+			return nullptr;
+		}
 		D_ASSERT(IsOccupied());
 		return reinterpret_cast<data_ptr_t>(value & POINTER_MASK);
 	}
@@ -65,6 +79,11 @@ public:
 		D_ASSERT((salt & POINTER_MASK) == POINTER_MASK);
 		// No need to mask, just put the whole thing there
 		value = salt;
+	}
+
+	static inline aggr_ht_entry_t GetDesiredEntry(const data_ptr_t &pointer, const hash_t &salt) {
+		auto desired = reinterpret_cast<uint64_t>(pointer) | (salt & SALT_MASK);
+		return aggr_ht_entry_t(desired);
 	}
 
 private:

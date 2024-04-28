@@ -54,8 +54,9 @@ private:
    [POINTER]
    [POINTER]
    [POINTER]
-   The pointers are either NULL
+   The pointers are either NULL if the cell is free or point to the start of the linked list.
 */
+
 class JoinHashTable {
 public:
 	using ValidityBytes = TemplatedValidityMask<uint8_t>;
@@ -66,6 +67,7 @@ public:
 	//! probe.
 	struct ScanStructure {
 		TupleDataChunkState &key_state;
+		//! Directly point to the entry in the hash table
 		Vector pointers;
 		idx_t count;
 		SelectionVector sel_vector;
@@ -78,7 +80,7 @@ public:
 		//! Get the next batch of data from the scan structure
 		void Next(DataChunk &keys, DataChunk &left, DataChunk &result);
 		//! Are pointer chains all pointing to NULL?
-		bool PointersExhausted();
+		bool PointersExhausted() const;
 
 	private:
 		//! Next operator for the inner join
@@ -115,6 +117,25 @@ public:
 	};
 
 public:
+	struct ProbeState {
+
+		ProbeState();
+
+		Vector hash_salts_v;
+		Vector ht_offsets_v;
+		Vector row_ptr_insert_to_v;
+
+		SelectionVector entry_compare_sel_vector;
+		SelectionVector no_match_sel;
+	};
+
+	struct InsertState : ProbeState {
+		explicit InsertState(unique_ptr<TupleDataCollection> &data_collection);
+
+		DataChunk lhs_data;
+		TupleDataChunkState chunk_state;
+	};
+
 	JoinHashTable(BufferManager &buffer_manager, const vector<JoinCondition> &conditions,
 	              vector<LogicalType> build_types, JoinType type, const vector<idx_t> &output_columns);
 	~JoinHashTable();
@@ -132,7 +153,7 @@ public:
 	//! ever called.
 	void Finalize(idx_t chunk_idx_from, idx_t chunk_idx_to, bool parallel);
 	//! Probe the HT with the given input chunk, resulting in the given result
-	unique_ptr<ScanStructure> Probe(DataChunk &keys, TupleDataChunkState &key_state,
+	unique_ptr<ScanStructure> Probe(DataChunk &keys, TupleDataChunkState &key_state, ProbeState &probe_state,
 	                                Vector *precomputed_hashes = nullptr);
 	//! Scan the HT to construct the full outer join result
 	void ScanFullOuter(JoinHTScanState &state, Vector &addresses, DataChunk &result);
@@ -167,18 +188,28 @@ public:
 	vector<LogicalType> build_types;
 	//! Positions of the columns that need to output
 	const vector<idx_t> &output_columns;
-	//! The comparison predicates
-	vector<ExpressionType> predicates;
+	//! The comparison predicates that only contain equality predicates
+	vector<ExpressionType> equality_predicates;
+	//! The comparison predicates that contain non-equality predicates
+	vector<ExpressionType> non_equality_predicates;
+	//! The column indices of the non-equality predicates to be used to compare the rows
+	vector<column_t> non_equality_predicate_columns;
 	//! Data column layout
 	TupleDataLayout layout;
-	//! Efficiently matches rows
-	RowMatcher row_matcher;
-	RowMatcher row_matcher_no_match_sel;
+	//! Matches the equal condition rows during the build phase of the hash join to prevent
+	//! duplicates in a list because of hash-collisions
+	RowMatcher row_matcher_build;
+	//! Efficiently matches the non-equi rows during the probing phase, only there if non_equality_predicates is not
+	//! empty
+	unique_ptr<RowMatcher> row_matcher_probe;
+	//! Matches the same rows as the row_matcher, but also returns a vector for no matches
+	unique_ptr<RowMatcher> row_matcher_probe_no_match_sel;
+
 	//! The size of an entry as stored in the HashTable
 	idx_t entry_size;
 	//! The total tuple size
 	idx_t tuple_size;
-	//! Next pointer offset in tuple
+	//! Next pointer offset in tuple, also used for the position of the hash, which then gets overwritten by the pointer
 	idx_t pointer_offset;
 	//! A constant false column for initialising right outer joins
 	Vector vfound;
@@ -214,12 +245,16 @@ private:
 	void Hash(DataChunk &keys, const SelectionVector &sel, idx_t count, Vector &hashes);
 
 	//! Apply a bitmask to the hashes
-	void ApplyBitmask(Vector &hashes, idx_t count);
-	void ApplyBitmask(Vector &hashes, const SelectionVector &sel, idx_t count, Vector &pointers);
+	inline idx_t ApplyBitmask(hash_t hash) const;
+
+	//! Gets a pointer to the entry in the HT for each of the hashes_v using linear probing
+	void GetRowPointers(DataChunk &keys, TupleDataChunkState &key_state, ProbeState &probe_state, Vector &hashes_v,
+	                    const SelectionVector &sel, idx_t count, Vector &pointers);
 
 private:
-	//! Insert the given set of locations into the HT with the given set of hashes
-	void InsertHashes(Vector &hashes, idx_t count, data_ptr_t key_locations[], bool parallel);
+	//! Insert the given set of locations into the HT with the given set of hashes_v
+	void InsertHashes(Vector &hashes_v, idx_t count, TupleDataChunkState &chunk_state, InsertState &insert_statebool,
+	                  bool parallel);
 
 	idx_t PrepareKeys(DataChunk &keys, vector<TupleDataVectorFormat> &vector_data, const SelectionVector *&current_sel,
 	                  SelectionVector &sel, bool build_side);
@@ -230,8 +265,13 @@ private:
 	unique_ptr<PartitionedTupleData> sink_collection;
 	//! The DataCollection holding the main data of the hash table
 	unique_ptr<TupleDataCollection> data_collection;
+
+	//! The capacity of the HT. Is the same as hash_map.GetSize() / sizeof(aggr_ht_entry_t)
+	idx_t capacity;
+
 	//! The hash map of the HT, created after finalization
 	AllocatedData hash_map;
+	aggr_ht_entry_t *entries; // todo: Maybe rename to ht_entry_t and put into separate file
 	//! Whether or not NULL values are considered equal in each of the comparisons
 	vector<bool> null_values_are_equal;
 
@@ -329,9 +369,9 @@ public:
 	//! Build HT for the next partitioned probe round
 	bool PrepareExternalFinalize(const idx_t max_ht_size);
 	//! Probe whatever we can, sink the rest into a thread-local HT
-	unique_ptr<ScanStructure> ProbeAndSpill(DataChunk &keys, TupleDataChunkState &key_state, DataChunk &payload,
-	                                        ProbeSpill &probe_spill, ProbeSpillLocalAppendState &spill_state,
-	                                        DataChunk &spill_chunk);
+	unique_ptr<ScanStructure> ProbeAndSpill(DataChunk &keys, TupleDataChunkState &key_state, ProbeState &probe_state,
+	                                        DataChunk &payload, ProbeSpill &probe_spill,
+	                                        ProbeSpillLocalAppendState &spill_state, DataChunk &spill_chunk);
 
 private:
 	//! The current number of radix bits used to partition
