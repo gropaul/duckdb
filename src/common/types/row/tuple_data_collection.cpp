@@ -271,6 +271,14 @@ void TupleDataCollection::ToUnifiedFormat(TupleDataChunkState &chunk_state, Data
 	}
 }
 
+void TupleDataCollection::ToUnifiedFormatMine(TupleDataChunkState &chunk_state, DataChunk &new_chunk) {
+	D_ASSERT(chunk_state.vector_data.size() >= chunk_state.column_ids.size()); // Needs InitializeAppend
+	for (column_t i = 0; i < chunk_state.column_ids.size(); i++) {
+		auto col_idx = chunk_state.column_ids[i];
+		ToUnifiedFormatInternal(chunk_state.vector_data[col_idx], new_chunk.data[i], new_chunk.size());
+	}
+}
+
 void TupleDataCollection::GetVectorData(const TupleDataChunkState &chunk_state, UnifiedVectorFormat result[]) {
 	const auto &vector_data = chunk_state.vector_data;
 	for (idx_t i = 0; i < vector_data.size(); i++) {

@@ -111,7 +111,8 @@ public:
 	                   const idx_t append_count = DConstants::INVALID_INDEX);
 
 	//! Creates a UnifiedVectorFormat in the given Chunk state for the given DataChunk
-	static void ToUnifiedFormat(TupleDataChunkState &chunk_state, DataChunk &new_chunk);
+	static void ToUnifiedFormat(TupleDataChunkState &chunk_state, DataChunk &new_chunk);	//! Creates a UnifiedVectorFormat in the given Chunk state for the given DataChunk
+	static void ToUnifiedFormatMine(TupleDataChunkState &chunk_state, DataChunk &new_chunk);
 	//! Gets the UnifiedVectorFormat from the Chunk state as an array
 	static void GetVectorData(const TupleDataChunkState &chunk_state, UnifiedVectorFormat result[]);
 	//! Computes the heap sizes for the new DataChunk that will be appended

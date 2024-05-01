@@ -1107,7 +1107,7 @@ string PhysicalHashJoin::ParamsToString() const {
 	result += StringUtil::Format("EC: %llu\n", estimated_cardinality);
 	return result;
 }
-TupleDataCollection *PhysicalHashJoin::GetHTDataCollection(const idx_t emitter_id){
+TupleDataCollection *PhysicalHashJoin::GetHTDataCollection(const idx_t emitter_id) const {
 	if (!this->emit_fact_vector) {
 		return nullptr;
 	}

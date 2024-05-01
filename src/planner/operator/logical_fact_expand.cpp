@@ -1,8 +1,8 @@
-#include <utility>
-
 #include "duckdb/planner/operator/logical_fact_expand.hpp"
 
 #include "duckdb/main/config.hpp"
+
+#include <utility>
 
 namespace duckdb {
 
@@ -22,6 +22,18 @@ void LogicalFactExpand::ResolveTypes() {
 
 vector<idx_t> LogicalFactExpand::GetTableIndex() const {
 	return vector<idx_t> {table_index};
+}
+
+string LogicalFactExpand::ParamsToString() const {
+	string result = "";
+	for (auto &condition : conditions) {
+		result += "\n";
+		auto expr_string = condition.lhs_binding.alias + " " + ExpressionTypeToOperator(condition.comparison) + " " +
+		                   condition.rhs_binding.alias;
+		result += expr_string;
+	}
+
+	return result;
 }
 
 string LogicalFactExpand::GetName() const {

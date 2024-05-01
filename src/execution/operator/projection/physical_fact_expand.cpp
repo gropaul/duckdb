@@ -2,7 +2,6 @@
 
 #include "duckdb/common/extra_type_info.hpp"
 #include "duckdb/common/types/row/tuple_data_collection.hpp"
-#include "duckdb/execution/operator/join/physical_hash_join.hpp"
 #include "duckdb/parallel/thread_context.hpp"
 #include "duckdb/planner/expression/bound_reference_expression.hpp"
 
@@ -90,7 +89,6 @@ CombinedScanStructure::CombinedScanStructure(DataChunk &input, const vector<Fact
 			is_fact_vector.push_back(true);
 			emitter_ids.push_back(emitter_id);
 
-
 			vector<LogicalType> flat_types = type_info->flat_types;
 			vector<column_t> mapping_of_types = vector<column_t>(flat_types.size());
 
@@ -101,7 +99,7 @@ CombinedScanStructure::CombinedScanStructure(DataChunk &input, const vector<Fact
 
 			this->fact_column_mappings.push_back(mapping_of_types);
 
-			auto &fact_data_collection = state.GetDataCollection(op->children, fact_vector_count, emitter_id);
+			auto &fact_data_collection = state.GetDataCollection(op, fact_vector_count, emitter_id);
 			const idx_t pointer_offset = fact_data_collection.GetLayout().GetOffsets().back();
 
 			// initialize single scan structure for this vector
@@ -167,7 +165,7 @@ void CombinedScanStructure::AdvancePointers() {
 	}
 }
 
-void CombinedScanStructure::Gather(DataChunk &input, DataChunk &result) {
+void CombinedScanStructure::Gather(DataChunk &input, DataChunk &result, unique_ptr<FactorizedRowMatcher> &matcher) {
 
 	column_t fact_column_idx = 0;
 	column_t flat_column_idx = 0;
@@ -178,6 +176,20 @@ void CombinedScanStructure::Gather(DataChunk &input, DataChunk &result) {
 	SelectionVector slice_sel(STANDARD_VECTOR_SIZE);
 	for (idx_t i = 0; i < slice_count; i++) {
 		slice_sel.set_index(i, this->sel.get_index(i));
+	}
+
+	// match the fitting columns
+	if (matcher) {
+
+		column_t lhs_fact_index = matcher->lhs_fact_index;
+		column_t rhs_fact_index = matcher->rhs_fact_index;
+
+		Vector &lhs_fact_pointers = this->scan_structures[lhs_fact_index]->current_pointers_v;
+		Vector &rhs_fact_pointers = this->scan_structures[rhs_fact_index]->current_pointers_v;
+
+		slice_count = matcher->FactorizedMatch(input, slice_sel, slice_count, lhs_fact_pointers, rhs_fact_pointers);
+	} else {
+		D_ASSERT(this->conditions.size() == 0);
 	}
 
 	for (column_t input_column_idx = 0; input_column_idx < input.ColumnCount(); input_column_idx++) {
@@ -206,7 +218,7 @@ void CombinedScanStructure::Gather(DataChunk &input, DataChunk &result) {
 				vector<LogicalType> flat_types = type_info->flat_types;
 				D_ASSERT(result_v.GetType() == flat_types[expand_col_idx]);
 
-				scan_structure->data_collection.Gather(pointers_v, slice_sel, slice_count, expand_col_idx, result_v,
+				scan_structure->data_collection.Gather(pointers_v, slice_sel, slice_count, expand_col_idx + 1, result_v,
 				                                       slice_sel, nullptr);
 			}
 		}
@@ -224,13 +236,37 @@ void CombinedScanStructure::Gather(DataChunk &input, DataChunk &result) {
 	result.Slice(slice_sel, slice_count);
 }
 
-void CombinedScanStructure::Next(DataChunk &input, DataChunk &result) {
-	Gather(input, result);
+void CombinedScanStructure::Next(DataChunk &input, DataChunk &result, unique_ptr<FactorizedRowMatcher> &matcher) {
+	Gather(input, result, matcher);
 	AdvancePointers();
 }
 
 bool CombinedScanStructure::PointersExhausted() const {
 	return count == 0;
+}
+
+void FactExpandState::InitializeMatcher(const duckdb::DataChunk &input, const PhysicalFactExpand *op,
+                                        const vector<FactExpandCondition> &conditions_p) {
+	for (auto &condition : conditions_p) {
+
+		column_t lhs_fact_column = condition.lhs_binding.fact_column_chunk_index;
+		LogicalType lhs_fact_type = input.data[lhs_fact_column].GetType();
+		D_ASSERT(lhs_fact_type.id() == LogicalTypeId::FACT_POINTER);
+		auto lhs_type_info = reinterpret_cast<const FactPointerTypeInfo *>(lhs_fact_type.AuxInfo());
+		auto lhs_emitter_id = lhs_type_info->emitter_id;
+		auto &lhs_data_collection = this->GetDataCollection(op, lhs_fact_column, lhs_emitter_id);
+
+		column_t rhs_fact_column = condition.rhs_binding.fact_column_chunk_index;
+		LogicalType rhs_fact_type = input.data[rhs_fact_column].GetType();
+		D_ASSERT(rhs_fact_type.id() == LogicalTypeId::FACT_POINTER);
+		auto rhs_type_info = reinterpret_cast<const FactPointerTypeInfo *>(rhs_fact_type.AuxInfo());
+		auto rhs_emitter_id = rhs_type_info->emitter_id;
+		auto &rhs_data_collection = this->GetDataCollection(op, rhs_fact_column, rhs_emitter_id);
+
+		this->matcher = unique_ptr<FactorizedRowMatcher>(
+		    new FactorizedRowMatcher(condition.lhs_binding.fact_column_index, condition.rhs_binding.fact_column_index,
+		                             lhs_data_collection, rhs_data_collection, conditions_p));
+	}
 }
 
 PhysicalFactExpand::PhysicalFactExpand(vector<LogicalType> types, idx_t estimated_cardinality,
@@ -243,9 +279,13 @@ OperatorResultType PhysicalFactExpand::Execute(ExecutionContext &context, DataCh
                                                GlobalOperatorState &gstate, OperatorState &state_p) const {
 	auto &state = state_p.Cast<FactExpandState>();
 
+	if (state.matcher == nullptr && this->conditions.size() > 0) {
+		state.InitializeMatcher(input, this, this->conditions);
+	}
+
 	if (state.scan_structure) {
 		// still have elements remaining (i.e. we got >STANDARD_VECTOR_SIZE elements in the previous probe)
-		state.scan_structure->Next(input, result);
+		state.scan_structure->Next(input, result, state.matcher);
 		if (!state.scan_structure->PointersExhausted() || result.size() > 0) {
 			return OperatorResultType::HAVE_MORE_OUTPUT;
 		}
@@ -254,12 +294,18 @@ OperatorResultType PhysicalFactExpand::Execute(ExecutionContext &context, DataCh
 	}
 
 	state.scan_structure = make_uniq<CombinedScanStructure>(input, this->conditions, state, this);
-	state.scan_structure->Next(input, result);
+	state.scan_structure->Next(input, result, state.matcher);
 	return OperatorResultType::HAVE_MORE_OUTPUT;
 }
 
 string PhysicalFactExpand::ParamsToString() const {
 	string extra_info;
+	for (auto &condition : conditions) {
+		extra_info += "\n";
+		auto expr_string = condition.lhs_binding.alias + " " + ExpressionTypeToOperator(condition.comparison) + " " +
+		                   condition.rhs_binding.alias;
+		extra_info += expr_string;
+	}
 	return extra_info;
 }
 

@@ -1,7 +1,7 @@
 #include "duckdb/common/enums/expression_type.hpp"
 
-#include "duckdb/common/exception.hpp"
 #include "duckdb/common/enum_util.hpp"
+#include "duckdb/common/exception.hpp"
 
 namespace duckdb {
 
@@ -143,6 +143,8 @@ string ExpressionTypeToString(ExpressionType type) {
 		return "ARROW";
 	case ExpressionType::INVALID:
 		break;
+	case ExpressionType::COMPARE_FACT_EQUAL:
+		return "COMPARE_FACT_EQUAL";
 	}
 	return "INVALID";
 }
@@ -231,6 +233,7 @@ string ExpressionClassToString(ExpressionClass type) {
 
 string ExpressionTypeToOperator(ExpressionType type) {
 	switch (type) {
+	case ExpressionType::COMPARE_FACT_EQUAL:
 	case ExpressionType::COMPARE_EQUAL:
 		return "=";
 	case ExpressionType::COMPARE_NOTEQUAL:

@@ -54,7 +54,7 @@ public:
 	//! columns.
 	idx_t Match(DataChunk &lhs, const vector<TupleDataVectorFormat> &lhs_formats, SelectionVector &sel, idx_t count,
 	            const TupleDataLayout &rhs_layout, Vector &rhs_row_locations, SelectionVector *no_match_sel,
-	            idx_t &no_match_count, const vector<column_t> &columns);
+	            idx_t &no_match_count, const vector<column_t> &columns, bool sequential_lhs_vectors = false);
 
 private:
 	//! Gets the templated match function for a given column

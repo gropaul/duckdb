@@ -229,27 +229,30 @@ idx_t RowMatcher::Match(DataChunk &lhs, const vector<TupleDataVectorFormat> &lhs
 
 idx_t RowMatcher::Match(DataChunk &lhs, const vector<TupleDataVectorFormat> &lhs_formats, SelectionVector &sel,
                         idx_t count, const TupleDataLayout &rhs_layout, Vector &rhs_row_locations,
-                        SelectionVector *no_match_sel, idx_t &no_match_count, const vector<column_t> &columns) {
+                        SelectionVector *no_match_sel, idx_t &no_match_count, const vector<column_t> &columns, bool sequential_lhs_vectors) {
 	D_ASSERT(!match_functions.empty());
 
 	// The column_ids must have the same size as the match_functions vector
 	D_ASSERT(columns.size() == match_functions.size());
 
-	// The largest column_id must be smaller than the number columns to not cause an out-of-bounds error
-	D_ASSERT(*max_element(columns.begin(), columns.end()) < lhs.ColumnCount());
-
 	for (idx_t fun_idx = 0; fun_idx < match_functions.size(); fun_idx++) {
 		// if we only care about specific columns, we need to use the column_ids to get the correct column index
 		// otherwise, we just use the fun_idx
 		const auto col_idx = columns[fun_idx];
+		// if we are using sequential_lhs_vectors, the lhs_vector_index is incremented by 1 for each iteration
+		column_t lhs_vector_index = sequential_lhs_vectors ? fun_idx : col_idx;
 
+		// the index of the lhs vector must be smaller than the number of columns in the lhs chunk
+		D_ASSERT(lhs_vector_index < lhs.ColumnCount());
+		// todo: Should we have different match rows in the lhs and rhs we need to columns vectors
 		const auto &match_function = match_functions[fun_idx];
 		count =
-		    match_function.function(lhs.data[col_idx], lhs_formats[col_idx], sel, count, rhs_layout, rhs_row_locations,
+		    match_function.function(lhs.data[lhs_vector_index], lhs_formats[col_idx], sel, count, rhs_layout, rhs_row_locations,
 		                            col_idx, match_function.child_functions, no_match_sel, no_match_count);
 	}
 	return count;
 }
+
 
 MatchFunction RowMatcher::GetMatchFunction(const bool no_match_sel, const LogicalType &type,
                                            const ExpressionType predicate) {
