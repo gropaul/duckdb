@@ -110,33 +110,147 @@ public:
 	}
 };
 
+struct FactVectorPointerInfo {
+	vector<data_ptr_t> ptrs;
+	vector<idx_t> list_end_idx;
+	FactVectorPointerInfo() = default;
+	FactVectorPointerInfo(Vector &pointers_v, const idx_t &count, const idx_t &pointer_offset);
+
+	idx_t PointerCount() const {
+		return ptrs.size();
+	}
+
+	idx_t ListsCount() const {
+		return list_end_idx.size();
+	}
+
+	idx_t ListEndOffset(idx_t list_idx) const {
+		return list_end_idx[list_idx];
+	}
+
+	idx_t GetListStart(idx_t row_idx) const {
+		if (row_idx == 0) {
+			return 0;
+		}
+		return list_end_idx[row_idx - 1];
+	}
+
+	idx_t GetListEnd(idx_t row_idx) const {
+		return list_end_idx[row_idx];
+	}
+};
+
+struct IncrementResult {
+	IncrementResult();
+	IncrementResult(bool list_complete, bool done);
+	// with this element a list is complete
+	bool list_complete;
+	// with this element all lists are processed
+	bool done;
+};
+
+struct SingleListState {
+	// which list of the vector we are currently in
+	idx_t row_idx;
+	// the current list position physical overarching list
+	idx_t list_vector_idx;
+
+	SingleListState() : row_idx(0), list_vector_idx(0) {
+	}
+
+	static bool ListComplete(idx_t list_vector_idx, idx_t row_idx, const FactVectorPointerInfo &pointer_info) {
+		idx_t list_end_index = pointer_info.ListEndOffset(row_idx);
+		return list_vector_idx == list_end_index;
+	}
+
+	static bool Done(idx_t list_vector_idx, const FactVectorPointerInfo &pointer_info) {
+		return list_vector_idx == pointer_info.PointerCount() - 1;
+	}
+
+	// returns a reference to the index
+	idx_t &ListVectorIdx() {
+		return list_vector_idx;
+	}
+
+	idx_t &GetRowIdx() {
+		return row_idx;
+	}
+
+	bool Increment(const FactVectorPointerInfo &pointer_info) {
+		list_vector_idx++;
+
+		bool list_complete = ListComplete(list_vector_idx, row_idx, pointer_info);
+
+		if (list_complete) {
+			row_idx++;
+		}
+
+		return list_complete;
+	}
+
+	void ResetToCurrentListHead(const FactVectorPointerInfo &pointer_info) {
+		// only reset if we are at the head of a list
+		D_ASSERT(ListComplete(this->list_vector_idx, row_idx - 1, pointer_info));
+		idx_t last_list_start = 0;
+		if (row_idx >= 2) {
+			last_list_start = pointer_info.ListEndOffset(row_idx - 2);
+		}
+		row_idx -= 1;
+		list_vector_idx = last_list_start;
+	}
+};
+
 //! Scan structure that can be used to resume scans, as a single probe can
 //! return VECTOR_SIZE*CHAIN_LENGTH values. Similar to the one of in the HashTable, but with reduced functionality
 struct SingleScanStructure {
 
-	Vector current_pointers_v;
-
-	bool finished;
 	//! Next pointer offset in tuple, also used for the position of the hash, which then gets overwritten by the
 	//! pointer
 	idx_t pointer_offset;
 
-	// when we reset one list to start with the next element of the next list, we also need to reset the selectino
-	Vector original_pointers_v;
-
 	vector<FactorizedRowMatcher> matchers;
+
+	FactVectorPointerInfo pointer_info;
+
+	Vector list_vector_v;
+
+	SingleListState list_state;
 
 	// data source
 	const TupleDataCollection &data_collection;
 
 	explicit SingleScanStructure(Vector &pointers_v, const idx_t &count, const idx_t &pointer_offset_p,
-	                             TupleDataCollection &data_collection);
+	                             TupleDataCollection &data_collection_p, const vector<LogicalType> &flat_types_p);
 
-	void AdvancePointers(duckdb::SelectionVector &found_sel, duckdb::idx_t &found_count);
+	// returns a reference to the index
+	idx_t &ListVectorIdx();
+	idx_t &GetRowIdx();
+	void ResetToCurrentListHead();
+	bool Increment();
 
-	void GetCurrentActivePointers(const idx_t original_count, duckdb::SelectionVector &sel, duckdb::idx_t &count);
+	vector<unique_ptr<Vector>> &GetListVectors() {
+		auto &list_vector_entries = ListVector::GetEntry(list_vector_v);
+		return StructVector::GetEntries(list_vector_entries);
+	}
+};
 
-	void ResetPointers(const SelectionVector &sel, const idx_t &count);
+struct ScanSelection {
+	SelectionVector flat_sel;
+	vector<SelectionVector> factor_sel;
+	idx_t count;
+	bool done;
+
+	ScanSelection(idx_t vector_size, idx_t fact_vector_count) : flat_sel(vector_size), count(0) {
+		factor_sel.resize(fact_vector_count);
+		for (idx_t i = 0; i < fact_vector_count; i++) {
+			factor_sel[i] = SelectionVector(vector_size);
+		}
+	}
+
+	void Finalize(idx_t count_p, bool done_p) {
+		count = count_p;
+		done = done_p;
+	}
 };
 
 struct CombinedScanStructure {
@@ -152,17 +266,12 @@ struct CombinedScanStructure {
 	vector<vector<column_t>> fact_column_mappings;
 	// has a mapping for whether a column is flat or factorized
 	vector<bool> is_fact_vector;
-	// which of the factorized vectors currently is stepped
-	column_t vector_to_step_idx;
+
 	// how many fact vectors there are to be flattened
 	column_t fact_vector_count;
 
 	// emitter ids for each fact vector
 	vector<idx_t> emitter_ids;
-
-	// used to only gather data where we still have pointers in the chain
-	idx_t count;
-	SelectionVector sel;
 
 	// how many pointers we have in the chain in the beginning
 	idx_t original_count;
@@ -170,15 +279,12 @@ struct CombinedScanStructure {
 	// the conditions for the scan
 	vector<FactExpandCondition> conditions;
 
-	void Next(DataChunk &input, DataChunk &result, unique_ptr<FactorizedRowMatcher> &matcher);
-	void Gather(DataChunk &input, DataChunk &result, unique_ptr<FactorizedRowMatcher> &matcher);
-	void SetSelection(const SelectionVector &original_sel, const idx_t &original_count);
-
-	//! Are pointer chains all pointing to NULL?
-	bool PointersExhausted() const;
+	bool Next(DataChunk &input, DataChunk &result, unique_ptr<FactorizedRowMatcher> &matcher);
+	void SliceResult(DataChunk &input, DataChunk &result, const ScanSelection &selection) const;
 
 private:
-	void AdvancePointers();
+	ScanSelection GetScanSelectionSequential(idx_t max_tuples);
+	void IntersectLists();
 };
 
 class PhysicalFactExpand : public PhysicalOperator {

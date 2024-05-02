@@ -5,8 +5,8 @@
 #include "duckdb/planner/operator/logical_fact_expand.hpp"
 #include "duckdb/planner/operator/logical_projection.hpp"
 namespace duckdb {
-using OPFactProcessingInfo = FactorizationOptimizer::OperatorFactProcessingInfo;
-using OPFactEmitInfo = FactorizationOptimizer::OperatorFactEmitInfo;
+using OperatorFactProcessingInfo = FactorizationOptimizer::OperatorFactProcessingInfo;
+using OperatorFactEmitInfo = FactorizationOptimizer::OperatorFactEmitInfo;
 FactorizationOptimizer::FactorizationOptimizer(Binder &binder_p) : current_emitter_count(0), binder(binder_p) {
 }
 bool FactorizationOptimizer::CanOptimize(duckdb::LogicalOperator &op) {
@@ -22,49 +22,105 @@ void FactorizationOptimizer::Optimize(unique_ptr<LogicalOperator> &op) {
 	root->ResolveOperatorTypes();
 }
 
-OPFactProcessingInfo FactorizationOptimizer::CanProcessFactVectors(const duckdb::LogicalOperator *op,
-                                                                   const vector<OperatorFactEmitInfo> &children_info) {
+OperatorFactProcessingInfo
+FactorizationOptimizer::CanProcessFactVectors(const duckdb::LogicalOperator *op,
+                                              const vector<unique_ptr<OperatorFactEmitInfo>> &children_info) {
 	idx_t child_count = children_info.size();
 	vector<bool> all_true(child_count, true);
 	vector<bool> all_false(child_count, false);
 	if (op->type == LogicalOperatorType::LOGICAL_FACT_EXPAND) {
-		return OPFactProcessingInfo(all_false);
+		return OperatorFactProcessingInfo(all_false);
 	}
 
 	if (op->type == LogicalOperatorType::LOGICAL_COMPARISON_JOIN) {
-		return OPFactProcessingInfo(all_false);
+		return OperatorFactProcessingInfo(all_false);
 	}
-	return OPFactProcessingInfo(all_true);
+	return OperatorFactProcessingInfo(all_true);
 }
 
 bool FactorizationOptimizer::OperatorCanProcessFactVectors(const LogicalOperator &op, idx_t child_idx,
-                                                           OPFactEmitInfo &child_info) {
+                                                           unique_ptr<OperatorFactEmitInfo> &child_info) {
 
 	if (op.type == LogicalOperatorType::LOGICAL_AGGREGATE_AND_GROUP_BY) {
 		return true;
 	} else if (op.type == LogicalOperatorType::LOGICAL_COMPARISON_JOIN) {
 		return true;
-	// set this false if we don't want to expand before the expansion
-	}else if (op.type == LogicalOperatorType::LOGICAL_FACT_EXPAND) {
+		// set this false if we don't want to expand before the expansion
+	} else if (op.type == LogicalOperatorType::LOGICAL_FACT_EXPAND) {
 		return true;
 	}
 
 	return false;
 }
 
-OPFactEmitInfo FactorizationOptimizer::CanEmitFactVectors(const unique_ptr<duckdb::LogicalOperator> &op,
-                                                          const vector<OperatorFactEmitInfo> &children_info) {
+unique_ptr<OperatorFactEmitInfo>
+FactorizationOptimizer::CanEmitFactVectors(const unique_ptr<duckdb::LogicalOperator> &op,
+                                           const vector<unique_ptr<OperatorFactEmitInfo>> &children_info) {
 	if (op->type == LogicalOperatorType::LOGICAL_COMPARISON_JOIN) {
-		return OPFactEmitInfo(true);
+		return make_uniq<OperatorFactEmitInfo>(true);
 	}
-	return OPFactEmitInfo(false);
+	return make_uniq<OperatorFactEmitInfo>(false);
 }
 
+unique_ptr<ColumnBindingReplacer>
+UpdateColumnBindings(optional_ptr<LogicalOperator> start, unique_ptr<LogicalOperator> &end,
+                     const vector<ColumnBinding> &flat_bindings, const vector<LogicalType> &flat_types,
+                     const vector<ColumnBinding> &fact_bindings, const vector<LogicalType> &fact_types,
+                     bool flat_to_fact = true) {
+	// update all expressions to behave accordingly
+	ColumnBindingReplacer replacer;
+	auto &replacement_bindings = replacer.replacement_bindings;
 
+	idx_t new_col_idx = 0;
+	idx_t flat_type_index = 0;
 
-OPFactEmitInfo FactorizationOptimizer::EmitFactVectors(unique_ptr<LogicalOperator> &op,
-                                                       optional_ptr<LogicalOperator> parent, idx_t parent_child_idx,
-                                                       OPFactEmitInfo &proposed_emit_info) {
+	for (idx_t old_col_idx = 0; old_col_idx < flat_bindings.size(); old_col_idx++) {
+
+		const auto &old_binding = flat_bindings[old_col_idx];
+		const auto &old_type = flat_types[old_col_idx];
+
+		const auto &new_type = fact_types[new_col_idx];
+		const auto &new_binding = fact_bindings[new_col_idx];
+
+		// if the type is factorized and the previous was not factorized, we need to point all columns to the factor
+		// column.
+		// If we access the last factorized element, we step the col index
+		if (new_type.id() == LogicalTypeId::FACT_POINTER && old_type.id() != LogicalTypeId::FACT_POINTER) {
+			auto type_info = reinterpret_cast<const FactPointerTypeInfo *>(new_type.AuxInfo());
+			vector<LogicalType> fact_type_flat_types = type_info->flat_types;
+
+			idx_t flat_type_count = fact_type_flat_types.size();
+
+			// we are at the end of the factorized vector and can step to the next
+			if (flat_type_index == flat_type_count - 1) {
+				new_col_idx++;
+				flat_type_index = 0;
+			} else {
+				flat_type_index++;
+			}
+
+			// if we want to translate flat types to fact types, we need to replace the old binding with the new binding
+			if (flat_to_fact) {
+				replacement_bindings.emplace_back(old_binding, new_binding, new_type);
+			} else {
+				replacement_bindings.emplace_back(new_binding, old_binding, old_type);
+			}
+
+		} else {
+			new_col_idx++;
+		}
+	}
+
+	replacer.stop_operator = end;
+	replacer.VisitOperator(*start);
+
+	return make_uniq<ColumnBindingReplacer>(replacer);
+}
+
+unique_ptr<OperatorFactEmitInfo> FactorizationOptimizer::EmitFactVectors(unique_ptr<LogicalOperator> &op,
+                                                                         optional_ptr<LogicalOperator> parent,
+                                                                         idx_t parent_child_idx,
+                                                                         unique_ptr<OperatorFactEmitInfo> &proposed_emit_info) {
 
 	// make sure that the parent is never null as we can't emit fact vectors as the query result
 	D_ASSERT(parent != nullptr);
@@ -86,48 +142,8 @@ OPFactEmitInfo FactorizationOptimizer::EmitFactVectors(unique_ptr<LogicalOperato
 	auto fact_bindings = op->GetColumnBindings();
 	auto fact_types = op->types;
 
-	// update all expressions to behave accordingly
-	ColumnBindingReplacer replacer;
-	auto &replacement_bindings = replacer.replacement_bindings;
-
-	idx_t new_col_idx = 0;
-
-	for (idx_t old_col_idx = 0; old_col_idx < flat_bindings.size(); old_col_idx++) {
-
-		const auto &old_binding = flat_bindings[old_col_idx];
-		const auto &old_type = flat_types[old_col_idx];
-
-		const auto &new_type = fact_types[new_col_idx];
-		const auto &new_binding = fact_bindings[new_col_idx];
-
-		// if the type is factorized and the previous was not factorized, we need to point all columns to the factor
-		// column.
-		// If we access the last factorized element, we step the col index
-		if (new_type.id() == LogicalTypeId::FACT_POINTER && old_type.id() != LogicalTypeId::FACT_POINTER) {
-			auto type_info = reinterpret_cast<const FactPointerTypeInfo *>(new_type.AuxInfo());
-			vector<LogicalType> fact_type_flat_types = type_info->flat_types;
-
-			idx_t flat_type_index = old_col_idx - new_col_idx;
-			idx_t flat_type_count = fact_type_flat_types.size();
-
-			// we are at the end of the factorized vector and can step to the next
-			if (flat_type_index == flat_type_count - 1) {
-				new_col_idx++;
-			}
-
-
-			replacement_bindings.emplace_back(old_binding, new_binding, new_type);
-
-		} else {
-			new_col_idx++;
-		}
-	}
-
 	// todo: this is farly hacky: At some point we have to make serious thoughts on how far up the factorization
-	replacer.stop_operator = op;
-	replacer.VisitOperator(*parent);
-
-	parent->ResolveOperatorTypes();
+	auto replacer = UpdateColumnBindings(op, op, flat_bindings, flat_types, fact_bindings, fact_types, true);
 
 	// remove all conditions where there is a fact pointer on the lhs to move them up to the fact expand
 	vector<FactExpandCondition> expand_conditions;
@@ -136,22 +152,21 @@ OPFactEmitInfo FactorizationOptimizer::EmitFactVectors(unique_ptr<LogicalOperato
 	if (op->type == LogicalOperatorType::LOGICAL_COMPARISON_JOIN) {
 		auto join = reinterpret_cast<LogicalComparisonJoin *>(op.get());
 
-
-		for (auto condition = join->conditions.begin(); condition != join->conditions.end(); ) {
+		for (auto condition = join->conditions.begin(); condition != join->conditions.end();) {
 			auto lhs_return_type = condition->left->return_type;
 			auto rhs_return_type = condition->right->return_type;
 
-			if (lhs_return_type.id() == LogicalTypeId::FACT_POINTER){
+			if (lhs_return_type.id() == LogicalTypeId::FACT_POINTER) {
 				// create a fact expand condition
 
-				// visit the rhs expression to make sure it also operates on the fact vector as we want to move the condition
-				// up
+				// visit the rhs expression to make sure it also operates on the fact vector as we want to move the
+				// condition up
 
 				auto fact_expand_condition = FactExpandCondition(*condition, fact_types);
 				expand_conditions.push_back(fact_expand_condition);
 				condition = join->conditions.erase(condition);
 
-			} else if (rhs_return_type.id() == LogicalTypeId::FACT_POINTER){
+			} else if (rhs_return_type.id() == LogicalTypeId::FACT_POINTER) {
 				throw NotImplementedException("RHS fact pointer not implemented");
 			} else {
 				++condition;
@@ -159,7 +174,8 @@ OPFactEmitInfo FactorizationOptimizer::EmitFactVectors(unique_ptr<LogicalOperato
 		}
 	}
 
-	return {true, true, flat_types, fact_types, flat_bindings, fact_bindings, expand_conditions};
+	return make_uniq<OperatorFactEmitInfo>(true, true, flat_types, fact_types, flat_bindings, fact_bindings,
+	                                       expand_conditions, std::move(replacer));
 }
 
 bool OutputContainsFactColumns(const vector<LogicalType> &output_types) {
@@ -173,17 +189,18 @@ bool OutputContainsFactColumns(const vector<LogicalType> &output_types) {
 	return false;
 }
 
-OPFactEmitInfo FactorizationOptimizer::OptimizeInternal(unique_ptr<LogicalOperator> &op,
-                                                        optional_ptr<LogicalOperator> parent, idx_t parent_child_idx) {
+unique_ptr<OperatorFactEmitInfo> FactorizationOptimizer::OptimizeInternal(unique_ptr<LogicalOperator> &op,
+                                                                          optional_ptr<LogicalOperator> parent,
+                                                                          idx_t parent_child_idx) {
 
 	// initialize a list the size of the children
-	vector<OPFactEmitInfo> children_info;
+	vector<unique_ptr<OperatorFactEmitInfo>> children_info;
 
 	// recursively optimize children
 	for (idx_t child_idx = 0; child_idx < op->children.size(); child_idx++) {
 		auto &child = op->children[child_idx];
 		auto op_info = OptimizeInternal(child, op.get(), child_idx);
-		children_info.push_back(op_info);
+		children_info.push_back(std::move(op_info));
 	}
 
 	// check if we can process fact vectors
@@ -195,10 +212,16 @@ OPFactEmitInfo FactorizationOptimizer::OptimizeInternal(unique_ptr<LogicalOperat
 
 		child->ResolveOperatorTypes();
 		bool output_contains_fact_columns = OutputContainsFactColumns(child->types);
-		auto &expand_conditions = children_info[child_idx].conditions;
+		auto &expand_conditions = children_info[child_idx]->conditions;
+		auto &child_info = children_info[child_idx];
 		// flatten the children if they are emitting fact vectors, and we can't process fact vectors
 		if (process_info.flat_child[child_idx] && output_contains_fact_columns) {
-			AddFactExpandBeforeOperator(child, expand_conditions);
+			AddFactExpandBeforeOperatorAndChild(op, child, expand_conditions);
+		}
+		// else make sure that the parent knows what it expects from the child output
+		else if (output_contains_fact_columns) {
+			child_info->replacer->stop_operator = child.get();
+			child_info->replacer->VisitOperator(*op);
 		}
 	}
 
@@ -208,8 +231,8 @@ OPFactEmitInfo FactorizationOptimizer::OptimizeInternal(unique_ptr<LogicalOperat
 	    parent != nullptr && OperatorCanProcessFactVectors(*parent, parent_child_idx, proposed_emission);
 	// todo: Overwrite to always emit fact vectors
 	parent_can_process = true;
-	if (proposed_emission.is_able && parent_can_process) {
-		OPFactEmitInfo actual_emission = EmitFactVectors(op, parent.get(), parent_child_idx, proposed_emission);
+	if (proposed_emission->is_able && parent_can_process) {
+		unique_ptr<OperatorFactEmitInfo> actual_emission = EmitFactVectors(op, parent.get(), parent_child_idx, proposed_emission);
 		return actual_emission;
 	} else {
 		return proposed_emission;
@@ -239,14 +262,19 @@ GetFlattenedTypesAndBindings(const vector<LogicalType> &types, const vector<Colu
 	return std::make_pair(flat_types, flat_bindings);
 }
 
-void FactorizationOptimizer::AddFactExpandBeforeOperator(unique_ptr<duckdb::LogicalOperator> &child, vector<FactExpandCondition> &conditions) {
+void FactorizationOptimizer::AddFactExpandBeforeOperatorAndChild(unique_ptr<duckdb::LogicalOperator> &parent,
+                                                                 unique_ptr<duckdb::LogicalOperator> &child,
+                                                                 vector<FactExpandCondition> &conditions) {
 
 	// between every operator that can't handle factorization and a factorizable operator, we need to insert
 	// a FactorizationExpand
 	const auto table_index = binder.GenerateTableIndex();
 
+	auto fact_types = child->types;
+	auto fact_bindings = child->GetColumnBindings();
+
 	child->ResolveOperatorTypes();
-	auto flat_types_and_bindings = GetFlattenedTypesAndBindings(child->types, child->GetColumnBindings());
+	auto flat_types_and_bindings = GetFlattenedTypesAndBindings(fact_types, fact_bindings);
 	auto &flat_types = flat_types_and_bindings.first;
 	auto &flat_bindings = flat_types_and_bindings.second;
 
