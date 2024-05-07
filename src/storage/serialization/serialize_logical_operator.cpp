@@ -8,6 +8,7 @@
 #include "duckdb/planner/operator/list.hpp"
 #include "duckdb/catalog/catalog_entry/schema_catalog_entry.hpp"
 #include "duckdb/catalog/catalog_entry/table_catalog_entry.hpp"
+#include "duckdb/planner/operator/logical_comparison_join.hpp"
 
 namespace duckdb {
 
@@ -296,6 +297,16 @@ unique_ptr<LogicalOperator> LogicalComparisonJoin::Deserialize(Deserializer &des
 	deserializer.ReadPropertyWithDefault<vector<unique_ptr<Expression>>>(206, "duplicate_eliminated_columns", result->duplicate_eliminated_columns);
 	deserializer.ReadPropertyWithDefault<bool>(207, "delim_flipped", result->delim_flipped, false);
 	return std::move(result);
+}
+bool LogicalComparisonJoin::WillExpandFactors() {
+	// return true if we have a fact condition
+	for(auto &cond : this->conditions){
+		if(cond.comparison == ExpressionType::COMPARE_FACT_EQUAL){
+			return true;
+		}
+	}
+
+	return false;
 }
 
 void LogicalCreate::Serialize(Serializer &serializer) const {

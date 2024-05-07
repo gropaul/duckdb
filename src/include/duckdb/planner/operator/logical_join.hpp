@@ -41,11 +41,19 @@ public:
 public:
 	vector<ColumnBinding> GetColumnBindings() override;
 
+	virtual bool WillExpandFactors();
+
 	vector<LogicalType> GetRHSTypes();
 	vector<LogicalType> GetOriginalRHSTypes();
 
 	vector<ColumnBinding> GetRHSBindings();
 	vector<ColumnBinding> GetOriginalRHSBindings();
+
+	vector<LogicalType> GetLHSTypes();
+	vector<LogicalType> GetOriginalLHSTypes();
+
+	vector<ColumnBinding> GetLHSBindings();
+	vector<ColumnBinding> GetOriginalLHSBindings();
 
 	void SetEmitFactVectors(bool emit_fact_vector_p, idx_t emitter_id_p);
 

@@ -124,19 +124,6 @@ CombinedScanStructure::CombinedScanStructure(DataChunk &input, const vector<Fact
 	}
 }
 
-void CombinedScanStructure::IntersectLists() {
-	for (idx_t row_idx = 0; row_idx < STANDARD_VECTOR_SIZE; row_idx++) {
-		auto &info_1 = this->scan_structures[0]->pointer_info;
-		auto &info_2 = this->scan_structures[2]->pointer_info;
-
-		idx_t list_1_start = info_1.GetListStart(row_idx);
-		idx_t list_1_end = info_1.GetListEnd(row_idx);
-
-		idx_t list_2_start = info_2.GetListStart(row_idx);
-		idx_t list_2_end = info_2.GetListEnd(row_idx);
-	}
-}
-
 ScanSelection CombinedScanStructure::GetScanSelectionSequential(idx_t max_tuples) {
 
 	idx_t tuple_index = 0;

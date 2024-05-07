@@ -31,10 +31,12 @@ JoinHashTable::InsertState::InsertState(const unique_ptr<TupleDataCollection> &d
 }
 
 JoinHashTable::JoinHashTable(BufferManager &buffer_manager_p, const vector<JoinCondition> &conditions_p,
-                             vector<LogicalType> btypes, JoinType type_p, const vector<idx_t> &output_columns_p, const bool emit_fact_vector_p, const idx_t emitter_id_p)
-    : emit_fact_vectors(emit_fact_vector_p), emitter_id(emitter_id_p), buffer_manager(buffer_manager_p), conditions(conditions_p),
-      build_types(std::move(btypes)), output_columns(output_columns_p), entry_size(0), tuple_size(0), vfound(Value::BOOLEAN(false)),
-      join_type(type_p), finalized(false), has_null(false), radix_bits(INITIAL_RADIX_BITS), partition_start(0), partition_end(0) {
+                             vector<LogicalType> btypes, JoinType type_p, const vector<idx_t> &output_columns_p,
+                             const bool emit_fact_vector_p, const idx_t emitter_id_p, const PhysicalOperator *op_p)
+    : op(op_p), emit_fact_pointers(emit_fact_vector_p), emitter_id(emitter_id_p), buffer_manager(buffer_manager_p),
+      conditions(conditions_p), build_types(std::move(btypes)), output_columns(output_columns_p), entry_size(0),
+      tuple_size(0), vfound(Value::BOOLEAN(false)), join_type(type_p), finalized(false), has_null(false),
+      radix_bits(INITIAL_RADIX_BITS), partition_start(0), partition_end(0) {
 
 	for (idx_t i = 0; i < conditions.size(); ++i) {
 		auto &condition = conditions[i];
@@ -747,6 +749,17 @@ unique_ptr<ScanStructure> JoinHashTable::InitializeScanStructure(DataChunk &keys
 		memset(ss->found_match.get(), 0, sizeof(bool) * STANDARD_VECTOR_SIZE);
 	}
 
+	if (FlattensFactVectors()) {
+		column_t fact_col_idx = factorized_predicate_columns[0];
+		Vector &fact_key_vector = keys.data[fact_col_idx];
+		auto fact_type = fact_key_vector.GetType();
+		D_ASSERT(fact_type.id() == LogicalTypeId::FACT_POINTER);
+
+		ss->lhs_pointers.ReferenceAndSetType(fact_key_vector);
+		auto type_info = reinterpret_cast<const FactPointerTypeInfo *>(fact_type.AuxInfo());
+		ss->lhs_collection = FindDataCollectionInOp(op, type_info->emitter_id);
+	}
+
 	// first prepare the keys for probing
 	TupleDataCollection::ToUnifiedFormat(key_state, keys);
 	ss->count = PrepareKeys(keys, key_state.vector_data, current_sel, ss->sel_vector, false);
@@ -773,13 +786,54 @@ unique_ptr<ScanStructure> JoinHashTable::Probe(DataChunk &keys, TupleDataChunkSt
 		GetRowPointers(keys, key_state, probe_state, hashes, *current_sel, ss->count, ss->pointers, ss->sel_vector);
 	}
 
+	if (ss->use_intersected_chain_pointers) {
+		// only one equality predicate is supported atm
+		D_ASSERT(factorized_predicate_columns.size() == 1);
+
+		unique_ptr<ChainData[]> lhs_data =
+		    GetChainData(ss->lhs_pointers, ss->lhs_collection, 1, ss->sel_vector, ss->count);
+		unique_ptr<ChainData[]> rhs_data =
+		    GetChainData(ss->pointers, data_collection.get(), 1, ss->sel_vector, ss->count);
+
+		idx_t new_count = 0;
+
+		for (idx_t idx = 0; idx < ss->count; idx++) {
+			auto sel_idx = ss->sel_vector.get_index(idx);
+			auto lhs_chain = lhs_data[sel_idx];
+			auto rhs_chain = rhs_data[sel_idx];
+
+			vector<data_ptr_t> &rhs_pointers = ss->rhs_intersection_pointer[sel_idx];
+			vector<data_ptr_t> &lhs_pointers = ss->lhs_intersection_pointer[sel_idx];
+			Intersect(lhs_chain, rhs_chain, lhs_pointers, rhs_pointers);
+
+			// set the sel vector to only point on elements where we have an intersection
+			bool non_empty_intersection = !rhs_pointers.empty();
+			ss->sel_vector.set_index(new_count, sel_idx);
+			new_count += non_empty_intersection;
+		}
+
+		ss->count = new_count;
+	}
+
 	return ss;
 }
 
 ScanStructure::ScanStructure(JoinHashTable &ht_p, TupleDataChunkState &key_state_p)
-    : key_state(key_state_p), pointers(LogicalType::POINTER), sel_vector(STANDARD_VECTOR_SIZE),
-      chain_match_sel_vector(STANDARD_VECTOR_SIZE), chain_no_match_sel_vector(STANDARD_VECTOR_SIZE), ht(ht_p),
-      finished(false) {
+    : key_state(key_state_p), pointers(LogicalType::POINTER), lhs_pointers(LogicalType::POINTER),
+      sel_vector(STANDARD_VECTOR_SIZE), chain_match_sel_vector(STANDARD_VECTOR_SIZE),
+      chain_no_match_sel_vector(STANDARD_VECTOR_SIZE), ht(ht_p), finished(false) {
+	if (ht.FlattensFactVectors()) {
+		use_intersected_chain_pointers = true;
+		// initialize the pointers with STANDARD_VECTOR_SIZE empty vectors
+		rhs_intersection_pointer.reserve(STANDARD_VECTOR_SIZE);
+		lhs_intersection_pointer.reserve(STANDARD_VECTOR_SIZE);
+		for (idx_t i = 0; i < STANDARD_VECTOR_SIZE; i++) {
+			rhs_intersection_pointer.push_back(vector<data_ptr_t>());
+			lhs_intersection_pointer.push_back(vector<data_ptr_t>());
+		}
+	} else {
+		use_intersected_chain_pointers = false;
+	}
 }
 
 void ScanStructure::Next(DataChunk &keys, DataChunk &left, DataChunk &result) {
@@ -874,21 +928,48 @@ idx_t ScanStructure::ScanInnerJoin(DataChunk &keys, SelectionVector &result_vect
 
 void ScanStructure::AdvancePointers(const SelectionVector &sel, idx_t sel_count) {
 
-	if (!ht.chains_longer_than_one || ht.emit_fact_vectors) {
-		this->count = 0;
-		return;
-	}
+	// can't emit fact pointers and have fact conditions at the same time
+	D_ASSERT(!(ht.emit_fact_pointers && ht.FlattensFactVectors()));
 
-	// now for all the pointers, we move on to the next set of pointers
 	idx_t new_count = 0;
-	auto ptrs = FlatVector::GetData<data_ptr_t>(this->pointers);
-	for (idx_t i = 0; i < sel_count; i++) {
-		auto idx = sel.get_index(i);
-		ptrs[idx] = Load<data_ptr_t>(ptrs[idx] + ht.pointer_offset);
-		if (ptrs[idx]) {
-			this->sel_vector.set_index(new_count++, idx);
+
+	if (this->use_intersected_chain_pointers) {
+
+		auto ptrs = FlatVector::GetData<data_ptr_t>(pointers);
+		auto lhs_ptrs = FlatVector::GetData<data_ptr_t>(lhs_pointers);
+		for (idx_t i = 0; i < sel_count; i++) {
+			auto sel_idx = sel.get_index(i);
+			auto &rhs_intersected_pointers = rhs_intersection_pointer[sel_idx];
+			auto &lhs_intersected_pointers = lhs_intersection_pointer[sel_idx];
+
+			ptrs[sel_idx] = rhs_intersected_pointers.back();
+			lhs_ptrs[sel_idx] = lhs_intersected_pointers.back();
+
+			// todo: This is probably the wrong ordering in removing the pointers
+			rhs_intersected_pointers.pop_back();
+			lhs_intersected_pointers.pop_back();
+
+			this->sel_vector.set_index(new_count, sel_idx);
+			new_count += !rhs_intersected_pointers.empty();
+		}
+	} else {
+
+		if (!ht.chains_longer_than_one || ht.emit_fact_pointers) {
+			this->count = 0;
+			return;
+		}
+
+		// now for all the pointers, we move on to the next set of pointers
+		auto ptrs = FlatVector::GetData<data_ptr_t>(this->pointers);
+		for (idx_t i = 0; i < sel_count; i++) {
+			auto idx = sel.get_index(i);
+			ptrs[idx] = Load<data_ptr_t>(ptrs[idx] + ht.pointer_offset);
+			if (ptrs[idx]) {
+				this->sel_vector.set_index(new_count++, idx);
+			}
 		}
 	}
+
 	this->count = new_count;
 }
 
@@ -906,12 +987,49 @@ void ScanStructure::GatherResult(Vector &result, const SelectionVector &sel_vect
 	GatherResult(result, *FlatVector::IncrementalSelectionVector(), sel_vector, count, col_idx);
 }
 
+void ScanStructure::FlatAndGatherLHS(DataChunk &left, DataChunk &keys, DataChunk &result, idx_t result_count) {
+	column_t fact_col_idx = ht.factorized_predicate_columns[0];
+	Vector &fact_vector = keys.data[fact_col_idx];
+
+	auto fact_type = fact_vector.GetType();
+	D_ASSERT(fact_type.id() == LogicalTypeId::FACT_POINTER);
+	auto type_info = reinterpret_cast<const FactPointerTypeInfo *>(fact_type.AuxInfo());
+
+	result.SetCardinality(result_count);
+
+	for (idx_t i = 0; i < type_info->flat_types.size(); i++) {
+		auto &vector = result.data[fact_col_idx + i];
+		// todo: Make this correct
+		const auto output_col_idx = i;
+		D_ASSERT(vector.GetType() == ht.layout.GetTypes()[output_col_idx]);
+		lhs_collection->Gather(lhs_pointers, chain_match_sel_vector, result_count, output_col_idx, vector,
+		                       chain_match_sel_vector, nullptr);
+	}
+
+	for (column_t lhs_col_idx = 0; lhs_col_idx < left.ColumnCount(); lhs_col_idx++) {
+		// slice if the column is not the fact column
+		auto &result_vector = result.data[lhs_col_idx];
+		auto &lhs_vector = left.data[lhs_col_idx];
+
+		if (lhs_vector.GetType().id() == LogicalTypeId::FACT_POINTER) {
+			continue;
+		}
+
+		// reference and slice the vector
+		result_vector.Slice(lhs_vector, chain_match_sel_vector, result_count);
+	}
+}
+
 void ScanStructure::NextInnerJoin(DataChunk &keys, DataChunk &left, DataChunk &result) {
 	if (ht.join_type != JoinType::RIGHT_SEMI && ht.join_type != JoinType::RIGHT_ANTI) {
-		if (ht.emit_fact_vectors){
+		if (ht.emit_fact_pointers) {
 			// only one fact vector instead of the whole rhs
 			D_ASSERT(result.ColumnCount() == left.ColumnCount() + 1);
-		}else{
+
+		} else if (ht.FlattensFactVectors()) {
+			// we need to return the fact vector and the output columns
+			// todo: maybe add D_ASSERT
+		} else {
 			D_ASSERT(result.ColumnCount() == left.ColumnCount() + ht.output_columns.size());
 		}
 	}
@@ -940,12 +1058,16 @@ void ScanStructure::NextInnerJoin(DataChunk &keys, DataChunk &left, DataChunk &r
 		// for right semi join, just mark the entry as found and move on. Propagation happens later
 		if (ht.join_type != JoinType::RIGHT_SEMI && ht.join_type != JoinType::RIGHT_ANTI) {
 
-			// matches were found
-			// construct the result
-			// on the LHS, we create a slice using the result vector
-			result.Slice(left, chain_match_sel_vector, result_count, 0);
+			if (ht.FlattensFactVectors()) {
+				FlatAndGatherLHS(left, keys, result, result_count);
+			} else {
+				// matches were found
+				// construct the result
+				// on the LHS, we create a slice using the result vector
+				result.Slice(left, chain_match_sel_vector, result_count, 0);
+			}
 
-			if (ht.emit_fact_vectors) {
+			if (ht.emit_fact_pointers) {
 				// in our very special case, the aggregate keys are the first vector and the key to be grouped by is
 				// the second vector
 
@@ -965,8 +1087,6 @@ void ScanStructure::NextInnerJoin(DataChunk &keys, DataChunk &left, DataChunk &r
 
 				// mark only the fields with pointers as valid
 				fact_vector.Slice(chain_match_sel_vector, result_count);
-
-
 
 			} else {
 
@@ -1549,7 +1669,6 @@ void JoinHashTable::GetChainLengths(Vector &row_pointer_v, const idx_t count, co
 
 		row_pointer[i] = reinterpret_cast<data_ptr_t>(chain_length);
 	}
-
 }
 
 ProbeSpill::ProbeSpill(JoinHashTable &ht, ClientContext &context, const vector<LogicalType> &probe_types)

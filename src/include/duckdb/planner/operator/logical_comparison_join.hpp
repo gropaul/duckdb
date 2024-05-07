@@ -35,6 +35,9 @@ public:
 	bool delim_flipped = false;
 
 public:
+
+	bool WillExpandFactors() override;
+
 	string ParamsToString() const override;
 
 	void Serialize(Serializer &serializer) const override;

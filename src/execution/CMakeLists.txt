@@ -13,6 +13,7 @@ add_library_unity(
   column_binding_resolver.cpp
   expression_executor.cpp
   expression_executor_state.cpp
+  fact_utils.cpp
   join_hashtable.cpp
   perfect_aggregate_hashtable.cpp
   physical_operator.cpp

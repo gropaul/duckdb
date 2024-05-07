@@ -73,6 +73,10 @@ public:
 		TupleDataChunkState &key_state;
 		//! Directly point to the entry in the hash table
 		Vector pointers;
+
+		Vector lhs_pointers;
+		TupleDataCollection* lhs_collection;
+
 		idx_t count;
 		SelectionVector sel_vector;
 		SelectionVector chain_match_sel_vector;
@@ -88,6 +92,11 @@ public:
 		void Next(DataChunk &keys, DataChunk &left, DataChunk &result);
 		//! Are pointer chains all pointing to NULL?
 		bool PointersExhausted() const;
+		//! whether to use the intersected_chain_pointers or not
+		bool use_intersected_chain_pointers;
+		//! array of lists of pointers for the intersected chain pointers
+		vector<vector<data_ptr_t>> rhs_intersection_pointer;
+		vector<vector<data_ptr_t>> lhs_intersection_pointer;
 
 	private:
 		//! Next operator for the inner join
@@ -119,6 +128,7 @@ public:
 		void GatherResult(Vector &result, const SelectionVector &result_vector, const SelectionVector &sel_vector,
 		                  const idx_t count, const idx_t col_idx);
 		void GatherResult(Vector &result, const SelectionVector &sel_vector, const idx_t count, const idx_t col_idx);
+		void FlatAndGatherLHS(DataChunk &left, DataChunk &keys, DataChunk &result, idx_t result_count);
 		idx_t ResolvePredicates(DataChunk &keys, SelectionVector &match_sel, SelectionVector *no_match_sel);
 	};
 
@@ -157,7 +167,7 @@ public:
 
 	JoinHashTable(BufferManager &buffer_manager, const vector<JoinCondition> &conditions,
 	              vector<LogicalType> build_types, JoinType type, const vector<idx_t> &output_columns,
-	              const bool emit_fact_vectors, const idx_t emitter_id);
+	              const bool emit_fact_vectors, const idx_t emitter_id, const PhysicalOperator *op_p);
 	~JoinHashTable();
 
 	//! Add the given data to the HT
@@ -196,9 +206,13 @@ public:
 		return *data_collection;
 	}
 
-
+	bool FlattensFactVectors() const {
+		return !factorized_predicates.empty();
+	}
+	//! The physical operator that created this HT
+	const PhysicalOperator *op;
 	//! Whether to emit fact vectors from the HT
-	bool emit_fact_vectors;
+	bool emit_fact_pointers;
 	//! The emitter id of the HT
 	idx_t emitter_id;
 	//! BufferManager
@@ -224,7 +238,7 @@ public:
 	vector<column_t> equality_predicate_columns;
 	//! The column indices of the non-equality predicates to be used to compare the rows
 	vector<column_t> non_equality_predicate_columns;
-	//! The column indices of the factorized predicates
+	//! The column indices of the factorized predicates rhs
 	vector<column_t> factorized_predicate_columns;
 	//! Data column layout
 	TupleDataLayout layout;

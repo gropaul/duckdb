@@ -1,16 +1,30 @@
 #include "duckdb/planner/operator/logical_join.hpp"
 
+#include "duckdb/execution/fact_utils.hpp"
 #include "duckdb/planner/expression/bound_columnref_expression.hpp"
 #include "duckdb/planner/expression_iterator.hpp"
-
 namespace duckdb {
 
 LogicalJoin::LogicalJoin(JoinType join_type, LogicalOperatorType logical_type)
     : LogicalOperator(logical_type), join_type(join_type) {
 }
 
-vector<ColumnBinding> LogicalJoin::GetColumnBindings() {
+vector<ColumnBinding> LogicalJoin::GetOriginalLHSBindings() {
 	auto left_bindings = MapBindings(children[0]->GetColumnBindings(), left_projection_map);
+	return left_bindings;
+}
+
+vector<ColumnBinding> LogicalJoin::GetLHSBindings() {
+	auto left_bindings = GetOriginalLHSBindings();
+	if (WillExpandFactors()) {
+		return FlattenBindings(left_bindings, GetOriginalLHSTypes());
+	} else {
+		return left_bindings;
+	}
+}
+
+vector<ColumnBinding> LogicalJoin::GetColumnBindings() {
+	auto left_bindings = GetLHSBindings();
 	if (join_type == JoinType::SEMI || join_type == JoinType::ANTI) {
 		// for SEMI and ANTI join we only project the left hand side
 		return left_bindings;
@@ -31,14 +45,14 @@ vector<ColumnBinding> LogicalJoin::GetColumnBindings() {
 }
 
 void LogicalJoin::ResolveTypes() {
-	types = MapTypes(children[0]->types, left_projection_map);
+	auto lhs_types = GetLHSTypes();
 	if (join_type == JoinType::SEMI || join_type == JoinType::ANTI) {
 		// for SEMI and ANTI join we only project the left hand side
 		return;
 	}
 	if (join_type == JoinType::MARK) {
 		// for MARK join we project the left hand side, plus a BOOLEAN column indicating the MARK
-		types.emplace_back(LogicalType::BOOLEAN);
+		lhs_types.emplace_back(LogicalType::BOOLEAN);
 		return;
 	}
 	// for any other join we project both sides
@@ -47,12 +61,33 @@ void LogicalJoin::ResolveTypes() {
 		types = right_types;
 		return;
 	}
+	types = lhs_types;
 	types.insert(types.end(), right_types.begin(), right_types.end());
+
+	vector<ColumnBinding> column_bindings = GetColumnBindings();
+	D_ASSERT(types.size() == column_bindings.size());
 }
 
 void LogicalJoin::SetEmitFactVectors(bool emit_fact_vector_p, idx_t emitter_id_p) {
 	emit_fact_vectors = emit_fact_vector_p;
 	emitter_id = emitter_id_p;
+}
+
+bool LogicalJoin::WillExpandFactors() {
+	return false;
+}
+
+vector<LogicalType> LogicalJoin::GetOriginalLHSTypes() {
+	return MapTypes(children[0]->types, left_projection_map);
+};
+
+vector<LogicalType> LogicalJoin::GetLHSTypes() {
+	auto originals = GetOriginalLHSTypes();
+	if (WillExpandFactors()) {
+		return FlattenTypes(originals);
+	} else {
+		return originals;
+	}
 }
 
 vector<LogicalType> LogicalJoin::GetOriginalRHSTypes() {
@@ -63,7 +98,7 @@ vector<LogicalType> LogicalJoin::GetOriginalRHSTypes() {
 vector<LogicalType> LogicalJoin::GetRHSTypes() {
 	vector<LogicalType> rhs_types = GetOriginalRHSTypes();
 	vector<ColumnBinding> rhs_bindings = GetOriginalRHSBindings();
-    if (this->emit_fact_vectors){
+	if (this->emit_fact_vectors) {
 		return {LogicalType::FACT_POINTER(rhs_types, rhs_bindings, this->emitter_id)};
 	} else {
 		return rhs_types;
@@ -77,7 +112,7 @@ vector<ColumnBinding> LogicalJoin::GetOriginalRHSBindings() {
 
 vector<ColumnBinding> LogicalJoin::GetRHSBindings() {
 	auto right_bindings = GetOriginalRHSBindings();
-	if (this->emit_fact_vectors){
+	if (this->emit_fact_vectors) {
 		return {ColumnBinding(right_bindings[0].table_index, 0)};
 	} else {
 		return right_bindings;

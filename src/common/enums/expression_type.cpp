@@ -234,6 +234,7 @@ string ExpressionClassToString(ExpressionClass type) {
 string ExpressionTypeToOperator(ExpressionType type) {
 	switch (type) {
 	case ExpressionType::COMPARE_FACT_EQUAL:
+		return "f=";
 	case ExpressionType::COMPARE_EQUAL:
 		return "=";
 	case ExpressionType::COMPARE_NOTEQUAL:

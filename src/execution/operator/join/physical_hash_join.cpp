@@ -177,7 +177,7 @@ public:
 
 unique_ptr<JoinHashTable> PhysicalHashJoin::InitializeHashTable(ClientContext &context) const {
 	auto result = make_uniq<JoinHashTable>(BufferManager::GetBufferManager(context), conditions, payload_types,
-	                                       join_type, rhs_output_columns, this->emit_fact_vector, this->emitter_id);
+	                                       join_type, rhs_output_columns, this->emit_fact_vector, this->emitter_id, this);
 	if (!delim_types.empty() && join_type == JoinType::MARK) {
 		// correlated MARK join
 		if (delim_types.size() + 1 == conditions.size()) {
@@ -1105,6 +1105,10 @@ string PhysicalHashJoin::ParamsToString() const {
 		result += "\n[INFOSEPARATOR]\n";
 	}
 	result += StringUtil::Format("EC: %llu\n", estimated_cardinality);
+	if (this->emit_fact_vector){
+		result += "\n[INFOSEPARATOR]\n";
+		result += "Emits Fact Vector\n";
+	}
 	return result;
 }
 TupleDataCollection *PhysicalHashJoin::GetHTDataCollection(const idx_t emitter_id) const {

@@ -15,6 +15,7 @@
 #include "duckdb/execution/physical_operator.hpp"
 #include "duckdb/planner/expression.hpp"
 #include "duckdb/planner/operator/logical_fact_expand.hpp"
+#include "duckdb/execution/fact_utils.hpp"
 
 namespace duckdb {
 class FactExpandState;
@@ -284,7 +285,6 @@ struct CombinedScanStructure {
 
 private:
 	ScanSelection GetScanSelectionSequential(idx_t max_tuples);
-	void IntersectLists();
 };
 
 class PhysicalFactExpand : public PhysicalOperator {
@@ -340,26 +340,6 @@ public:
 		return *fact_column_collection; // Dereferencing the pointer to return a reference
 	}
 
-	static TupleDataCollection *FindDataCollectionInOp(const PhysicalOperator *op, const idx_t &emitter_id) {
-
-		if (op->type == PhysicalOperatorType::HASH_JOIN) {
-			auto physical_hash_join_op = reinterpret_cast<const PhysicalHashJoin *>(op);
-			auto collection = physical_hash_join_op->GetHTDataCollection(emitter_id);
-			// can be null e.g. if wrong emitter id
-			if (collection != nullptr) {
-				return collection;
-			}
-		}
-
-		for (auto &child : op->children) {
-			auto child_data_collection = FindDataCollectionInOp(child.get(), emitter_id);
-			if (child_data_collection) {
-				return child_data_collection;
-			}
-		}
-
-		return nullptr;
-	}
 	void InitializeMatcher(const duckdb::DataChunk &input, const PhysicalFactExpand *op,
 	                       const vector<FactExpandCondition> &conditions_p);
 
