@@ -20,6 +20,7 @@
 #include "duckdb/execution/ht_entry.hpp"
 #include "duckdb/planner/operator/logical_comparison_join.hpp"
 #include "duckdb/storage/storage_info.hpp"
+#include "duckdb/execution/fact_data.hpp"
 
 namespace duckdb {
 
@@ -65,16 +66,76 @@ public:
 	// that it does not fit into the CPU cache
 	static constexpr const idx_t USE_SALT_THRESHOLD = 8192;
 
+	struct SharedState {
+
+		SharedState();
+
+		// The ptrs to the row to which a key should be inserted into during building
+		// or matched against during probing
+		Vector rhs_row_locations;
+
+		SelectionVector salt_match_sel;
+		SelectionVector key_no_match_sel;
+	};
+
+	struct FactProbeState {
+
+		FactProbeState();
+
+		void Initialize(idx_t element_count, BufferManager &buffer_manager);
+
+		SelectionVector chains_remaining_sel;
+		Vector tmp_data_v;
+
+		bool initialized_data = false;
+		AllocatedData ptrs_lhs_list_data;
+		data_ptr_t* ptrs_lhs_lists[STANDARD_VECTOR_SIZE];
+
+		AllocatedData ptrs_rhs_list_data;
+		data_ptr_t* ptrs_rhs_lists[STANDARD_VECTOR_SIZE];
+
+		idx_t ptrs_list_size[STANDARD_VECTOR_SIZE];
+
+		fact_data_t* data_ptrs_lhs[STANDARD_VECTOR_SIZE];
+		fact_data_t* data_ptrs_rhs[STANDARD_VECTOR_SIZE];
+	};
+
+	struct ProbeState : SharedState {
+
+		ProbeState();
+
+		Vector salt_v;
+		Vector ht_offsets_v;
+		Vector ht_offsets_dense_v;
+
+		SelectionVector non_empty_sel;
+
+		FactProbeState fact;
+
+	};
+
+
+	struct InsertState : SharedState {
+		InsertState(const unique_ptr<TupleDataCollection> &data_collection,
+		            const vector<column_t> &equality_predicate_columns);
+		/// Because of the index hick up
+		SelectionVector remaining_sel;
+		SelectionVector key_match_sel;
+		TupleDataChunkState chunk_state;
+	};
+
 	//! Scan structure that can be used to resume scans, as a single probe can
 	//! return 1024*N values (where N is the size of the HT). This is
 	//! returned by the JoinHashTable::Scan function and can be used to resume a
 	//! probe.
 	struct ScanStructure {
 		TupleDataChunkState &key_state;
+		ProbeState &probe_state;
+
 		//! Directly point to the entry in the hash table
 		Vector pointers;
 
-		Vector lhs_pointers;
+		Vector lhs_pointers_v;
 		TupleDataCollection* lhs_collection;
 
 		idx_t count;
@@ -87,7 +148,7 @@ public:
 		JoinHashTable &ht;
 		bool finished;
 
-		explicit ScanStructure(JoinHashTable &ht, TupleDataChunkState &key_state);
+		explicit ScanStructure(JoinHashTable &ht, TupleDataChunkState &key_state, ProbeState &probe_state_p);
 		//! Get the next batch of data from the scan structure
 		void Next(DataChunk &keys, DataChunk &left, DataChunk &result);
 		//! Are pointer chains all pointing to NULL?
@@ -95,8 +156,7 @@ public:
 		//! whether to use the intersected_chain_pointers or not
 		bool use_intersected_chain_pointers;
 		//! array of lists of pointers for the intersected chain pointers
-		vector<vector<data_ptr_t>> rhs_intersection_pointer;
-		vector<vector<data_ptr_t>> lhs_intersection_pointer;
+
 
 	private:
 		//! Next operator for the inner join
@@ -133,37 +193,6 @@ public:
 	};
 
 public:
-	struct SharedState {
-
-		SharedState();
-
-		// The ptrs to the row to which a key should be inserted into during building
-		// or matched against during probing
-		Vector rhs_row_locations;
-
-		SelectionVector salt_match_sel;
-		SelectionVector key_no_match_sel;
-	};
-
-	struct ProbeState : SharedState {
-
-		ProbeState();
-
-		Vector salt_v;
-		Vector ht_offsets_v;
-		Vector ht_offsets_dense_v;
-
-		SelectionVector non_empty_sel;
-	};
-
-	struct InsertState : SharedState {
-		InsertState(const unique_ptr<TupleDataCollection> &data_collection,
-		            const vector<column_t> &equality_predicate_columns);
-		/// Because of the index hick up
-		SelectionVector remaining_sel;
-		SelectionVector key_match_sel;
-		TupleDataChunkState chunk_state;
-	};
 
 	JoinHashTable(BufferManager &buffer_manager, const vector<JoinCondition> &conditions,
 	              vector<LogicalType> build_types, JoinType type, const vector<idx_t> &output_columns,
@@ -182,6 +211,8 @@ public:
 	//! Finalize must be called before any call to Probe, and after Finalize is called Build should no longer be
 	//! ever called.
 	void Finalize(idx_t chunk_idx_from, idx_t chunk_idx_to, bool parallel);
+	//! Finalize the build of fact data to later refer pointer to the fact data
+	void InitializeFactData();
 	//! Probe the HT with the given input chunk, resulting in the given result
 	unique_ptr<ScanStructure> Probe(DataChunk &keys, TupleDataChunkState &key_state, ProbeState &probe_state,
 	                                optional_ptr<Vector> precomputed_hashes = nullptr);
@@ -255,6 +286,9 @@ public:
 
 	//! If there is more than one element in the chain, we need to scan the next elements of the chain
 	bool chains_longer_than_one;
+	//! Distinct chain count
+	idx_t chains_count;
+
 
 	//! The capacity of the HT. Is the same as hash_map.GetSize() / sizeof(ht_entry_t)
 	idx_t capacity;
@@ -294,7 +328,7 @@ public:
 
 private:
 	unique_ptr<ScanStructure> InitializeScanStructure(DataChunk &keys, TupleDataChunkState &key_state,
-	                                                  const SelectionVector *&current_sel);
+	                                                  const SelectionVector *&current_sel, ProbeState &probe_state);
 	void Hash(DataChunk &keys, const SelectionVector &sel, idx_t count, Vector &hashes);
 
 	bool UseSalt() const;
@@ -323,11 +357,44 @@ private:
 	//! The hash map of the HT, created after finalization
 	AllocatedData hash_map;
 	ht_entry_t *entries;
+
 	//! Whether or not NULL values are considered equal in each of the comparisons
 	vector<bool> null_values_are_equal;
 
 	//! Copying not allowed
 	JoinHashTable(const JoinHashTable &) = delete;
+
+public:
+	//===--------------------------------------------------------------------===//
+	// Factorization stuff
+	//===--------------------------------------------------------------------===//
+	AllocatedData chains_length_data;
+	idx_t *chain_lengths;
+
+	AllocatedData chains_ht_data;
+	uint64_t *chains_ht;
+	float_t ht_capacity_to_elements_ratio;
+	idx_t chains_ht_offset;
+
+
+	AllocatedData fact_datas_data;
+	fact_data_t *fact_datas = nullptr;
+	//! The current offset of the next element in fact_data that gets incremented every time a new fact_data is added
+	idx_t fact_data_offset = 0;
+
+	AllocatedData fact_keys_data;
+	uint64_t *fact_keys = nullptr;
+
+	AllocatedData fact_ptr_data;
+	data_ptr_t* fact_ptr;
+	//! The current offset of the next element in fact_data that gets incremented every time a new fact_data is added
+	idx_t chain_elements_offset = 0;
+
+	//! We will replace the chains_length_data with the pointer to the fact_data, therefore we need a mask to identify
+	//! the fact_data. The mask is the most significant bit of the pointer. This should never be set by accident from
+	//! the length, as this would mean that the length is larger than the pointer size.
+	static constexpr idx_t FACT_DATA_MASK = 0x8000000000000000;
+
 
 public:
 	//===--------------------------------------------------------------------===//
@@ -433,6 +500,8 @@ private:
 	//! First and last partition of the current probe round
 	idx_t partition_start;
 	idx_t partition_end;
+	void ProbeAndIntersectFacts(ProbeState &probe_state, unique_ptr<ScanStructure> &ss) const;
+	void InitializeIntersectionData(ProbeState &probe_state, unique_ptr<ScanStructure> &ss) const;
 };
 
 } // namespace duckdb

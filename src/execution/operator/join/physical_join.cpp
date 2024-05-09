@@ -10,7 +10,7 @@ PhysicalJoin::PhysicalJoin(LogicalOperator &op, PhysicalOperatorType type, JoinT
                            idx_t estimated_cardinality)
     : CachingPhysicalOperator(type, op.types, estimated_cardinality), join_type(join_type) {
 	auto join_op = reinterpret_cast<LogicalJoin *>(&op);
-	this->emit_fact_vector = join_op->emit_fact_vectors;
+	this->emit_fact_vector = join_op->produce_fact_vectors;
 	this->emitter_id = join_op->emitter_id;
 }
 

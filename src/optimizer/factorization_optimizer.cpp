@@ -231,7 +231,7 @@ unique_ptr<OperatorFactEmitInfo> FactorizationOptimizer::OptimizeInternal(unique
 	    parent != nullptr && CanProcessFactVectorsFromChild(*parent, parent_child_idx, proposed_emission);
 
 	// todo: Overwrite to always emit fact vectors
-	// parent_can_process = true;
+	parent_can_process = true;
 	if (proposed_emission->is_able && parent_can_process) {
 		unique_ptr<OperatorFactEmitInfo> actual_emission =
 		    EmitFactVectors(op, parent.get(), parent_child_idx, proposed_emission);

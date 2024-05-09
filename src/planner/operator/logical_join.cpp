@@ -69,7 +69,7 @@ void LogicalJoin::ResolveTypes() {
 }
 
 void LogicalJoin::SetEmitFactVectors(bool emit_fact_vector_p, idx_t emitter_id_p) {
-	emit_fact_vectors = emit_fact_vector_p;
+	produce_fact_vectors = emit_fact_vector_p;
 	emitter_id = emitter_id_p;
 }
 
@@ -98,7 +98,7 @@ vector<LogicalType> LogicalJoin::GetOriginalRHSTypes() {
 vector<LogicalType> LogicalJoin::GetRHSTypes() {
 	vector<LogicalType> rhs_types = GetOriginalRHSTypes();
 	vector<ColumnBinding> rhs_bindings = GetOriginalRHSBindings();
-	if (this->emit_fact_vectors) {
+	if (this->produce_fact_vectors && !WillExpandFactors()) {
 		return {LogicalType::FACT_POINTER(rhs_types, rhs_bindings, this->emitter_id)};
 	} else {
 		return rhs_types;
@@ -112,7 +112,7 @@ vector<ColumnBinding> LogicalJoin::GetOriginalRHSBindings() {
 
 vector<ColumnBinding> LogicalJoin::GetRHSBindings() {
 	auto right_bindings = GetOriginalRHSBindings();
-	if (this->emit_fact_vectors) {
+	if (this->produce_fact_vectors && !WillExpandFactors()) {
 		return {ColumnBinding(right_bindings[0].table_index, 0)};
 	} else {
 		return right_bindings;

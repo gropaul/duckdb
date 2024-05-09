@@ -1,7 +1,9 @@
-
+#pragma once
 
 #include "duckdb/common/extra_type_info.hpp"
 #include "duckdb/execution/operator/join/physical_hash_join.hpp"
+#include "duckdb/execution/fact_data.hpp"
+
 namespace duckdb {
 
 static TupleDataCollection *FindDataCollectionInOp(const PhysicalOperator *op, const idx_t &emitter_id) {
@@ -60,84 +62,6 @@ static vector<ColumnBinding> FlattenBindings(const vector<ColumnBinding> &factor
 	}
 
 	return flat_bindings;
-};
-struct PointerOccurrence {
-	PointerOccurrence() : pointer(nullptr), occurrencies(0) {
-	}
-	PointerOccurrence(data_ptr_t pointer) : pointer(pointer), occurrencies(1) {
-	}
-	data_ptr_t pointer;
-	uint64_t occurrencies;
-};
-
-struct ChainIntersectionResult {
-	vector<data_ptr_t> pointers;
-};
-
-struct ChainData {
-
-	// the pointers that form the original chain
-	vector<data_ptr_t> pointers;
-
-	// the keys for the intersection
-	vector<uint64_t> keys;
-
-	// holds how often a key occurs in the chain
-	unordered_map<uint64_t, PointerOccurrence> key_map;
-
-	// whether the map has been built
-	bool map_built = false;
-
-	bool KeyMapBuilt() {
-		return map_built;
-	}
-
-	// Builds the key map if it has not been built yet
-	void BuildKeyMap() {
-
-		if (map_built) {
-			return;
-		}
-
-		map_built = true;
-		// reserve space for the key map
-		key_map.reserve(keys.size());
-
-		for (idx_t i = 0; i < keys.size(); i++) {
-			auto key = keys[i];
-			auto pointer = pointers[i];
-			auto entry = key_map.find(key);
-			if (entry == key_map.end()) {
-				auto new_occurrence = PointerOccurrence(pointer);
-				key_map[key] = new_occurrence;
-			} else {
-				entry->second.occurrencies++;
-			}
-		}
-	}
-
-	void Probe(const ChainData &probe_data, vector<data_ptr_t> &lhs_pointers, vector<data_ptr_t> &rhs_pointers) {
-
-		// must be built
-		D_ASSERT(KeyMapBuilt());
-
-		for (idx_t i = 0; i < probe_data.keys.size(); i++) {
-			auto lhs_key = probe_data.keys[i];
-			auto lhs_pointer = probe_data.pointers[i];
-			auto entry = key_map.find(lhs_key);
-			if (entry != key_map.end()) {
-				auto occurence = entry->second;
-				auto rhs_pointer = occurence.pointer;
-				for (idx_t j = 0; j < occurence.occurrencies; j++) {
-					lhs_pointers.push_back(lhs_pointer);
-					rhs_pointers.push_back(rhs_pointer);
-				}
-			}
-		}
-
-		// must be equal in length
-		D_ASSERT(lhs_pointers.size() == rhs_pointers.size());
-	}
 };
 
 } // namespace duckdb

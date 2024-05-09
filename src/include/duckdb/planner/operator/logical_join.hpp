@@ -57,7 +57,7 @@ public:
 
 	void SetEmitFactVectors(bool emit_fact_vector_p, idx_t emitter_id_p);
 
-	bool emit_fact_vectors = false;
+	bool produce_fact_vectors = false;
 	idx_t emitter_id = 0;
 protected:
 
