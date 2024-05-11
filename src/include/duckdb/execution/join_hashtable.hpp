@@ -371,12 +371,6 @@ public:
 	AllocatedData chains_length_data;
 	idx_t *chain_lengths;
 
-	AllocatedData chains_ht_data;
-	uint64_t *chains_ht;
-	float_t ht_capacity_to_elements_ratio;
-	idx_t chains_ht_offset;
-
-
 	AllocatedData fact_datas_data;
 	fact_data_t *fact_datas = nullptr;
 	//! The current offset of the next element in fact_data that gets incremented every time a new fact_data is added
@@ -502,6 +496,7 @@ private:
 	idx_t partition_end;
 	void ProbeAndIntersectFacts(ProbeState &probe_state, unique_ptr<ScanStructure> &ss) const;
 	void InitializeIntersectionData(ProbeState &probe_state, unique_ptr<ScanStructure> &ss) const;
+	void UpdateSelAndPointer(ProbeState &probe_state, unique_ptr<ScanStructure> &ss) const;
 };
 
 } // namespace duckdb

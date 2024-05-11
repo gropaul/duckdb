@@ -80,6 +80,7 @@ static void GetChainData(Vector &pointers_v, TupleDataCollection *data_collectio
 		idx_t next_chains_remaining = 0;
 		chain_element_index += 1;
 
+		// todo: we don't need to check the next pointer as we know the chain length
 		for (idx_t idx = 0; idx < chains_remaining; idx++) {
 
 			auto sel_idx = probe_state.chains_remaining_sel.get_index(idx);
@@ -94,6 +95,8 @@ static void GetChainData(Vector &pointers_v, TupleDataCollection *data_collectio
 				pointers[sel_idx] = next_pointer;
 
 				probe_state.chains_remaining_sel.set_index(next_chains_remaining++, sel_idx);
+			} else {
+				fact_data->SortKeys();
 			}
 		}
 
@@ -129,28 +132,29 @@ static void DetermineBuildAndProbeSides(fact_data_t &left, fact_data_t &right, f
 // We always have to return the rhs pointers to make sure that we can expand on the rhs
 static void Intersect(fact_data_t &left, const fact_data_t &right, data_ptr_t *&lhs_pointers_res,
                       data_ptr_t *&rhs_pointers_res, idx_t &pointers_index) {
-	// build on the lhs to probe with the rhs
-	left.BuildKeyMap();
-
-	auto &ht = left.chain_ht;
-	auto &capacity = left.ht_capacity;
 
 	pointers_index = 0;
 
-	// probe the lhs with the rhs
-	for (idx_t rhs_idx = 0; rhs_idx < right.chain_length; rhs_idx++) {
-		auto rhs_key = right.keys[rhs_idx];
-		auto hash = rhs_key % left.ht_capacity;
-		while (ht[hash] != NULL_ELEMENT) {
-			auto &lhs_idx = ht[hash];
+	// intersect to sorted lists
+	idx_t left_index = 0;
+	idx_t right_index = 0;
 
-			if (left.keys[lhs_idx] == rhs_key) {
-				lhs_pointers_res[pointers_index] = left.pointers[lhs_idx];
-				rhs_pointers_res[pointers_index] = right.pointers[rhs_idx];
-				pointers_index += 1;
-			}
-			hash = (hash + 1) % capacity;
+	while (left_index < left.chain_length && right_index < right.chain_length) {
+		uint64_t &left_key = left.keys[left_index];
+		uint64_t &right_key = right.keys[right_index];
+
+		if (left_key == right_key) {
+			lhs_pointers_res[pointers_index] = left.pointers[left_index];
+			rhs_pointers_res[pointers_index] = right.pointers[right_index];
+			pointers_index += 1;
+			left_index += 1;
+			right_index += 1;
+		} else {
+			bool left_key_smaller = (left_key < right_key);
+			left_index += left_key_smaller;
+			right_index += !left_key_smaller;
 		}
 	}
+
 }
 } // namespace duckdb

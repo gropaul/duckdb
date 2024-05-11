@@ -204,14 +204,9 @@ static inline data_ptr_t GetFactPointer(const idx_t &ht_offset, const data_ptr_t
 		auto fact_keys = &ht->fact_keys[ht->chain_elements_offset];
 		ht->chain_elements_offset += chain_length;
 
-		auto chain_ht = &ht->chains_ht[ht->chains_ht_offset];
-		idx_t ht_capacity = floor(ht->ht_capacity_to_elements_ratio * chain_length);
-		ht->chains_ht_offset += ht_capacity;
-
 		D_ASSERT(ht->chain_elements_offset <= ht->Count());
-		D_ASSERT(ht->chains_ht_offset <= ht->capacity);
 
-		fact_data.Initialize(chain_length, chain_head, fact_ptr, fact_keys, chain_ht, ht_capacity);
+		fact_data.Initialize(chain_length, chain_head, fact_ptr, fact_keys);
 
 		idx_t fact_data_ptr = reinterpret_cast<idx_t>(&fact_data);
 		idx_t masked_ptr = fact_data_ptr | ht->FACT_DATA_MASK;
@@ -796,7 +791,6 @@ void JoinHashTable::InsertHashes(Vector &hashes_v, idx_t count, TupleDataChunkSt
 
 void JoinHashTable::InitializePointerTable() {
 	capacity = PointerTableCapacity(Count());
-	ht_capacity_to_elements_ratio = (double)capacity / Count();
 	D_ASSERT(IsPowerOfTwo(capacity));
 
 	if (hash_map.get()) {
@@ -811,10 +805,6 @@ void JoinHashTable::InitializePointerTable() {
 				chains_length_data = buffer_manager.GetBufferAllocator().Allocate(capacity * sizeof(idx_t));
 				chain_lengths = reinterpret_cast<idx_t *>(chains_length_data.get());
 				std::fill_n(chain_lengths, capacity, 0);
-
-				chains_ht_data = buffer_manager.GetBufferAllocator().Allocate(capacity * sizeof(uint64_t));
-				chains_ht = reinterpret_cast<uint64_t *>(chains_ht_data.get());
-				std::fill_n(chains_ht, capacity, NULL_ELEMENT);
 			}
 
 		} else {
@@ -830,10 +820,6 @@ void JoinHashTable::InitializePointerTable() {
 			chains_length_data = buffer_manager.GetBufferAllocator().Allocate(capacity * sizeof(idx_t));
 			chain_lengths = reinterpret_cast<idx_t *>(chains_length_data.get());
 			std::fill_n(chain_lengths, capacity, 0);
-
-			chains_ht_data = buffer_manager.GetBufferAllocator().Allocate(capacity * sizeof(uint64_t));
-			chains_ht = reinterpret_cast<uint64_t *>(chains_ht_data.get());
-			std::fill_n(chains_ht, capacity, NULL_ELEMENT);
 		}
 	}
 	D_ASSERT(hash_map.GetSize() == capacity * sizeof(idx_t));
@@ -860,7 +846,6 @@ void JoinHashTable::InitializeFactData() {
 
 		chain_elements_offset = 0;
 		fact_data_offset = 0;
-		chains_ht_offset = 0;
 
 		// for debug check if the sum of the lengths is the same as the number of elements
 		idx_t elements_count = 0;
@@ -991,6 +976,27 @@ void JoinHashTable::InitializeIntersectionData(JoinHashTable::ProbeState &probe_
 	}
 }
 
+
+void JoinHashTable::UpdateSelAndPointer(JoinHashTable::ProbeState &probe_state, unique_ptr<ScanStructure> &ss) const {
+	auto lhs_pointers_vector = FlatVector::GetData<data_ptr_t>(ss->lhs_pointers_v);
+	auto rhs_pointers_vector = FlatVector::GetData<data_ptr_t>(ss->pointers);
+
+	// update the lhs and rhs pointers to only point to the intersection
+	for (idx_t i = 0; i < ss->count; i++) {
+		auto sel_idx = ss->sel_vector.get_index(i);
+
+		data_ptr_t *&lhs_pointers = probe_state.fact.ptrs_rhs_lists[sel_idx];
+		data_ptr_t *&rhs_pointers = probe_state.fact.ptrs_rhs_lists[sel_idx];
+
+		idx_t &pointers_list_size = probe_state.fact.ptrs_list_size[sel_idx];
+
+		lhs_pointers_vector[sel_idx] = lhs_pointers[pointers_list_size - 1];
+		rhs_pointers_vector[sel_idx] = rhs_pointers[pointers_list_size - 1];
+
+		pointers_list_size -= 1;
+	}
+}
+
 void JoinHashTable::ProbeAndIntersectFacts(
     JoinHashTable::ProbeState &probe_state,
     unique_ptr<ScanStructure> &ss) const { // only one equality predicate is supported atm
@@ -1007,8 +1013,8 @@ void JoinHashTable::ProbeAndIntersectFacts(
 
 	for (idx_t idx = 0; idx < ss->count; idx++) {
 		auto sel_idx = ss->sel_vector.get_index(idx);
-		auto lhs_chain = lhs_data[sel_idx];
-		auto rhs_chain = rhs_data[sel_idx];
+		auto &lhs_chain = lhs_data[sel_idx];
+		auto &rhs_chain = rhs_data[sel_idx];
 
 		data_ptr_t *&lhs_pointers = probe_state.fact.ptrs_lhs_lists[sel_idx];
 		data_ptr_t *&rhs_pointers = probe_state.fact.ptrs_rhs_lists[sel_idx];
@@ -1022,25 +1028,8 @@ void JoinHashTable::ProbeAndIntersectFacts(
 		new_count += non_empty_intersection;
 	}
 
-	auto lhs_pointers_vector = FlatVector::GetData<data_ptr_t>(ss->lhs_pointers_v);
-	auto rhs_pointers_vector = FlatVector::GetData<data_ptr_t>(ss->pointers);
-
-	// update the lhs and rhs pointers to only point to the intersection
-	for (idx_t i = 0; i < new_count; i++) {
-		auto sel_idx = ss->sel_vector.get_index(i);
-
-		data_ptr_t *&lhs_pointers = probe_state.fact.ptrs_rhs_lists[sel_idx];
-		data_ptr_t *&rhs_pointers = probe_state.fact.ptrs_rhs_lists[sel_idx];
-
-		idx_t &pointers_list_size = probe_state.fact.ptrs_list_size[sel_idx];
-
-		lhs_pointers_vector[sel_idx] = lhs_pointers[pointers_list_size - 1];
-		rhs_pointers_vector[sel_idx] = rhs_pointers[pointers_list_size - 1];
-
-		pointers_list_size -= 1;
-	}
-
 	ss->count = new_count;
+	UpdateSelAndPointer(probe_state, ss);
 }
 
 ScanStructure::ScanStructure(JoinHashTable &ht_p, TupleDataChunkState &key_state_p, ProbeState &probe_state_p)
