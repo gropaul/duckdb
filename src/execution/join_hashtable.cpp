@@ -184,43 +184,6 @@ static inline bool IsDataPointer(const idx_t &ht_offset, idx_t mask) {
 	return (ht_offset & mask) == mask;
 }
 
-static inline data_ptr_t GetFactPointer(const idx_t &ht_offset, const data_ptr_t &chain_head, JoinHashTable *ht) {
-	// get the length of the chain at this position
-	idx_t &chain_length = ht->chain_lengths[ht_offset];
-
-	// check if the length is still the length or already a pointer to the fact data
-	if (IsDataPointer(chain_length, ht->FACT_DATA_MASK)) {
-		// remove mask which is the most significant bit to get the actual pointer
-		idx_t fact_data_ptr = chain_length - ht->FACT_DATA_MASK;
-		return reinterpret_cast<data_ptr_t>(fact_data_ptr);
-	} else {
-
-		// if the chain length is still the length, we need to get the pointer from the fact data
-		auto &fact_data = ht->fact_datas[ht->fact_data_offset];
-		ht->fact_data_offset += 1;
-		// todo: here we have a data dependency as all the elements before wait for the next incrment
-
-		auto fact_ptr = &ht->fact_ptr[ht->chain_elements_offset];
-		auto fact_keys = &ht->fact_keys[ht->chain_elements_offset];
-		ht->chain_elements_offset += chain_length;
-
-		auto chain_ht = &ht->chains_ht[ht->chains_ht_offset];
-		idx_t ht_capacity = floor(ht->ht_capacity_to_elements_ratio * chain_length);
-		ht->chains_ht_offset += ht_capacity;
-
-		D_ASSERT(ht->chain_elements_offset <= ht->Count());
-		D_ASSERT(ht->chains_ht_offset <= ht->capacity);
-
-		fact_data.Initialize(chain_length, chain_head, fact_ptr, fact_keys, chain_ht, ht_capacity);
-
-		idx_t fact_data_ptr = reinterpret_cast<idx_t>(&fact_data);
-		idx_t masked_ptr = fact_data_ptr | ht->FACT_DATA_MASK;
-		chain_length = masked_ptr;
-
-		return reinterpret_cast<data_ptr_t>(fact_data_ptr);
-	}
-}
-
 //! Gets a pointer to the entry in the HT for each of the hashes_v using linear probing. Will update the key_match_sel
 //! vector and the count argument to the number and position of the matches
 template <bool USE_SALTS, bool EMIT_FACT_POINTERS>
@@ -348,7 +311,7 @@ static inline void GetRowPointersInternal(DataChunk &keys, TupleDataChunkState &
 				const data_ptr_t list_head = row_ptr_insert_to[row_index];
 				if (EMIT_FACT_POINTERS) {
 					auto &ht_offset = ht_offsets[row_index];
-					pointers_result[row_index] = GetFactPointer(ht_offset, list_head, ht);
+					pointers_result[row_index] = reinterpret_cast<data_ptr_t>(ht->chain_lengths[ht_offset]);
 				} else {
 					pointers_result[row_index] = list_head;
 				}
@@ -796,7 +759,6 @@ void JoinHashTable::InsertHashes(Vector &hashes_v, idx_t count, TupleDataChunkSt
 
 void JoinHashTable::InitializePointerTable() {
 	capacity = PointerTableCapacity(Count());
-	ht_capacity_to_elements_ratio = (double)capacity / Count();
 	D_ASSERT(IsPowerOfTwo(capacity));
 
 	if (hash_map.get()) {
@@ -811,10 +773,6 @@ void JoinHashTable::InitializePointerTable() {
 				chains_length_data = buffer_manager.GetBufferAllocator().Allocate(capacity * sizeof(idx_t));
 				chain_lengths = reinterpret_cast<idx_t *>(chains_length_data.get());
 				std::fill_n(chain_lengths, capacity, 0);
-
-				chains_ht_data = buffer_manager.GetBufferAllocator().Allocate(capacity * sizeof(uint64_t));
-				chains_ht = reinterpret_cast<uint64_t *>(chains_ht_data.get());
-				std::fill_n(chains_ht, capacity, NULL_ELEMENT);
 			}
 
 		} else {
@@ -830,10 +788,6 @@ void JoinHashTable::InitializePointerTable() {
 			chains_length_data = buffer_manager.GetBufferAllocator().Allocate(capacity * sizeof(idx_t));
 			chain_lengths = reinterpret_cast<idx_t *>(chains_length_data.get());
 			std::fill_n(chain_lengths, capacity, 0);
-
-			chains_ht_data = buffer_manager.GetBufferAllocator().Allocate(capacity * sizeof(uint64_t));
-			chains_ht = reinterpret_cast<uint64_t *>(chains_ht_data.get());
-			std::fill_n(chains_ht, capacity, NULL_ELEMENT);
 		}
 	}
 	D_ASSERT(hash_map.GetSize() == capacity * sizeof(idx_t));
@@ -845,35 +799,64 @@ void JoinHashTable::InitializePointerTable() {
 }
 
 void JoinHashTable::InitializeFactData() {
-	if (fact_datas == nullptr) {
-		// create one fact data for each of the chains
-		fact_datas_data = buffer_manager.GetBufferAllocator().Allocate(chains_count * sizeof(fact_data_t));
-		fact_datas = reinterpret_cast<fact_data_t *>(fact_datas_data.get());
+	if (fact_datas != nullptr) {
+		return;
+	}
 
-		idx_t ht_elements_count = Count();
+	// create one fact data for each of the chains
+	fact_datas_data = buffer_manager.GetBufferAllocator().Allocate(chains_count * sizeof(fact_data_t));
+	fact_datas = reinterpret_cast<fact_data_t *>(fact_datas_data.get());
 
-		fact_keys_data = buffer_manager.GetBufferAllocator().Allocate(ht_elements_count * sizeof(uint64_t));
-		fact_keys = reinterpret_cast<uint64_t *>(fact_keys_data.get());
+	idx_t ht_elements_count = Count();
+	fact_keys_data = buffer_manager.GetBufferAllocator().Allocate(ht_elements_count * sizeof(uint64_t));
+	fact_keys = reinterpret_cast<uint64_t *>(fact_keys_data.get());
 
-		fact_ptr_data = buffer_manager.GetBufferAllocator().Allocate(ht_elements_count * sizeof(data_ptr_t));
-		fact_ptr = reinterpret_cast<data_ptr_t *>(fact_ptr_data.get());
+	fact_ptr_data = buffer_manager.GetBufferAllocator().Allocate(ht_elements_count * sizeof(data_ptr_t));
+	fact_ptr = reinterpret_cast<data_ptr_t *>(fact_ptr_data.get());
 
-		chain_elements_offset = 0;
-		fact_data_offset = 0;
-		chains_ht_offset = 0;
+	// change the pointers in the hashtable to the fact data pointers
+	idx_t fact_data_idx = 0;
+	idx_t chains_total_ht_capacity = 0;
+	idx_t chains_elements_offset = 0;
 
-		// for debug check if the sum of the lengths is the same as the number of elements
-		idx_t elements_count = 0;
-		idx_t distinct_chains = 0;
-		for (idx_t i = 0; i < capacity; i++) {
-			elements_count += chain_lengths[i];
-			if (chain_lengths[i] > 0) {
-				distinct_chains++;
-			}
+	for (idx_t entry_idx = 0; entry_idx < capacity; entry_idx++) {
+		auto &entry = entries[entry_idx];
+		if (entry.IsOccupied()) {
+			auto &fact_data = fact_datas[fact_data_idx];
+			auto &chain_length = chain_lengths[entry_idx];
+			auto chain_head = entry.GetPointer();
+			auto chain_ht_capacity = NextPowerOfTwo(chain_length * 2);
+			chains_total_ht_capacity += chain_ht_capacity;
+
+			auto chain_fact_ptr = &fact_ptr[chains_elements_offset];
+			auto chain_fact_keys = &fact_keys[chains_elements_offset];
+			chains_elements_offset += chain_length;
+
+			fact_data.Initialize(chain_length, chain_head, chain_fact_ptr, chain_fact_keys, chain_ht_capacity);
+			uint64_t fact_data_ptr = reinterpret_cast<uint64_t>(&fact_data);
+			chain_lengths[entry_idx] = fact_data_ptr;
+
+			fact_data_idx++;
+
+			D_ASSERT(chains_elements_offset <= ht_elements_count);
 		}
+	}
 
-		D_ASSERT(distinct_chains == chains_count);
-		D_ASSERT(elements_count == ht_elements_count);
+	// initialize chains HTs
+	chains_ht_data = buffer_manager.GetBufferAllocator().Allocate(chains_total_ht_capacity * sizeof(uint64_t));
+	chains_ht = reinterpret_cast<uint64_t *>(chains_ht_data.get());
+	std::fill_n(chains_ht, chains_total_ht_capacity, NULL_ELEMENT);
+
+	// set the pointer to the hashtable in the fact data
+	idx_t chains_ht_offset = 0;
+	for (fact_data_idx = 0; fact_data_idx < chains_count; fact_data_idx++) {
+		auto &fact_data = fact_datas[fact_data_idx];
+
+		auto chain_ht = &chains_ht[chains_ht_offset];
+		fact_data.chain_ht = chain_ht;
+
+		auto chain_ht_capacity = fact_data.ht_capacity;
+		chains_ht_offset += chain_ht_capacity;
 	}
 }
 
@@ -965,7 +948,8 @@ unique_ptr<ScanStructure> JoinHashTable::Probe(DataChunk &keys, TupleDataChunkSt
 	return ss;
 }
 
-void JoinHashTable::InitializeIntersectionData(JoinHashTable::ProbeState &probe_state, unique_ptr<ScanStructure> &ss) const {
+void JoinHashTable::InitializeIntersectionData(JoinHashTable::ProbeState &probe_state,
+                                               unique_ptr<ScanStructure> &ss) const {
 	probe_state.fact.Initialize(Count(), buffer_manager);
 
 	auto &lhs_data = probe_state.fact.data_ptrs_lhs;

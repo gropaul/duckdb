@@ -17,10 +17,10 @@
 #include "duckdb/common/types/row/tuple_data_layout.hpp"
 #include "duckdb/common/types/vector.hpp"
 #include "duckdb/execution/aggregate_hashtable.hpp"
+#include "duckdb/execution/fact_data.hpp"
 #include "duckdb/execution/ht_entry.hpp"
 #include "duckdb/planner/operator/logical_comparison_join.hpp"
 #include "duckdb/storage/storage_info.hpp"
-#include "duckdb/execution/fact_data.hpp"
 
 namespace duckdb {
 
@@ -89,15 +89,15 @@ public:
 
 		bool initialized_data = false;
 		AllocatedData ptrs_lhs_list_data;
-		data_ptr_t* ptrs_lhs_lists[STANDARD_VECTOR_SIZE];
+		data_ptr_t *ptrs_lhs_lists[STANDARD_VECTOR_SIZE];
 
 		AllocatedData ptrs_rhs_list_data;
-		data_ptr_t* ptrs_rhs_lists[STANDARD_VECTOR_SIZE];
+		data_ptr_t *ptrs_rhs_lists[STANDARD_VECTOR_SIZE];
 
 		idx_t ptrs_list_size[STANDARD_VECTOR_SIZE];
 
-		fact_data_t* data_ptrs_lhs[STANDARD_VECTOR_SIZE];
-		fact_data_t* data_ptrs_rhs[STANDARD_VECTOR_SIZE];
+		fact_data_t *data_ptrs_lhs[STANDARD_VECTOR_SIZE];
+		fact_data_t *data_ptrs_rhs[STANDARD_VECTOR_SIZE];
 	};
 
 	struct ProbeState : SharedState {
@@ -111,9 +111,7 @@ public:
 		SelectionVector non_empty_sel;
 
 		FactProbeState fact;
-
 	};
-
 
 	struct InsertState : SharedState {
 		InsertState(const unique_ptr<TupleDataCollection> &data_collection,
@@ -136,7 +134,7 @@ public:
 		Vector pointers;
 
 		Vector lhs_pointers_v;
-		TupleDataCollection* lhs_collection;
+		TupleDataCollection *lhs_collection;
 
 		idx_t count;
 		SelectionVector sel_vector;
@@ -156,7 +154,6 @@ public:
 		//! whether to use the intersected_chain_pointers or not
 		bool use_intersected_chain_pointers;
 		//! array of lists of pointers for the intersected chain pointers
-
 
 	private:
 		//! Next operator for the inner join
@@ -193,7 +190,6 @@ public:
 	};
 
 public:
-
 	JoinHashTable(BufferManager &buffer_manager, const vector<JoinCondition> &conditions,
 	              vector<LogicalType> build_types, JoinType type, const vector<idx_t> &output_columns,
 	              const bool emit_fact_vectors, const idx_t emitter_id, const PhysicalOperator *op_p);
@@ -289,7 +285,6 @@ public:
 	//! Distinct chain count
 	idx_t chains_count;
 
-
 	//! The capacity of the HT. Is the same as hash_map.GetSize() / sizeof(ht_entry_t)
 	idx_t capacity;
 	//! The size of an entry as stored in the HashTable
@@ -373,28 +368,15 @@ public:
 
 	AllocatedData chains_ht_data;
 	uint64_t *chains_ht;
-	float_t ht_capacity_to_elements_ratio;
-	idx_t chains_ht_offset;
-
 
 	AllocatedData fact_datas_data;
 	fact_data_t *fact_datas = nullptr;
-	//! The current offset of the next element in fact_data that gets incremented every time a new fact_data is added
-	idx_t fact_data_offset = 0;
 
 	AllocatedData fact_keys_data;
 	uint64_t *fact_keys = nullptr;
 
 	AllocatedData fact_ptr_data;
-	data_ptr_t* fact_ptr;
-	//! The current offset of the next element in fact_data that gets incremented every time a new fact_data is added
-	idx_t chain_elements_offset = 0;
-
-	//! We will replace the chains_length_data with the pointer to the fact_data, therefore we need a mask to identify
-	//! the fact_data. The mask is the most significant bit of the pointer. This should never be set by accident from
-	//! the length, as this would mean that the length is larger than the pointer size.
-	static constexpr idx_t FACT_DATA_MASK = 0x8000000000000000;
-
+	data_ptr_t *fact_ptr;
 
 public:
 	//===--------------------------------------------------------------------===//
