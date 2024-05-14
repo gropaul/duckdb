@@ -101,35 +101,51 @@ static void GetChainData(Vector &pointers_v, TupleDataCollection *data_collectio
 }
 
 // Function to determine which side of a join operation should be used for building and probing
-static void DetermineBuildAndProbeSides(fact_data_t &left, fact_data_t &right, fact_data_t *&build_side,
-                                        fact_data_t *&probe_side) {
-	bool lhs_built = left.KeyMapBuilt();
-	bool rhs_built = right.KeyMapBuilt();
+// 1. if one of the sides is already built, we should use the other side for building and probing
+// 2. if both sides are built or none of them is built, we should use the smaller side for building and probing
+static void DetermineBuildAndProbeSides(fact_data_t *&build_side, fact_data_t *&probe_side, data_ptr_t *&build_res,
+                                        data_ptr_t *&probe_res) {
+	bool current_build_side_build = build_side->KeyMapBuilt();
+	bool current_probe_side_build = probe_side->KeyMapBuilt();
 
-	// Decide on the build and probe side based on whether the key maps have been built
-	if (lhs_built && !rhs_built) {
-		build_side = &left;
-		probe_side = &right;
-	} else if (!lhs_built && rhs_built) {
-		build_side = &right;
-		probe_side = &left;
+	// Determine which side to build and which to probe
+	if (current_build_side_build && !current_probe_side_build) {
+		// Current build side is built, use the other side for probing, everything is already set up
+	} else if (!current_build_side_build && current_probe_side_build) {
+		// Current build side is not built, but the probe side is built, swap the sides
+		std::swap(build_side, probe_side);
+		std::swap(build_res, probe_res);
 	} else {
-		// If both or neither are built, choose the smaller one as the build side to optimize performance
-		if (left.chain_length < right.chain_length) {
-			build_side = &left;
-			probe_side = &right;
-		} else {
-			build_side = &right;
-			probe_side = &left;
+		// Either both sides are built or neither side is built
+		// Build the smaller side and probe the larger side
+		idx_t current_build_side_length = build_side->chain_length;
+		idx_t current_probe_side_length = probe_side->chain_length;
+
+		// If the build side is larger than the probe side, swap the sides
+		if (current_build_side_length > current_probe_side_length) {
+			std::swap(build_side, probe_side);
+			std::swap(build_res, probe_res);
+		}
+
+		// if not both sides are built, build the build side
+		if (!current_build_side_build) {
+			// build the build side
+			build_side->BuildKeyMap();
 		}
 	}
+
+	D_ASSERT(build_side->KeyMapBuilt());
 }
 
 // We always have to return the rhs pointers to make sure that we can expand on the rhs
-static void Intersect(fact_data_t &left, const fact_data_t &right, data_ptr_t *&lhs_pointers_res,
-                      data_ptr_t *&rhs_pointers_res, idx_t &pointers_index) {
+static void Intersect(fact_data_t *left_ptr, fact_data_t *right_ptr, data_ptr_t *lhs_pointers_res,
+                      data_ptr_t *rhs_pointers_res, idx_t &pointers_index) {
+
 	// build on the lhs to probe with the rhs
-	left.BuildKeyMap();
+	DetermineBuildAndProbeSides(left_ptr, right_ptr, lhs_pointers_res, rhs_pointers_res);
+
+	auto left = *left_ptr;
+	auto right = *right_ptr;
 
 	auto &ht = left.chain_ht;
 	auto &bitmask = left.ht_bitmask;

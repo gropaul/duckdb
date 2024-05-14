@@ -26,7 +26,8 @@ inline void FillHtWithIndex(uint64_t *elements, idx_t elements_count, uint64_t *
 }
 
 struct fact_data_t { // NOLINT
-	void Initialize(idx_t chain_length_p, data_ptr_t chain_head_p, data_ptr_t *pointers_p, uint64_t *keys_p, idx_t ht_capacity_p) {
+	void Initialize(idx_t chain_length_p, data_ptr_t chain_head_p, data_ptr_t *pointers_p, uint64_t *keys_p,
+	                idx_t ht_capacity_p) {
 		chain_length = chain_length_p;
 		chain_head = chain_head_p;
 		pointers = pointers_p;
@@ -65,11 +66,8 @@ struct fact_data_t { // NOLINT
 
 	// Builds the key map if it has not been built yet
 	void BuildKeyMap() {
-		if (map_built) {
-			return;
-		} else {
-			map_built = true;
-		}
+		D_ASSERT(!map_built);
+		map_built = true;
 		FillHtWithIndex(keys, chain_length, chain_ht, ht_bitmask);
 	}
 };

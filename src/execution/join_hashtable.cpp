@@ -14,6 +14,8 @@ using ScanStructure = JoinHashTable::ScanStructure;
 using ProbeSpill = JoinHashTable::ProbeSpill;
 using ProbeSpillLocalState = JoinHashTable::ProbeSpillLocalAppendState;
 
+const idx_t ELEMENT_FACTOR = 200;
+
 JoinHashTable::SharedState::SharedState()
     : rhs_row_locations(LogicalType::POINTER), salt_match_sel(STANDARD_VECTOR_SIZE),
       key_no_match_sel(STANDARD_VECTOR_SIZE) {
@@ -33,7 +35,7 @@ void JoinHashTable::FactProbeState::Initialize(idx_t element_count, BufferManage
 	if (initialized_data) {
 		return;
 	} else {
-		idx_t n_allocate = element_count * 10;
+		idx_t n_allocate = element_count * ELEMENT_FACTOR;
 		ptrs_lhs_list_data = buffer_manager_p.GetBufferAllocator().Allocate(n_allocate * sizeof(data_ptr_t));
 		ptrs_rhs_list_data = buffer_manager_p.GetBufferAllocator().Allocate(n_allocate * sizeof(data_ptr_t));
 
@@ -971,7 +973,7 @@ void JoinHashTable::InitializeIntersectionData(JoinHashTable::ProbeState &probe_
 		probe_state.fact.ptrs_rhs_lists[sel_idx] = &rhs_list_data[current_chain_idx];
 
 		current_chain_idx += total_chain_length;
-		D_ASSERT(current_chain_idx <= Count() * 10);
+		D_ASSERT(current_chain_idx <= Count() * ELEMENT_FACTOR);
 	}
 }
 
@@ -994,11 +996,11 @@ void JoinHashTable::ProbeAndIntersectFacts(
 		auto lhs_chain = lhs_data[sel_idx];
 		auto rhs_chain = rhs_data[sel_idx];
 
-		data_ptr_t *&lhs_pointers = probe_state.fact.ptrs_lhs_lists[sel_idx];
-		data_ptr_t *&rhs_pointers = probe_state.fact.ptrs_rhs_lists[sel_idx];
+		data_ptr_t* lhs_pointers = probe_state.fact.ptrs_lhs_lists[sel_idx];
+		data_ptr_t* rhs_pointers = probe_state.fact.ptrs_rhs_lists[sel_idx];
 
 		idx_t &pointers_index = probe_state.fact.ptrs_list_size[sel_idx];
-		Intersect(*lhs_chain, *rhs_chain, lhs_pointers, rhs_pointers, pointers_index);
+		Intersect(lhs_chain, rhs_chain, lhs_pointers, rhs_pointers, pointers_index);
 
 		// set the sel vector to only point on elements where we have an intersection
 		bool non_empty_intersection = pointers_index != 0;
