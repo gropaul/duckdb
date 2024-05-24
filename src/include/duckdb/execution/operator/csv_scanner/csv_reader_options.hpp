@@ -51,8 +51,8 @@ struct CSVReaderOptions {
 	idx_t rejects_limit = 0;
 	//! Number of samples to buffer
 	idx_t buffer_sample_size = (idx_t)STANDARD_VECTOR_SIZE * 50;
-	//! Specifies the string that represents a null value
-	string null_str;
+	//! Specifies the strings that represents a null value
+	vector<string> null_str = {""};
 	//! Whether file is compressed or not, and if so which compression type
 	//! AUTO_DETECT (default; infer from file extension)
 	FileCompressionType compression = FileCompressionType::AUTO_DETECT;
@@ -69,9 +69,9 @@ struct CSVReaderOptions {
 	//! User-defined name list
 	vector<string> name_list;
 	//! Types considered as candidates for auto detection ordered by descending specificity (~ from high to low)
-	vector<LogicalType> auto_type_candidates = {LogicalType::VARCHAR, LogicalType::TIMESTAMP, LogicalType::DATE,
-	                                            LogicalType::TIME,    LogicalType::DOUBLE,    LogicalType::BIGINT,
-	                                            LogicalType::BOOLEAN, LogicalType::SQLNULL};
+	vector<LogicalType> auto_type_candidates = {LogicalType::VARCHAR,   LogicalType::DOUBLE, LogicalType::BIGINT,
+	                                            LogicalType::TIMESTAMP, LogicalType::DATE,   LogicalType::TIME,
+	                                            LogicalType::BOOLEAN,   LogicalType::SQLNULL};
 	//! In case the sniffer found a mismatch error from user defined types or dialect
 	string sniffer_user_mismatch_error;
 	//! In case the sniffer found a mismatch error from user defined types or dialect
@@ -84,6 +84,8 @@ struct CSVReaderOptions {
 	idx_t maximum_line_size = 2097152;
 	//! Whether or not header names shall be normalized
 	bool normalize_names = false;
+	//! True, if column with that index must skip null check
+	unordered_set<string> force_not_null_names;
 	//! True, if column with that index must skip null check
 	vector<bool> force_not_null;
 	//! Number of sample chunks used in auto-detection
@@ -118,10 +120,8 @@ struct CSVReaderOptions {
 	string suffix;
 	string write_newline;
 
-	//! The date format to use (if any is specified)
-	map<LogicalTypeId, StrpTimeFormat> date_format = {{LogicalTypeId::DATE, {}}, {LogicalTypeId::TIMESTAMP, {}}};
 	//! The date format to use for writing (if any is specified)
-	map<LogicalTypeId, StrfTimeFormat> write_date_format = {{LogicalTypeId::DATE, {}}, {LogicalTypeId::TIMESTAMP, {}}};
+	map<LogicalTypeId, Value> write_date_format = {{LogicalTypeId::DATE, Value()}, {LogicalTypeId::TIMESTAMP, Value()}};
 	//! Whether or not a type format is specified
 	map<LogicalTypeId, bool> has_format = {{LogicalTypeId::DATE, false}, {LogicalTypeId::TIMESTAMP, false}};
 
@@ -144,11 +144,14 @@ struct CSVReaderOptions {
 	void SetDelimiter(const string &delimiter);
 	string GetDelimiter() const;
 
+	//! If we can safely ignore errors (i.e., they are being ignored and not being stored in a rejects table)
+	bool IgnoreErrors() const;
+
 	NewLineIdentifier GetNewline() const;
 	void SetNewline(const string &input);
 	//! Set an option that is supported by both reading and writing functions, called by
 	//! the SetReadOption and SetWriteOption methods
-	bool SetBaseOption(const string &loption, const Value &value);
+	bool SetBaseOption(const string &loption, const Value &value, bool write_option = false);
 
 	//! loption - lowercase string
 	//! set - argument(s) to the option

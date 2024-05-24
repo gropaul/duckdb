@@ -462,16 +462,17 @@ static char continuePromptSelected[20]; /* Selected continuation prompt. default
 ** output from UTF-8 into MBCS.
 */
 #if defined(_WIN32) || defined(WIN32)
+static int win_utf8_mode = 0;
+
 void utf8_printf(FILE *out, const char *zFormat, ...){
   va_list ap;
   va_start(ap, zFormat);
   if( stdout_is_console && (out==stdout || out==stderr) ){
     char *z1 = sqlite3_vmprintf(zFormat, ap);
-	if (SetConsoleOutputCP(CP_UTF8)) {
+	if (win_utf8_mode && SetConsoleOutputCP(CP_UTF8)) {
 		// we can write UTF8 directly
         fputs(z1, out);
 	} else {
-        // failed to set code page
         // fallback to writing old style windows unicode
         char *z2 = sqlite3_win32_utf8_to_mbcs_v2(z1, 0);
         fputs(z2, out);
@@ -688,7 +689,7 @@ static char *local_getline(char *zLine, FILE *in){
 #if defined(_WIN32) || defined(WIN32)
   int is_stdin = stdin_is_interactive && in==stdin;
   int is_utf8 = 0;
-  if (is_stdin) {
+  if (is_stdin && win_utf8_mode) {
       if (SetConsoleCP(CP_UTF8)) {
           is_utf8 = 1;
       }
@@ -2282,6 +2283,10 @@ static int makeDirectory(
     rc = SQLITE_NOMEM;
   }else{
     int nCopy = (int)strlen(zCopy);
+	if(nCopy == 0) {
+	  sqlite3_free(zCopy);
+	  return SQLITE_ERROR;
+	}
     int i = 1;
 
     while( rc==SQLITE_OK ){
@@ -13616,6 +13621,9 @@ static const char *(azHelp[]) = {
 #endif
   ".width NUM1 NUM2 ...     Set minimum column widths for columnar output",
   "     Negative values right-justify",
+#if defined(_WIN32) || defined(WIN32)
+  ".utf8                    Enable experimental UTF-8 console output mode"
+#endif
 };
 
 /*
@@ -14200,7 +14208,32 @@ static void linenoise_completion(const char *zLine, linenoiseCompletions *lc){
   char zBuf[1000];
 
   if( nLine>sizeof(zBuf)-30 ) return;
-  if( zLine[0]=='.' || zLine[0]=='#') return;
+  if (zLine[0] == '.') {
+    // auto-complete dot command
+    // look for all completions in the help file
+	for(size_t line_idx = 0; line_idx < ArraySize(azHelp); line_idx++) {
+      const char *line = azHelp[line_idx];
+      if (line[0] != '.') {
+        continue;
+      }
+	  int found_match = 1;
+      size_t line_pos;
+      for(line_pos = 0; !IsSpace(line[line_pos]) && line[line_pos] && line_pos + 1 < sizeof(zBuf); line_pos++) {
+        zBuf[line_pos] = line[line_pos];
+		if (line_pos < nLine && line[line_pos] != zLine[line_pos]) {
+			// only match prefixes for auto-completion, i.e. ".sh" matches ".shell"
+			found_match = 0;
+			break;
+		}
+      }
+      zBuf[line_pos] = '\0';
+      if (found_match && line_pos >= nLine) {
+        linenoiseAddCompletion(lc, zBuf);
+      }
+	}
+    return;
+  }
+  if(zLine[0]=='#') return;
 //  if( i==nLine-1 ) return;
   zSql = sqlite3_mprintf("CALL sql_auto_complete(%Q)", zLine);
   sqlite3 *localDb = NULL;
@@ -19371,7 +19404,13 @@ static int do_meta_command(char *zLine, ShellState *p){
     for(j=1; j<nArg; j++){
       p->colWidth[j-1] = (int)integerValue(azArg[j]);
     }
-  } else {
+  }
+#if defined(_WIN32) || defined(WIN32)
+  else if( c=='u' && strncmp(azArg[0], "utf8", n)==0 ){
+    win_utf8_mode = 1;
+  }
+#endif
+  else {
 #ifdef HAVE_LINENOISE
     const char *error = NULL;
     if (linenoiseParseOption((const char**) azArg, nArg, &error)) {

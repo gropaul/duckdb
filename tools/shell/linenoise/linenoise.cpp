@@ -659,7 +659,7 @@ void Linenoise::EditBackspace() {
 	}
 }
 
-static bool IsSpace(char c) {
+bool Linenoise::IsSpace(char c) {
 	switch (c) {
 	case ' ':
 	case '\r':
@@ -1061,6 +1061,7 @@ Linenoise::Linenoise(int stdin_fd, int stdout_fd, char *buf, size_t buflen, cons
 	render = true;
 	continuation_markers = true;
 	insert = false;
+	search_index = 0;
 
 	/* Buffer starts empty. */
 	buf[0] = '\0';

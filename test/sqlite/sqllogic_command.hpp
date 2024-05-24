@@ -41,6 +41,13 @@ struct ExecuteContext {
 	int error_line;
 };
 
+struct Condition {
+	string keyword;
+	string value;
+	ExpressionType comparison;
+	bool skip_if;
+};
+
 class Command {
 public:
 	Command(SQLLogicTestRunner &runner);
@@ -51,6 +58,7 @@ public:
 	int query_line;
 	string base_sql_query;
 	string file_name;
+	vector<Condition> conditions;
 
 public:
 	Connection *CommandConnection(ExecuteContext &context) const;
@@ -92,7 +100,8 @@ public:
 
 class RestartCommand : public Command {
 public:
-	RestartCommand(SQLLogicTestRunner &runner);
+	bool load_extensions;
+	RestartCommand(SQLLogicTestRunner &runner, bool load_extensions);
 
 public:
 	void ExecuteInternal(ExecuteContext &context) const override;
@@ -146,7 +155,7 @@ private:
 class UnzipCommand : public Command {
 public:
 	// 1 MB
-	static constexpr const int64_t BUFFER_SIZE = 1u << 23;
+	static constexpr const int64_t BUFFER_SIZE = 1u << 20;
 
 public:
 	UnzipCommand(SQLLogicTestRunner &runner, string &input, string &output);
