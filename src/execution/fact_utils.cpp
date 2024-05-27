@@ -139,7 +139,7 @@ static void DetermineBuildAndProbeSides(fact_data_t *&build_side, fact_data_t *&
 
 // We always have to return the rhs pointers to make sure that we can expand on the rhs
 static void Intersect(fact_data_t *left_ptr, fact_data_t *right_ptr, data_ptr_t *lhs_pointers_res,
-                      data_ptr_t *rhs_pointers_res, idx_t &pointers_index) {
+                      data_ptr_t *rhs_pointers_res, idx_t &intersection_count) {
 
 	// build on the lhs to probe with the rhs
 	DetermineBuildAndProbeSides(left_ptr, right_ptr, lhs_pointers_res, rhs_pointers_res);
@@ -150,7 +150,7 @@ static void Intersect(fact_data_t *left_ptr, fact_data_t *right_ptr, data_ptr_t 
 	auto &ht = left.chain_ht;
 	auto &bitmask = left.ht_bitmask;
 
-	pointers_index = 0;
+	intersection_count = 0;
 
 	// probe the lhs with the rhs
 	for (idx_t rhs_idx = 0; rhs_idx < right.chain_length; rhs_idx++) {
@@ -160,9 +160,9 @@ static void Intersect(fact_data_t *left_ptr, fact_data_t *right_ptr, data_ptr_t 
 			auto &lhs_idx = ht[rhs_hash];
 
 			if (left.keys[lhs_idx] == rhs_key) {
-				lhs_pointers_res[pointers_index] = left.pointers[lhs_idx];
-				rhs_pointers_res[pointers_index] = right.pointers[rhs_idx];
-				pointers_index += 1;
+				lhs_pointers_res[intersection_count] = left.pointers[lhs_idx];
+				rhs_pointers_res[intersection_count] = right.pointers[rhs_idx];
+				intersection_count += 1;
 			}
 			IncrementHash(rhs_hash, bitmask);
 		}

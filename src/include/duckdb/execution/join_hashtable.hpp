@@ -88,12 +88,18 @@ public:
 		Vector tmp_data_v;
 
 		bool initialized_data = false;
-		AllocatedData ptrs_lhs_list_data;
-		data_ptr_t *ptrs_lhs_lists[STANDARD_VECTOR_SIZE];
 
-		AllocatedData ptrs_rhs_list_data;
+		// how many elements are allocated for ptrs_lhs_list_data and ptrs_rhs_list_data for storing all
+		// intersection results
+		idx_t ptrs_list_data_size;
+		AllocatedData ptrs_list_data_lhs;
+		AllocatedData ptrs_list_data_rhs;
+
+		// the list of each row of the pointers for the intersection results
+		data_ptr_t *ptrs_lhs_lists[STANDARD_VECTOR_SIZE];
 		data_ptr_t *ptrs_rhs_lists[STANDARD_VECTOR_SIZE];
 
+		// the length of each row of the intersection result vector
 		idx_t ptrs_list_size[STANDARD_VECTOR_SIZE];
 
 		fact_data_t *data_ptrs_lhs[STANDARD_VECTOR_SIZE];

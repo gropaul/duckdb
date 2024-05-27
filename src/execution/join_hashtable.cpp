@@ -14,8 +14,6 @@ using ScanStructure = JoinHashTable::ScanStructure;
 using ProbeSpill = JoinHashTable::ProbeSpill;
 using ProbeSpillLocalState = JoinHashTable::ProbeSpillLocalAppendState;
 
-const idx_t ELEMENT_FACTOR = 200;
-
 JoinHashTable::SharedState::SharedState()
     : rhs_row_locations(LogicalType::POINTER), salt_match_sel(STANDARD_VECTOR_SIZE),
       key_no_match_sel(STANDARD_VECTOR_SIZE) {
@@ -35,9 +33,9 @@ void JoinHashTable::FactProbeState::Initialize(idx_t element_count, BufferManage
 	if (initialized_data) {
 		return;
 	} else {
-		idx_t n_allocate = element_count * ELEMENT_FACTOR;
-		ptrs_lhs_list_data = buffer_manager_p.GetBufferAllocator().Allocate(n_allocate * sizeof(data_ptr_t));
-		ptrs_rhs_list_data = buffer_manager_p.GetBufferAllocator().Allocate(n_allocate * sizeof(data_ptr_t));
+		ptrs_list_data_size = element_count * 1.5;
+		ptrs_list_data_lhs = buffer_manager_p.GetBufferAllocator().Allocate(ptrs_list_data_size * sizeof(data_ptr_t));
+		ptrs_list_data_rhs = buffer_manager_p.GetBufferAllocator().Allocate(ptrs_list_data_size * sizeof(data_ptr_t));
 
 		initialized_data = true;
 	}
@@ -950,33 +948,6 @@ unique_ptr<ScanStructure> JoinHashTable::Probe(DataChunk &keys, TupleDataChunkSt
 	return ss;
 }
 
-void JoinHashTable::InitializeIntersectionData(JoinHashTable::ProbeState &probe_state,
-                                               unique_ptr<ScanStructure> &ss) const {
-	probe_state.fact.Initialize(Count(), buffer_manager);
-
-	auto &lhs_data = probe_state.fact.data_ptrs_lhs;
-	auto &rhs_data = probe_state.fact.data_ptrs_rhs;
-
-	idx_t current_chain_idx = 0;
-	auto lhs_list_data = reinterpret_cast<data_ptr_t *>(probe_state.fact.ptrs_lhs_list_data.get());
-	auto rhs_list_data = reinterpret_cast<data_ptr_t *>(probe_state.fact.ptrs_rhs_list_data.get());
-
-	// init the ptrs_lhs_lists and ptrs_rhs_lists lists
-	for (idx_t idx = 0; idx < ss->count; idx++) {
-		auto sel_idx = ss->sel_vector.get_index(idx);
-
-		auto lhs_chain = lhs_data[sel_idx];
-		auto rhs_chain = rhs_data[sel_idx];
-
-		auto total_chain_length = lhs_chain->chain_length * rhs_chain->chain_length;
-		probe_state.fact.ptrs_lhs_lists[sel_idx] = &lhs_list_data[current_chain_idx];
-		probe_state.fact.ptrs_rhs_lists[sel_idx] = &rhs_list_data[current_chain_idx];
-
-		current_chain_idx += total_chain_length;
-		D_ASSERT(current_chain_idx <= Count() * ELEMENT_FACTOR);
-	}
-}
-
 void JoinHashTable::ProbeAndIntersectFacts(
     JoinHashTable::ProbeState &probe_state,
     unique_ptr<ScanStructure> &ss) const { // only one equality predicate is supported atm
@@ -988,22 +959,34 @@ void JoinHashTable::ProbeAndIntersectFacts(
 	GetChainData(ss->lhs_pointers_v, ss->lhs_collection, 1, ss->sel_vector, ss->count, lhs_data, probe_state.fact);
 	GetChainData(ss->pointers, data_collection.get(), 1, ss->sel_vector, ss->count, rhs_data, probe_state.fact);
 
-	InitializeIntersectionData(probe_state, ss);
+	probe_state.fact.Initialize(Count(), buffer_manager);
+
+	auto list_data_lhs = reinterpret_cast<data_ptr_t *>(probe_state.fact.ptrs_list_data_lhs.get());
+	auto list_data_rhs = reinterpret_cast<data_ptr_t *>(probe_state.fact.ptrs_list_data_rhs.get());
+
 	idx_t new_count = 0;
+	idx_t intersection_count_total = 0;
 
 	for (idx_t idx = 0; idx < ss->count; idx++) {
 		auto sel_idx = ss->sel_vector.get_index(idx);
 		auto lhs_chain = lhs_data[sel_idx];
 		auto rhs_chain = rhs_data[sel_idx];
 
-		data_ptr_t* lhs_pointers = probe_state.fact.ptrs_lhs_lists[sel_idx];
-		data_ptr_t* rhs_pointers = probe_state.fact.ptrs_rhs_lists[sel_idx];
+		data_ptr_t* &pointers_lhs = probe_state.fact.ptrs_lhs_lists[sel_idx];
+		data_ptr_t* &pointers_rhs = probe_state.fact.ptrs_rhs_lists[sel_idx];
 
-		idx_t &pointers_index = probe_state.fact.ptrs_list_size[sel_idx];
-		Intersect(lhs_chain, rhs_chain, lhs_pointers, rhs_pointers, pointers_index);
+		pointers_lhs = &list_data_lhs[intersection_count_total];
+		pointers_rhs = &list_data_rhs[intersection_count_total];
+
+		idx_t &intersection_count = probe_state.fact.ptrs_list_size[sel_idx];
+		Intersect(lhs_chain, rhs_chain, pointers_lhs, pointers_rhs, intersection_count);
+
+		intersection_count_total += intersection_count;
+
+		D_ASSERT(intersection_count <= probe_state.fact.ptrs_list_data_size);
 
 		// set the sel vector to only point on elements where we have an intersection
-		bool non_empty_intersection = pointers_index != 0;
+		bool non_empty_intersection = intersection_count != 0;
 		ss->sel_vector.set_index(new_count, sel_idx);
 		new_count += non_empty_intersection;
 	}
