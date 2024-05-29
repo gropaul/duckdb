@@ -16,10 +16,10 @@ vector<ColumnBinding> LogicalJoin::GetOriginalLHSBindings() {
 
 vector<ColumnBinding> LogicalJoin::GetLHSBindings() {
 	auto left_bindings = GetOriginalLHSBindings();
-	if (WillExpandFactors()) {
-		return FlattenBindings(left_bindings, GetOriginalLHSTypes());
-	} else {
+	if (WillEmitFacts(produce_fact_vectors)) {
 		return left_bindings;
+	} else {
+		return FlattenBindings(left_bindings, GetOriginalLHSTypes());
 	}
 }
 
@@ -68,25 +68,26 @@ void LogicalJoin::ResolveTypes() {
 	D_ASSERT(types.size() == column_bindings.size());
 }
 
-void LogicalJoin::SetEmitFactVectors(bool emit_fact_vector_p, idx_t emitter_id_p) {
-	produce_fact_vectors = emit_fact_vector_p;
-	emitter_id = emitter_id_p;
+void LogicalJoin::SetProduceFactVectors(bool produce_p, idx_t producer_id_p) {
+	produce_fact_vectors = produce_p;
+	producer_id = producer_id_p;
 }
 
-bool LogicalJoin::WillExpandFactors() {
+bool LogicalJoin::WillEmitFacts(bool produce_fact_vectors_p) {
 	return false;
 }
 
 vector<LogicalType> LogicalJoin::GetOriginalLHSTypes() {
+	children[0]->ResolveOperatorTypes();
 	return MapTypes(children[0]->types, left_projection_map);
 };
 
 vector<LogicalType> LogicalJoin::GetLHSTypes() {
 	auto originals = GetOriginalLHSTypes();
-	if (WillExpandFactors()) {
-		return FlattenTypes(originals);
-	} else {
+	if (WillEmitFacts(produce_fact_vectors)) {
 		return originals;
+	} else {
+		return FlattenTypes(originals);
 	}
 }
 
@@ -98,8 +99,8 @@ vector<LogicalType> LogicalJoin::GetOriginalRHSTypes() {
 vector<LogicalType> LogicalJoin::GetRHSTypes() {
 	vector<LogicalType> rhs_types = GetOriginalRHSTypes();
 	vector<ColumnBinding> rhs_bindings = GetOriginalRHSBindings();
-	if (this->produce_fact_vectors && !WillExpandFactors()) {
-		return {LogicalType::FACT_POINTER(rhs_types, rhs_bindings, this->emitter_id)};
+	if (WillEmitFacts(produce_fact_vectors)) {
+		return {LogicalType::FACT_POINTER(rhs_types, rhs_bindings, this->producer_id)};
 	} else {
 		return rhs_types;
 	}
@@ -112,7 +113,8 @@ vector<ColumnBinding> LogicalJoin::GetOriginalRHSBindings() {
 
 vector<ColumnBinding> LogicalJoin::GetRHSBindings() {
 	auto right_bindings = GetOriginalRHSBindings();
-	if (this->produce_fact_vectors && !WillExpandFactors()) {
+	if (WillEmitFacts(produce_fact_vectors)) {
+		// only once rhs binding with the fact pointer
 		return {ColumnBinding(right_bindings[0].table_index, 0)};
 	} else {
 		return right_bindings;

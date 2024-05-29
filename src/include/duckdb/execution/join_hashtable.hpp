@@ -239,15 +239,27 @@ public:
 		return *data_collection;
 	}
 
-	bool FlattensFactVectors() const {
+
+	bool EmitsFactVectors() const {
+		if (produce_fact_pointers) {
+			// if there are factorized predicates, the output will be flat
+			if (!HasFactorizedPredicates()) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	bool HasFactorizedPredicates() const {
 		return !factorized_predicates.empty();
 	}
 	//! The physical operator that created this HT
 	const PhysicalOperator *op;
-	//! Whether to emit fact vectors from the HT
-	bool emit_fact_pointers;
-	//! The emitter id of the HT
-	idx_t emitter_id;
+	//! Whether to produce fact vectors from the HT
+	bool produce_fact_pointers;
+	//! The producer id of the HT to later gather the pointers from
+	idx_t producer_id;
 	//! BufferManager
 	BufferManager &buffer_manager;
 	//! The join conditions

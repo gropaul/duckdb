@@ -9,6 +9,7 @@
 #include "duckdb/storage/buffer_manager.hpp"
 
 namespace duckdb {
+
 using ValidityBytes = JoinHashTable::ValidityBytes;
 using ScanStructure = JoinHashTable::ScanStructure;
 using ProbeSpill = JoinHashTable::ProbeSpill;
@@ -50,7 +51,7 @@ JoinHashTable::InsertState::InsertState(const unique_ptr<TupleDataCollection> &d
 JoinHashTable::JoinHashTable(BufferManager &buffer_manager_p, const vector<JoinCondition> &conditions_p,
                              vector<LogicalType> btypes, JoinType type_p, const vector<idx_t> &output_columns_p,
                              const bool emit_fact_vector_p, const idx_t emitter_id_p, const PhysicalOperator *op_p)
-    : op(op_p), emit_fact_pointers(emit_fact_vector_p), emitter_id(emitter_id_p), buffer_manager(buffer_manager_p),
+    : op(op_p), produce_fact_pointers(emit_fact_vector_p), producer_id(emitter_id_p), buffer_manager(buffer_manager_p),
       conditions(conditions_p), build_types(std::move(btypes)), output_columns(output_columns_p),
       chains_longer_than_one(false), chains_count(0), entry_size(0), tuple_size(0), vfound(Value::BOOLEAN(false)),
       join_type(type_p), finalized(false), has_null(false), radix_bits(INITIAL_RADIX_BITS), partition_start(0),
@@ -345,7 +346,7 @@ void JoinHashTable::GetRowPointers(DataChunk &keys, TupleDataChunkState &key_sta
                                    SelectionVector &match_sel) {
 
 	if (UseSalt()) {
-		if (emit_fact_pointers) {
+		if (produce_fact_pointers) {
 			GetRowPointersInternal<true, true>(keys, key_state, state, hashes_v, sel, count, this, entries,
 			                                   pointers_result_v, match_sel);
 		} else {
@@ -353,7 +354,7 @@ void JoinHashTable::GetRowPointers(DataChunk &keys, TupleDataChunkState &key_sta
 			                                    pointers_result_v, match_sel);
 		};
 	} else {
-		if (emit_fact_pointers) {
+		if (produce_fact_pointers) {
 			GetRowPointersInternal<false, true>(keys, key_state, state, hashes_v, sel, count, this, entries,
 			                                    pointers_result_v, match_sel);
 		} else {
@@ -737,7 +738,7 @@ void JoinHashTable::InsertHashes(Vector &hashes_v, idx_t count, TupleDataChunkSt
 	auto row_locations = chunk_state.row_locations;
 
 	if (parallel) {
-		if (emit_fact_pointers) {
+		if (produce_fact_pointers) {
 			auto atomic_chain_lengths = reinterpret_cast<atomic<idx_t> *>(this->chain_lengths);
 			InsertHashesLoop<true, true>(atomic_entries, atomic_chain_lengths, row_locations, hashes_v, count,
 			                             insert_state, this->data_collection, this);
@@ -746,7 +747,7 @@ void JoinHashTable::InsertHashes(Vector &hashes_v, idx_t count, TupleDataChunkSt
 			                              this->data_collection, this);
 		}
 	} else {
-		if (emit_fact_pointers) {
+		if (produce_fact_pointers) {
 			auto atomic_chain_lengths = reinterpret_cast<atomic<idx_t> *>(this->chain_lengths);
 			InsertHashesLoop<false, true>(atomic_entries, atomic_chain_lengths, row_locations, hashes_v, count,
 			                              insert_state, this->data_collection, this);
@@ -769,7 +770,7 @@ void JoinHashTable::InitializePointerTable() {
 			hash_map = buffer_manager.GetBufferAllocator().Allocate(capacity * sizeof(data_ptr_t));
 			entries = reinterpret_cast<ht_entry_t *>(hash_map.get());
 
-			if (emit_fact_pointers) {
+			if (produce_fact_pointers) {
 				chains_length_data = buffer_manager.GetBufferAllocator().Allocate(capacity * sizeof(idx_t));
 				chain_lengths = reinterpret_cast<idx_t *>(chains_length_data.get());
 				std::fill_n(chain_lengths, capacity, 0);
@@ -784,7 +785,7 @@ void JoinHashTable::InitializePointerTable() {
 		hash_map = buffer_manager.GetBufferAllocator().Allocate(capacity * sizeof(ht_entry_t));
 		entries = reinterpret_cast<ht_entry_t *>(hash_map.get());
 
-		if (emit_fact_pointers) {
+		if (produce_fact_pointers) {
 			chains_length_data = buffer_manager.GetBufferAllocator().Allocate(capacity * sizeof(idx_t));
 			chain_lengths = reinterpret_cast<idx_t *>(chains_length_data.get());
 			std::fill_n(chain_lengths, capacity, 0);
@@ -885,7 +886,7 @@ void JoinHashTable::Finalize(idx_t chunk_idx_from, idx_t chunk_idx_to, bool para
 		InsertHashes(hashes, count, chunk_state, insert_state, parallel);
 	} while (iterator.Next());
 
-	if (emit_fact_pointers) {
+	if (produce_fact_pointers) {
 		InitializeFactData();
 	}
 }
@@ -904,7 +905,8 @@ unique_ptr<ScanStructure> JoinHashTable::InitializeScanStructure(DataChunk &keys
 		memset(ss->found_match.get(), 0, sizeof(bool) * STANDARD_VECTOR_SIZE);
 	}
 
-	if (FlattensFactVectors()) {
+	if (HasFactorizedPredicates()) {
+		// todo: this is a hack!
 		column_t fact_col_idx = factorized_predicate_columns[0];
 		Vector &fact_key_vector = keys.data[fact_col_idx];
 		auto fact_type = fact_key_vector.GetType();
@@ -956,6 +958,7 @@ void JoinHashTable::ProbeAndIntersectFacts(
 	auto &lhs_data = probe_state.fact.data_ptrs_lhs;
 	auto &rhs_data = probe_state.fact.data_ptrs_rhs;
 
+	// todo: The key column is hacky, need fact column binding
 	GetChainData(ss->lhs_pointers_v, ss->lhs_collection, 1, ss->sel_vector, ss->count, lhs_data, probe_state.fact);
 	GetChainData(ss->pointers, data_collection.get(), 1, ss->sel_vector, ss->count, rhs_data, probe_state.fact);
 
@@ -1017,7 +1020,7 @@ ScanStructure::ScanStructure(JoinHashTable &ht_p, TupleDataChunkState &key_state
       lhs_pointers_v(LogicalType::POINTER), sel_vector(STANDARD_VECTOR_SIZE),
       chain_match_sel_vector(STANDARD_VECTOR_SIZE), chain_no_match_sel_vector(STANDARD_VECTOR_SIZE), ht(ht_p),
       finished(false) {
-	if (ht.FlattensFactVectors()) {
+	if (ht.HasFactorizedPredicates()) {
 		use_intersected_chain_pointers = true;
 	} else {
 		use_intersected_chain_pointers = false;
@@ -1145,7 +1148,7 @@ void ScanStructure::AdvancePointers(const SelectionVector &sel, idx_t sel_count)
 		}
 	} else {
 
-		if (!ht.chains_longer_than_one || ht.emit_fact_pointers) {
+		if (!ht.chains_longer_than_one || ht.produce_fact_pointers) {
 			this->count = 0;
 			return;
 		}
@@ -1179,6 +1182,9 @@ void ScanStructure::GatherResult(Vector &result, const SelectionVector &sel_vect
 }
 
 void ScanStructure::FlatAndGatherLHS(DataChunk &left, DataChunk &keys, DataChunk &result, idx_t result_count) {
+
+	// first gather the one fact pointer vector we get from the LHS
+	// todo: hacky index
 	column_t fact_col_idx = ht.factorized_predicate_columns[0];
 	Vector &fact_vector = keys.data[fact_col_idx];
 
@@ -1188,15 +1194,17 @@ void ScanStructure::FlatAndGatherLHS(DataChunk &left, DataChunk &keys, DataChunk
 
 	result.SetCardinality(result_count);
 
+	// Gather the fact vector and save it in the result
 	for (idx_t i = 0; i < type_info->flat_types.size(); i++) {
 		auto &vector = result.data[fact_col_idx + i];
-		// todo: Make this correct
+		// todo: hacky index
 		const auto output_col_idx = i;
 		D_ASSERT(vector.GetType() == ht.layout.GetTypes()[output_col_idx]);
 		lhs_collection->Gather(lhs_pointers_v, chain_match_sel_vector, result_count, output_col_idx, vector,
 		                       chain_match_sel_vector, nullptr);
 	}
 
+	// the rest of the columns are flat, so we only need to reference/slice them
 	for (column_t lhs_col_idx = 0; lhs_col_idx < left.ColumnCount(); lhs_col_idx++) {
 		// slice if the column is not the fact column
 		auto &result_vector = result.data[lhs_col_idx];
@@ -1213,11 +1221,11 @@ void ScanStructure::FlatAndGatherLHS(DataChunk &left, DataChunk &keys, DataChunk
 
 void ScanStructure::NextInnerJoin(DataChunk &keys, DataChunk &left, DataChunk &result) {
 	if (ht.join_type != JoinType::RIGHT_SEMI && ht.join_type != JoinType::RIGHT_ANTI) {
-		if (ht.emit_fact_pointers && !ht.FlattensFactVectors()) {
+		if (ht.EmitsFactVectors()) {
 			// only one fact vector instead of the whole rhs
 			D_ASSERT(result.ColumnCount() == left.ColumnCount() + 1);
 
-		} else if (ht.FlattensFactVectors()) {
+		} else if (ht.HasFactorizedPredicates()) {
 			// we need to return the fact vector and the output columns
 			// todo: maybe add D_ASSERT
 		} else {
@@ -1249,25 +1257,26 @@ void ScanStructure::NextInnerJoin(DataChunk &keys, DataChunk &left, DataChunk &r
 		// for right semi join, just mark the entry as found and move on. Propagation happens later
 		if (ht.join_type != JoinType::RIGHT_SEMI && ht.join_type != JoinType::RIGHT_ANTI) {
 
-			if (ht.FlattensFactVectors()) {
+			// LHS Side: If there are fact pointers, we need to gather the fact vectors
+			if (ht.HasFactorizedPredicates()) {
 				FlatAndGatherLHS(left, keys, result, result_count);
-			} else {
+			}
+			// else we can just slice the lhs
+			else {
 				// matches were found
 				// construct the result
 				// on the LHS, we create a slice using the result vector
 				result.Slice(left, chain_match_sel_vector, result_count, 0);
 			}
 
-			if (ht.emit_fact_pointers) {
-				// in our very special case, the aggregate keys are the first vector and the key to be grouped by is
-				// the second vector
+			// RHS Side: Either emit a fact pointer vector or gather the result for flat vectors
+			if (ht.EmitsFactVectors()) {
 
 				// set the first vector in the result to be the fact vector
-				auto &fact_vector = result.data[left.ColumnCount()];
-				fact_vector.SetVectorType(VectorType::FLAT_VECTOR);
+				auto &fact_pointers_result_v = result.data[left.ColumnCount()];
+				fact_pointers_result_v.SetVectorType(VectorType::FLAT_VECTOR);
 
-				// fact_vector.SetVectorType(VectorType::FACTORIZED_VECTOR);
-				auto fact_vector_pointer = FlatVector::GetData<data_ptr_t>(fact_vector);
+				auto fact_vector_pointer = FlatVector::GetData<data_ptr_t>(fact_pointers_result_v);
 
 				auto ptrs = FlatVector::GetData<data_ptr_t>(pointers);
 
@@ -1277,7 +1286,7 @@ void ScanStructure::NextInnerJoin(DataChunk &keys, DataChunk &left, DataChunk &r
 				}
 
 				// mark only the fields with pointers as valid
-				fact_vector.Slice(chain_match_sel_vector, result_count);
+				fact_pointers_result_v.Slice(chain_match_sel_vector, result_count);
 
 			} else {
 

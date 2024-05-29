@@ -10,8 +10,8 @@ PhysicalJoin::PhysicalJoin(LogicalOperator &op, PhysicalOperatorType type, JoinT
                            idx_t estimated_cardinality)
     : CachingPhysicalOperator(type, op.types, estimated_cardinality), join_type(join_type) {
 	auto join_op = reinterpret_cast<LogicalJoin *>(&op);
-	this->emit_fact_vector = join_op->produce_fact_vectors;
-	this->emitter_id = join_op->emitter_id;
+	this->produce_fact_vectors = join_op->produce_fact_vectors;
+	this->producer_id = join_op->producer_id;
 }
 
 bool PhysicalJoin::EmptyResultIfRHSIsEmpty() const {

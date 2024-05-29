@@ -35,8 +35,7 @@ public:
 	bool delim_flipped = false;
 
 public:
-
-	bool WillExpandFactors() override;
+	bool WillEmitFacts(bool produce_fact_vectors) override;
 
 	string ParamsToString() const override;
 

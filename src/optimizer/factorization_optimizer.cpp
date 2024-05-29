@@ -6,6 +6,7 @@
 #include "duckdb/planner/operator/logical_projection.hpp"
 namespace duckdb {
 
+using ProposedOperatorFactEmitInfo = FactorizationOptimizer::ProposedOperatorFactEmitInfo;
 using OperatorFactProcessingInfo = FactorizationOptimizer::OperatorFactProcessingInfo;
 using OperatorFactEmitInfo = FactorizationOptimizer::OperatorFactEmitInfo;
 
@@ -25,12 +26,21 @@ void FactorizationOptimizer::Optimize(unique_ptr<LogicalOperator> &op) {
 	root->ResolveOperatorTypes();
 }
 
-bool FactorizationOptimizer::CanProcessFactVectorsFromChild(const LogicalOperator &op, idx_t child_idx,
-                                                            unique_ptr<OperatorFactEmitInfo> &child_info) {
+bool FactorizationOptimizer::CanProcessFactVectorsFromChild(const LogicalOperator &op, idx_t child_idx) {
 
 	if (op.type == LogicalOperatorType::LOGICAL_AGGREGATE_AND_GROUP_BY) {
 		return true;
 	} else if (op.type == LogicalOperatorType::LOGICAL_COMPARISON_JOIN) {
+		// on the lhs we can process the fact vectors
+		if (child_idx == 0) {
+			return true;
+
+			// on the rhs we can't process the fact vectors
+		} else if (child_idx == 1) {
+			return false;
+		} else {
+			throw NotImplementedException("More than two children not implemented");
+		}
 		return true;
 		// set this false if we don't want to expand before the expansion
 	} else if (op.type == LogicalOperatorType::LOGICAL_FACT_EXPAND) {
@@ -83,13 +93,21 @@ vector<FactExpandCondition> FactorizationOptimizer::UpdateForProcess(unique_ptr<
 	return expand_conditions;
 }
 
-unique_ptr<OperatorFactEmitInfo>
-FactorizationOptimizer::CanEmitFactVectors(const unique_ptr<duckdb::LogicalOperator> &op,
-                                           const vector<unique_ptr<OperatorFactEmitInfo>> &children_info) {
+ProposedOperatorFactEmitInfo
+FactorizationOptimizer::GetProposedEmission(const unique_ptr<duckdb::LogicalOperator> &op,
+                                            const vector<unique_ptr<OperatorFactEmitInfo>> &children_info) {
+	bool is_able = true;
+	bool will_produce_fact_vectors;
+	bool will_emit_fact_vectors;
+
 	if (op->type == LogicalOperatorType::LOGICAL_COMPARISON_JOIN) {
-		return make_uniq<OperatorFactEmitInfo>(true);
+		auto join = reinterpret_cast<LogicalComparisonJoin *>(op.get());
+		will_produce_fact_vectors = true;
+		will_emit_fact_vectors = join->WillEmitFacts(will_produce_fact_vectors);
+
+		return ProposedOperatorFactEmitInfo(is_able, will_produce_fact_vectors, will_emit_fact_vectors);
 	}
-	return make_uniq<OperatorFactEmitInfo>(false);
+	return ProposedOperatorFactEmitInfo(false, false, false);
 }
 
 unique_ptr<ColumnBindingReplacer>
@@ -148,8 +166,8 @@ UpdateColumnBindings(optional_ptr<LogicalOperator> start, unique_ptr<LogicalOper
 }
 
 unique_ptr<OperatorFactEmitInfo>
-FactorizationOptimizer::EmitFactVectors(unique_ptr<LogicalOperator> &op, optional_ptr<LogicalOperator> parent,
-                                        idx_t parent_child_idx, unique_ptr<OperatorFactEmitInfo> &proposed_emit_info) {
+FactorizationOptimizer::ProduceFactVectors(unique_ptr<LogicalOperator> &op, optional_ptr<LogicalOperator> parent,
+                                        idx_t parent_child_idx, ProposedOperatorFactEmitInfo &proposed_emit_info) {
 
 	// make sure that the parent is never null as we can't emit fact vectors as the query result
 	D_ASSERT(parent != nullptr);
@@ -161,12 +179,13 @@ FactorizationOptimizer::EmitFactVectors(unique_ptr<LogicalOperator> &op, optiona
 	if (op->type == LogicalOperatorType::LOGICAL_COMPARISON_JOIN) {
 		auto join = reinterpret_cast<LogicalComparisonJoin *>(op.get());
 		// online
-		join->SetEmitFactVectors(true, current_emitter_count);
+		join->SetProduceFactVectors(true, current_emitter_count);
 		current_emitter_count++;
 
 	} else {
 		throw NotImplementedException("EmitFactVectors not implemented for this operator");
 	}
+
 	op->ResolveOperatorTypes();
 	auto fact_bindings = op->GetColumnBindings();
 	auto fact_types = op->types;
@@ -174,7 +193,7 @@ FactorizationOptimizer::EmitFactVectors(unique_ptr<LogicalOperator> &op, optiona
 	// todo: this is farly hacky: At some point we have to make serious thoughts on how far up the factorization
 	auto replacer = UpdateColumnBindings(op, op, flat_bindings, flat_types, fact_bindings, fact_types, true);
 
-	return make_uniq<OperatorFactEmitInfo>(true, true, flat_types, fact_types, flat_bindings, fact_bindings,
+	return make_uniq<OperatorFactEmitInfo>(proposed_emit_info, flat_types, fact_types, flat_bindings, fact_bindings,
 	                                       std::move(replacer));
 }
 
@@ -201,10 +220,8 @@ unique_ptr<OperatorFactEmitInfo> FactorizationOptimizer::OptimizeInternal(unique
 		children_info.push_back(std::move(op_info));
 	}
 
-	// check if we can emit fact vectors
-	auto proposed_emission = CanEmitFactVectors(op, children_info);
 
-	// for each of the childs, either adapt to the fact vectors or add fact expand between
+	// for each of the children, either adapt to the fact vectors or add fact expand between
 	for (idx_t child_idx = 0; child_idx < op->children.size(); child_idx++) {
 
 		auto &child = op->children[child_idx];
@@ -217,7 +234,7 @@ unique_ptr<OperatorFactEmitInfo> FactorizationOptimizer::OptimizeInternal(unique
 			child_info->replacer->stop_operator = child.get();
 			child_info->replacer->VisitOperator(*op);
 
-			bool can_process_child_facts = CanProcessFactVectorsFromChild(*op, child_idx, proposed_emission);
+			bool can_process_child_facts = CanProcessFactVectorsFromChild(*op, child_idx);
 			auto expand_conditions = UpdateForProcess(op, child->types);
 
 			if (!can_process_child_facts) {
@@ -226,19 +243,30 @@ unique_ptr<OperatorFactEmitInfo> FactorizationOptimizer::OptimizeInternal(unique
 		}
 	}
 
-	// now whether this operator will emit factors to the next operator
-	auto parent_can_process =
-	    parent != nullptr && CanProcessFactVectorsFromChild(*parent, parent_child_idx, proposed_emission);
+	// check if we can emit fact vectors
+	auto proposed_emission = GetProposedEmission(op, children_info);
 
-	// todo: Overwrite to always emit fact vectors
-	parent_can_process = true;
-	if (proposed_emission->is_able && parent_can_process) {
-		unique_ptr<OperatorFactEmitInfo> actual_emission =
-		    EmitFactVectors(op, parent.get(), parent_child_idx, proposed_emission);
-		return actual_emission;
-	} else {
-		return proposed_emission;
+	// whether this operator produce fact vectors
+	if (proposed_emission.is_producing_fact_vectors) {
+
+		bool produce;
+
+		// if we are actually emitting fact vectors, we need to check if the parent can process the fact vectors
+		if (proposed_emission.is_emitting_fact_vectors) {
+			auto parent_can_process =
+			    parent != nullptr && CanProcessFactVectorsFromChild(*parent, parent_child_idx);
+			produce = parent_can_process;
+
+		// if we are not emitting fact vectors, we can always produce them and flatten them internally
+		} else {
+			produce = true;
+		}
+
+		if (produce) {
+			return ProduceFactVectors(op, parent.get(), parent_child_idx, proposed_emission);
+		}
 	}
+	return make_uniq<OperatorFactEmitInfo>(OperatorFactEmitInfo::FlatEmission());
 }
 
 std::pair<vector<LogicalType>, vector<ColumnBinding>>

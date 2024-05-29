@@ -298,16 +298,6 @@ unique_ptr<LogicalOperator> LogicalComparisonJoin::Deserialize(Deserializer &des
 	deserializer.ReadPropertyWithDefault<bool>(207, "delim_flipped", result->delim_flipped, false);
 	return std::move(result);
 }
-bool LogicalComparisonJoin::WillExpandFactors() {
-	// return true if we have a fact condition
-	for(auto &cond : this->conditions){
-		if(cond.comparison == ExpressionType::COMPARE_FACT_EQUAL){
-			return true;
-		}
-	}
-
-	return false;
-}
 
 void LogicalCreate::Serialize(Serializer &serializer) const {
 	LogicalOperator::Serialize(serializer);

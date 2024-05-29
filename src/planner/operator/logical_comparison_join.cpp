@@ -20,4 +20,30 @@ string LogicalComparisonJoin::ParamsToString() const {
 	return result;
 }
 
+
+bool LogicalComparisonJoin::WillEmitFacts(bool produce_fact_vectors) {
+
+	bool has_factorized_condition = false;
+	// return true if we have a fact condition
+	for(auto &cond : this->conditions){
+		if(cond.comparison == ExpressionType::COMPARE_FACT_EQUAL){
+			has_factorized_condition = true;
+			break;
+		}
+	}
+
+	// if we produce fact vectors and there is a fact condition, we will need to flat them to resolve the condition
+	// and therefore will not emit fact vectors
+	// otherwise we will emit fact vectors
+	if (produce_fact_vectors) {
+		if (has_factorized_condition) {
+			return false;
+		} else {
+			return true;
+		}
+	} else {
+		return false;
+	}
+}
+
 } // namespace duckdb

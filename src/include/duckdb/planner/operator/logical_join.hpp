@@ -41,7 +41,7 @@ public:
 public:
 	vector<ColumnBinding> GetColumnBindings() override;
 
-	virtual bool WillExpandFactors();
+	virtual bool WillEmitFacts(bool produce_fact_vectors);
 
 	vector<LogicalType> GetRHSTypes();
 	vector<LogicalType> GetOriginalRHSTypes();
@@ -55,10 +55,10 @@ public:
 	vector<ColumnBinding> GetLHSBindings();
 	vector<ColumnBinding> GetOriginalLHSBindings();
 
-	void SetEmitFactVectors(bool emit_fact_vector_p, idx_t emitter_id_p);
+	void SetProduceFactVectors(bool produce_p, idx_t producer_id_p);
 
 	bool produce_fact_vectors = false;
-	idx_t emitter_id = 0;
+	idx_t producer_id = 0;
 protected:
 
 	void ResolveTypes() override;
