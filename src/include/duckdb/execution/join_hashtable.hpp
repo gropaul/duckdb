@@ -152,7 +152,7 @@ public:
 		JoinHashTable &ht;
 		bool finished;
 
-		explicit ScanStructure(JoinHashTable &ht, TupleDataChunkState &key_state, ProbeState &probe_state_p);
+		explicit ScanStructure(JoinHashTable &ht, TupleDataChunkState &key_state, ProbeState &probe_state_p, LogicalType &pointer_type);
 		//! Get the next batch of data from the scan structure
 		void Next(DataChunk &keys, DataChunk &left, DataChunk &result);
 		//! Are pointer chains all pointing to NULL?
@@ -240,7 +240,7 @@ public:
 	}
 
 
-	bool EmitsFactVectors() const {
+	inline bool EmitsFactVectors() const {
 		if (produce_fact_pointers) {
 			// if there are factorized predicates, the output will be flat
 			if (!HasFactorizedPredicates()) {
@@ -251,7 +251,7 @@ public:
 		return false;
 	}
 
-	bool HasFactorizedPredicates() const {
+	inline bool HasFactorizedPredicates() const {
 		return !factorized_predicates.empty();
 	}
 	//! The physical operator that created this HT

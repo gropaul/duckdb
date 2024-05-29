@@ -897,8 +897,14 @@ unique_ptr<ScanStructure> JoinHashTable::InitializeScanStructure(DataChunk &keys
 	D_ASSERT(Count() > 0); // should be handled before
 	D_ASSERT(finalized);
 
+	LogicalType pointer_type = LogicalType::POINTER;
+	if (EmitsFactVectors()) {
+		// the last return type is the fact pointer type
+		pointer_type = op->types[op->types.size() - 1];
+	}
+
 	// set up the scan structure
-	auto ss = make_uniq<ScanStructure>(*this, key_state, probe_state);
+	auto ss = make_uniq<ScanStructure>(*this, key_state, probe_state, pointer_type);
 
 	if (join_type != JoinType::INNER) {
 		ss->found_match = make_unsafe_uniq_array<bool>(STANDARD_VECTOR_SIZE);
@@ -1015,8 +1021,8 @@ void JoinHashTable::ProbeAndIntersectFacts(
 	ss->count = new_count;
 }
 
-ScanStructure::ScanStructure(JoinHashTable &ht_p, TupleDataChunkState &key_state_p, ProbeState &probe_state_p)
-    : key_state(key_state_p), probe_state(probe_state_p), pointers(LogicalType::POINTER),
+ScanStructure::ScanStructure(JoinHashTable &ht_p, TupleDataChunkState &key_state_p, ProbeState &probe_state_p, LogicalType &pointer_type)
+    : key_state(key_state_p), probe_state(probe_state_p), pointers(pointer_type),
       lhs_pointers_v(LogicalType::POINTER), sel_vector(STANDARD_VECTOR_SIZE),
       chain_match_sel_vector(STANDARD_VECTOR_SIZE), chain_no_match_sel_vector(STANDARD_VECTOR_SIZE), ht(ht_p),
       finished(false) {
@@ -1274,19 +1280,7 @@ void ScanStructure::NextInnerJoin(DataChunk &keys, DataChunk &left, DataChunk &r
 
 				// set the first vector in the result to be the fact vector
 				auto &fact_pointers_result_v = result.data[left.ColumnCount()];
-				fact_pointers_result_v.SetVectorType(VectorType::FLAT_VECTOR);
-
-				auto fact_vector_pointer = FlatVector::GetData<data_ptr_t>(fact_pointers_result_v);
-
-				auto ptrs = FlatVector::GetData<data_ptr_t>(pointers);
-
-				for (idx_t j = 0; j < result_count; j++) {
-					auto idx = chain_match_sel_vector.get_index(j);
-					fact_vector_pointer[idx] = ptrs[idx];
-				}
-
-				// mark only the fields with pointers as valid
-				fact_pointers_result_v.Slice(chain_match_sel_vector, result_count);
+				fact_pointers_result_v.Slice(pointers, chain_match_sel_vector, result_count);
 
 			} else {
 
