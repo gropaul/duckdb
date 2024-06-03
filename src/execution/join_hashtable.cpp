@@ -34,7 +34,7 @@ void JoinHashTable::FactProbeState::Initialize(idx_t element_count, BufferManage
 	if (initialized_data) {
 		return;
 	} else {
-		ptrs_list_data_size = element_count * 1.5;
+		ptrs_list_data_size = element_count * 0.5;
 		ptrs_list_data_lhs = buffer_manager_p.GetBufferAllocator().Allocate(ptrs_list_data_size * sizeof(data_ptr_t));
 		ptrs_list_data_rhs = buffer_manager_p.GetBufferAllocator().Allocate(ptrs_list_data_size * sizeof(data_ptr_t));
 
@@ -693,7 +693,7 @@ static void InsertHashesLoop(atomic<ht_entry_t> entries[], atomic<idx_t> chain_l
 					rhs_row_locations[salt_match_count] = potential_collided_ptr;
 					salt_match_count += 1;
 				} else {
-					ht->chains_count++;
+					Increment<PARALLEL>(ht->chains_count);
 				}
 
 				// if we want to calc the lengths and (if not parallel or
@@ -799,10 +799,36 @@ void JoinHashTable::InitializePointerTable() {
 	bitmask = capacity - 1;
 }
 
-void JoinHashTable::InitializeFactData() {
-	if (fact_datas != nullptr) {
-		return;
-	}
+void JoinHashTable::Finalize(idx_t chunk_idx_from, idx_t chunk_idx_to, bool parallel) {
+
+	// Pointer table should be allocated
+	D_ASSERT(hash_map.get());
+
+	Vector hashes(LogicalType::HASH);
+	auto hash_data = FlatVector::GetData<hash_t>(hashes);
+
+	TupleDataChunkIterator iterator(*data_collection, TupleDataPinProperties::KEEP_EVERYTHING_PINNED, chunk_idx_from,
+	                                chunk_idx_to, false);
+	const auto row_locations = iterator.GetRowLocations();
+
+	InsertState insert_state(this->data_collection, this->equality_predicate_columns);
+
+	do {
+
+		const auto count = iterator.GetCurrentChunkCount();
+		for (idx_t i = 0; i < count; i++) {
+			hash_data[i] = Load<hash_t>(row_locations[i] + pointer_offset);
+		}
+		TupleDataChunkState &chunk_state = iterator.GetChunkState();
+
+		InsertHashes(hashes, count, chunk_state, insert_state, parallel);
+	} while (iterator.Next());
+}
+
+void JoinHashTable::FinalizeFactDatas() {
+
+	// may only be called once
+	D_ASSERT(fact_datas == nullptr);
 
 	// create one fact data for each of the chains
 	fact_datas_data = buffer_manager.GetBufferAllocator().Allocate(chains_count * sizeof(fact_data_t));
@@ -823,6 +849,10 @@ void JoinHashTable::InitializeFactData() {
 	for (idx_t entry_idx = 0; entry_idx < capacity; entry_idx++) {
 		auto &entry = entries[entry_idx];
 		if (entry.IsOccupied()) {
+
+			// make sure there is enough data allocated
+			D_ASSERT(fact_data_idx < chains_count);
+
 			auto &fact_data = fact_datas[fact_data_idx];
 			auto &chain_length = chain_lengths[entry_idx];
 			auto chain_head = entry.GetPointer();
@@ -858,36 +888,6 @@ void JoinHashTable::InitializeFactData() {
 
 		auto chain_ht_capacity = fact_data.ht_capacity;
 		chains_ht_offset += chain_ht_capacity;
-	}
-}
-
-void JoinHashTable::Finalize(idx_t chunk_idx_from, idx_t chunk_idx_to, bool parallel) {
-
-	// Pointer table should be allocated
-	D_ASSERT(hash_map.get());
-
-	Vector hashes(LogicalType::HASH);
-	auto hash_data = FlatVector::GetData<hash_t>(hashes);
-
-	TupleDataChunkIterator iterator(*data_collection, TupleDataPinProperties::KEEP_EVERYTHING_PINNED, chunk_idx_from,
-	                                chunk_idx_to, false);
-	const auto row_locations = iterator.GetRowLocations();
-
-	InsertState insert_state(this->data_collection, this->equality_predicate_columns);
-
-	do {
-
-		const auto count = iterator.GetCurrentChunkCount();
-		for (idx_t i = 0; i < count; i++) {
-			hash_data[i] = Load<hash_t>(row_locations[i] + pointer_offset);
-		}
-		TupleDataChunkState &chunk_state = iterator.GetChunkState();
-
-		InsertHashes(hashes, count, chunk_state, insert_state, parallel);
-	} while (iterator.Next());
-
-	if (produce_fact_pointers) {
-		InitializeFactData();
 	}
 }
 
@@ -949,7 +949,7 @@ unique_ptr<ScanStructure> JoinHashTable::Probe(DataChunk &keys, TupleDataChunkSt
 		GetRowPointers(keys, key_state, probe_state, hashes, *current_sel, ss->count, ss->pointers, ss->sel_vector);
 	}
 
-	if (ss->use_intersected_chain_pointers) {
+	if (ss->use_intersected_chain_pointers && ss->count > 0) {
 		ProbeAndIntersectFacts(probe_state, ss);
 	}
 
@@ -981,8 +981,8 @@ void JoinHashTable::ProbeAndIntersectFacts(
 		auto lhs_chain = lhs_data[sel_idx];
 		auto rhs_chain = rhs_data[sel_idx];
 
-		data_ptr_t* &pointers_lhs = probe_state.fact.ptrs_lhs_lists[sel_idx];
-		data_ptr_t* &pointers_rhs = probe_state.fact.ptrs_rhs_lists[sel_idx];
+		data_ptr_t *&pointers_lhs = probe_state.fact.ptrs_lhs_lists[sel_idx];
+		data_ptr_t *&pointers_rhs = probe_state.fact.ptrs_rhs_lists[sel_idx];
 
 		pointers_lhs = &list_data_lhs[intersection_count_total];
 		pointers_rhs = &list_data_rhs[intersection_count_total];
@@ -1021,11 +1021,11 @@ void JoinHashTable::ProbeAndIntersectFacts(
 	ss->count = new_count;
 }
 
-ScanStructure::ScanStructure(JoinHashTable &ht_p, TupleDataChunkState &key_state_p, ProbeState &probe_state_p, LogicalType &pointer_type)
-    : key_state(key_state_p), probe_state(probe_state_p), pointers(pointer_type),
-      lhs_pointers_v(LogicalType::POINTER), sel_vector(STANDARD_VECTOR_SIZE),
-      chain_match_sel_vector(STANDARD_VECTOR_SIZE), chain_no_match_sel_vector(STANDARD_VECTOR_SIZE), ht(ht_p),
-      finished(false) {
+ScanStructure::ScanStructure(JoinHashTable &ht_p, TupleDataChunkState &key_state_p, ProbeState &probe_state_p,
+                             LogicalType &pointer_type)
+    : key_state(key_state_p), probe_state(probe_state_p), pointers(pointer_type), lhs_pointers_v(LogicalType::POINTER),
+      sel_vector(STANDARD_VECTOR_SIZE), chain_match_sel_vector(STANDARD_VECTOR_SIZE),
+      chain_no_match_sel_vector(STANDARD_VECTOR_SIZE), ht(ht_p), finished(false) {
 	if (ht.HasFactorizedPredicates()) {
 		use_intersected_chain_pointers = true;
 	} else {

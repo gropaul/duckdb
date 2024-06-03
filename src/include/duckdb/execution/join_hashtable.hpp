@@ -152,7 +152,8 @@ public:
 		JoinHashTable &ht;
 		bool finished;
 
-		explicit ScanStructure(JoinHashTable &ht, TupleDataChunkState &key_state, ProbeState &probe_state_p, LogicalType &pointer_type);
+		explicit ScanStructure(JoinHashTable &ht, TupleDataChunkState &key_state, ProbeState &probe_state_p,
+		                       LogicalType &pointer_type);
 		//! Get the next batch of data from the scan structure
 		void Next(DataChunk &keys, DataChunk &left, DataChunk &result);
 		//! Are pointer chains all pointing to NULL?
@@ -214,7 +215,7 @@ public:
 	//! ever called.
 	void Finalize(idx_t chunk_idx_from, idx_t chunk_idx_to, bool parallel);
 	//! Finalize the build of fact data to later refer pointer to the fact data
-	void InitializeFactData();
+	void FinalizeFactDatas();
 	//! Probe the HT with the given input chunk, resulting in the given result
 	unique_ptr<ScanStructure> Probe(DataChunk &keys, TupleDataChunkState &key_state, ProbeState &probe_state,
 	                                optional_ptr<Vector> precomputed_hashes = nullptr);
@@ -238,7 +239,6 @@ public:
 	TupleDataCollection &GetDataCollection() {
 		return *data_collection;
 	}
-
 
 	inline bool EmitsFactVectors() const {
 		if (produce_fact_pointers) {
@@ -301,7 +301,7 @@ public:
 	//! If there is more than one element in the chain, we need to scan the next elements of the chain
 	bool chains_longer_than_one;
 	//! Distinct chain count
-	idx_t chains_count;
+	atomic<idx_t> chains_count;
 
 	//! The capacity of the HT. Is the same as hash_map.GetSize() / sizeof(ht_entry_t)
 	idx_t capacity;
@@ -382,10 +382,10 @@ public:
 	// Factorization stuff
 	//===--------------------------------------------------------------------===//
 	AllocatedData chains_length_data;
-	idx_t *chain_lengths;
+	idx_t *chain_lengths = nullptr;
 
 	AllocatedData chains_ht_data;
-	uint64_t *chains_ht;
+	uint64_t *chains_ht = nullptr;
 
 	AllocatedData fact_datas_data;
 	fact_data_t *fact_datas = nullptr;
@@ -394,7 +394,7 @@ public:
 	uint64_t *fact_keys = nullptr;
 
 	AllocatedData fact_ptr_data;
-	data_ptr_t *fact_ptr;
+	data_ptr_t *fact_ptr = nullptr;
 
 public:
 	//===--------------------------------------------------------------------===//

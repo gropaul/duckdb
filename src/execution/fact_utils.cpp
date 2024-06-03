@@ -103,10 +103,11 @@ static void GetChainData(Vector &pointers_v, TupleDataCollection *data_collectio
 // Function to determine which side of a join operation should be used for building and probing
 // 1. if one of the sides is already built, we should use the other side for building and probing
 // 2. if both sides are built or none of them is built, we should use the smaller side for building and probing
-static void DetermineBuildAndProbeSides(fact_data_t *&build_side, fact_data_t *&probe_side, data_ptr_t *&build_res,
+static void DetermineSidesAndBuild(fact_data_t *&build_side, fact_data_t *&probe_side, data_ptr_t *&build_res,
                                         data_ptr_t *&probe_res) {
-	bool current_build_side_build = build_side->KeyMapBuilt();
-	bool current_probe_side_build = probe_side->KeyMapBuilt();
+
+	bool current_build_side_build = build_side->IsHTBuild();
+	bool current_probe_side_build = probe_side->IsHTBuild();
 
 	// Determine which side to build and which to probe
 	if (current_build_side_build && !current_probe_side_build) {
@@ -121,7 +122,7 @@ static void DetermineBuildAndProbeSides(fact_data_t *&build_side, fact_data_t *&
 		idx_t current_build_side_length = build_side->chain_length;
 		idx_t current_probe_side_length = probe_side->chain_length;
 
-		// If the build side is larger than the probe side, swap the sides
+		// If the build side is smaller than the probe side, swap the sides
 		if (current_build_side_length > current_probe_side_length) {
 			std::swap(build_side, probe_side);
 			std::swap(build_res, probe_res);
@@ -130,11 +131,11 @@ static void DetermineBuildAndProbeSides(fact_data_t *&build_side, fact_data_t *&
 		// if not both sides are built, build the build side
 		if (!current_build_side_build) {
 			// build the build side
-			build_side->BuildKeyMap();
+			build_side->BuildHT();
 		}
 	}
 
-	D_ASSERT(build_side->KeyMapBuilt());
+	D_ASSERT(build_side->IsHTBuild());
 }
 
 // We always have to return the rhs pointers to make sure that we can expand on the rhs
@@ -142,7 +143,7 @@ static void Intersect(fact_data_t *left_ptr, fact_data_t *right_ptr, data_ptr_t 
                       data_ptr_t *rhs_pointers_res, idx_t &intersection_count) {
 
 	// build on the lhs to probe with the rhs
-	DetermineBuildAndProbeSides(left_ptr, right_ptr, lhs_pointers_res, rhs_pointers_res);
+	DetermineSidesAndBuild(left_ptr, right_ptr, lhs_pointers_res, rhs_pointers_res);
 
 	auto left = *left_ptr;
 	auto right = *right_ptr;

@@ -32,7 +32,7 @@ struct fact_data_t { // NOLINT
 		chain_head = chain_head_p;
 		pointers = pointers_p;
 		keys = keys_p;
-		map_built = false;
+		ht_build = false;
 		keys_gathered = false;
 		ht_capacity = ht_capacity_p;
 		// as the capacity is a power of 2, we can use a bitmask to get the hash
@@ -56,18 +56,18 @@ struct fact_data_t { // NOLINT
 	// the hashtable that is available
 	uint64_t *chain_ht;
 	// whether the map has been built
-	bool map_built;
+	bool ht_build;
 	// keys gathered from the chain
 	bool keys_gathered;
 
-	bool KeyMapBuilt() {
-		return map_built;
+	bool IsHTBuild() {
+		return ht_build;
 	}
 
 	// Builds the key map if it has not been built yet
-	void BuildKeyMap() {
-		D_ASSERT(!map_built);
-		map_built = true;
+	void BuildHT() {
+		D_ASSERT(!ht_build);
+		ht_build = true;
 		FillHtWithIndex(keys, chain_length, chain_ht, ht_bitmask);
 	}
 };

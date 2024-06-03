@@ -350,6 +350,10 @@ public:
 	void FinishEvent() override {
 		sink.hash_table->GetDataCollection().VerifyEverythingPinned();
 		sink.hash_table->finalized = true;
+
+		if (sink.hash_table->produce_fact_pointers){
+			sink.hash_table->FinalizeFactDatas();
+		}
 	}
 
 	static constexpr const idx_t PARALLEL_CONSTRUCT_THRESHOLD = 1048576;
@@ -515,6 +519,7 @@ SinkFinalizeType PhysicalHashJoin::Finalize(Pipeline &pipeline, Event &event, Cl
 	if (ht.Count() == 0 && EmptyResultIfRHSIsEmpty()) {
 		return SinkFinalizeType::NO_OUTPUT_POSSIBLE;
 	}
+
 	return SinkFinalizeType::READY;
 }
 
