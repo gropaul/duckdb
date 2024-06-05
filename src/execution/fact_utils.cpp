@@ -123,7 +123,7 @@ static void DetermineSidesAndBuild(fact_data_t *&build_side, fact_data_t *&probe
 		idx_t current_probe_side_length = probe_side->chain_length;
 
 		// If the build side is smaller than the probe side, swap the sides
-		if (current_build_side_length > current_probe_side_length) {
+		if (current_build_side_length < current_probe_side_length) {
 			std::swap(build_side, probe_side);
 			std::swap(build_res, probe_res);
 		}
