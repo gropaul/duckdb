@@ -350,7 +350,7 @@ public:
 	void FinishEvent() override {
 		sink.hash_table->GetDataCollection().VerifyEverythingPinned();
 		sink.hash_table->finalized = true;
-
+		sink.hash_table->LogMetrics();
 		if (sink.hash_table->produce_fact_pointers){
 			sink.hash_table->FinalizeFactDatas();
 		}

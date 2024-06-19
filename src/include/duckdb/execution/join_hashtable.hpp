@@ -197,6 +197,9 @@ public:
 	};
 
 public:
+
+	void LogMetrics();
+
 	JoinHashTable(BufferManager &buffer_manager, const vector<JoinCondition> &conditions,
 	              vector<LogicalType> build_types, JoinType type, const vector<idx_t> &output_columns,
 	              const bool emit_fact_vectors, const idx_t emitter_id, const PhysicalOperator *op_p);

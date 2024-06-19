@@ -4,6 +4,7 @@
 #include "duckdb/common/row_operations/row_operations.hpp"
 #include "duckdb/common/types/column/column_data_collection_segment.hpp"
 #include "duckdb/common/vector_operations/vector_operations.hpp"
+#include "duckdb/execution/fact_logging.hpp"
 #include "duckdb/execution/ht_entry.hpp"
 #include "duckdb/main/client_context.hpp"
 #include "duckdb/storage/buffer_manager.hpp"
@@ -34,7 +35,7 @@ void JoinHashTable::FactProbeState::Initialize(idx_t element_count, BufferManage
 	if (initialized_data) {
 		return;
 	} else {
-		ptrs_list_data_size = element_count * 0.5;
+		ptrs_list_data_size = element_count * 1.0;
 		ptrs_list_data_lhs = buffer_manager_p.GetBufferAllocator().Allocate(ptrs_list_data_size * sizeof(data_ptr_t));
 		ptrs_list_data_rhs = buffer_manager_p.GetBufferAllocator().Allocate(ptrs_list_data_size * sizeof(data_ptr_t));
 
@@ -823,6 +824,12 @@ void JoinHashTable::Finalize(idx_t chunk_idx_from, idx_t chunk_idx_to, bool para
 
 		InsertHashes(hashes, count, chunk_state, insert_state, parallel);
 	} while (iterator.Next());
+}
+
+void JoinHashTable::LogMetrics(){
+	const idx_t n_rows = Count();
+	const JoinMetrics metrics( n_rows, chains_count);
+	LogJoinMetrics(metrics);
 }
 
 void JoinHashTable::FinalizeFactDatas() {

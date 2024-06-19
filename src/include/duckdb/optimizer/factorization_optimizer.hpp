@@ -95,7 +95,7 @@ private:
 	void AddFactExpandBeforeOperatorAndChild(unique_ptr<duckdb::LogicalOperator> &parent,
 	                                         unique_ptr<duckdb::LogicalOperator> &child,
 	                                         vector<FactExpandCondition> &conditions);
-	bool CanProcessFactVectorsFromChild(const LogicalOperator &op, idx_t child_idx);
+	bool CanProcessFactVectorsFromChild(const LogicalOperator* op, idx_t child_idx);
 };
 
 } // namespace duckdb

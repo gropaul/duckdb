@@ -6,7 +6,7 @@
 
 namespace duckdb {
 
-static TupleDataCollection *FindDataCollectionInOp(const PhysicalOperator *op, const idx_t &emitter_id) {
+static inline TupleDataCollection *FindDataCollectionInOp(const PhysicalOperator *op, const idx_t &emitter_id) {
 
 	if (op->type == PhysicalOperatorType::HASH_JOIN) {
 		auto physical_hash_join_op = reinterpret_cast<const PhysicalHashJoin *>(op);
