@@ -21,6 +21,7 @@
 #include "duckdb/execution/ht_entry.hpp"
 #include "duckdb/planner/operator/logical_comparison_join.hpp"
 #include "duckdb/storage/storage_info.hpp"
+#include "duckdb/common/types/ams_sketch.hpp"
 
 namespace duckdb {
 
@@ -305,6 +306,8 @@ public:
 	bool chains_longer_than_one;
 	//! Distinct chain count
 	atomic<idx_t> chains_count;
+
+	FastAMS fast_ams_sketch;
 
 	//! The capacity of the HT. Is the same as hash_map.GetSize() / sizeof(ht_entry_t)
 	idx_t capacity;
