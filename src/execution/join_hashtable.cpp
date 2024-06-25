@@ -56,7 +56,7 @@ JoinHashTable::JoinHashTable(BufferManager &buffer_manager_p, const vector<JoinC
       conditions(conditions_p), build_types(std::move(btypes)), output_columns(output_columns_p),
       chains_longer_than_one(false), chains_count(0), entry_size(0), tuple_size(0), vfound(Value::BOOLEAN(false)),
       join_type(type_p), finalized(false), has_null(false), radix_bits(INITIAL_RADIX_BITS), partition_start(0),
-      partition_end(0) {
+      partition_end(0), fast_ams_sketch(8, 8) {
 
 	for (idx_t i = 0; i < conditions.size(); ++i) {
 		auto &condition = conditions[i];
