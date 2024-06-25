@@ -2,7 +2,6 @@
 set(CMAKE_C_VISIBILITY_PRESET hidden)
 
 if(NOT AMALGAMATION_BUILD)
-  add_subdirectory(fast_ams_sketch)
   add_subdirectory(fmt)
   add_subdirectory(libpg_query)
   add_subdirectory(re2)
