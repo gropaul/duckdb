@@ -1,0 +1,63 @@
+# name: test/playground/cyclic_join.test
+# description: A simple test to demonstrate how to join two tables
+# group: [playground]
+
+statement ok
+CREATE TABLE R (
+    a BIGINT NOT NULL,
+    c BIGINT NOT NULL
+)
+
+statement ok
+CREATE TABLE S (
+    b BIGINT NOT NULL,
+    e BIGINT NOT NULL
+)
+
+statement ok
+CREATE TABLE T (
+    d BIGINT NOT NULL,
+    f BIGINT NOT NULL
+)
+
+statement ok
+INSERT INTO R (a, c) VALUES
+(0,0),
+(0,1),
+(0,2),
+(1,0),
+(2,0)
+
+statement ok
+INSERT INTO S (b, e) VALUES
+(0,0),
+(0,1),
+(0,2),
+(1,0),
+(2,0)
+
+statement ok
+INSERT INTO T (d, f) VALUES
+(0,0),
+(0,1),
+(0,2),
+(1,0),
+(2,0)
+
+query IIIIII
+SELECT *
+FROM R,
+     S,
+     T
+WHERE R.a = S.b
+  AND R.c = T.d
+  AND S.e = T.f
+ORDER BY ALL
+----
+0	0	0	0	0	0
+0	0	0	1	0	1
+0	0	0	2	0	2
+0	1	0	0	1	0
+0	2	0	0	2	0
+1	0	1	0	0	0
+2	0	2	0	0	0
