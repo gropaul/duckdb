@@ -11,8 +11,8 @@ class MyRandomGenerator {
 public:
     using result_type = uint32_t;
 
-    static constexpr result_type Min() { return 0; }
-    static constexpr result_type Max() { return std::numeric_limits<result_type>::max(); }
+    static constexpr result_type min() { return 0; }
+    static constexpr result_type max() { return std::numeric_limits<result_type>::max(); }
 
     explicit MyRandomGenerator(uint32_t seed) : m_seed(seed) {}
 
