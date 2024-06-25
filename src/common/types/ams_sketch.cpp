@@ -1,4 +1,5 @@
 #include "duckdb/common/types/ams_sketch.hpp"
+#include <cstddef>
 #include <iostream>
 #include <ctime>
 #include <vector>
@@ -7,12 +8,11 @@
 #include <cassert>
 #include <set>
 #include <string>
-#include <sstream>
 #include <cstdlib>
 
 namespace duckdb {
 template<typename T>
-T getMedian(std::multiset<T>& data) {
+T FastAMS::GetMedian(const std::multiset<T>& data) {
     auto it = data.begin();
     std::advance(it, data.size() / 2);
     return *it;
@@ -20,33 +20,33 @@ T getMedian(std::multiset<T>& data) {
 
 using byte = char;
 
-FastAMS::FastAMS(unsigned long counters, unsigned long hashes)
-    : m_seed(static_cast<unsigned long>(std::time(0))), m_counters(counters) {
-    m_pFilter = new long[m_counters * hashes];
-    std::fill(m_pFilter, m_pFilter + m_counters * hashes, 0); // equivalent to bzero
+FastAMS::FastAMS(uint32_t counters, uint32_t hashes)
+    : m_seed(static_cast<uint32_t>(std::time(nullptr))), m_counters(counters) {
+    m_p_filter = new int32_t[m_counters * hashes];
+    std::fill(m_p_filter, m_p_filter + static_cast<size_t>(m_counters * hashes), 0); // equivalent to bzero
 
     MyRandomGenerator rng(m_seed); // Mersenne Twister random number generator
-    std::uniform_int_distribution<unsigned long> dist; // Uniform distribution
+    std::uniform_int_distribution<uint32_t> dist; // Uniform distribution
 
-    for (unsigned long i = 0; i < hashes; i++) {
+    for (uint32_t i = 0; i < hashes; i++) {
         m_hash.push_back(dist(rng)); // Generate a random number for hash
-        m_fourwiseHash.push_back(dist(rng)); // Generate a random number for fourwise hash
+        m_fourwise_hash.push_back(dist(rng)); // Generate a random number for fourwise hash
     }
 }
 
 FastAMS::FastAMS(
-    unsigned long counters,
-    unsigned long hashes,
-    unsigned long seed
+    uint32_t counters,
+    uint32_t hashes,
+    uint32_t seed
 ) : m_seed(seed), m_counters(counters) {
-    m_pFilter = new long[m_counters * hashes];
-    std::fill(m_pFilter, m_pFilter + m_counters * hashes, 0);
+    m_p_filter = new int32_t[m_counters * hashes];
+    std::fill(m_p_filter, m_p_filter + static_cast<size_t>(m_counters * hashes), 0);
 
     MyRandomGenerator rng(seed);
 
-    for (unsigned long i = 0; i < hashes; i++) {
+    for (uint32_t i = 0; i < hashes; i++) {
         m_hash.push_back(rng());
-        m_fourwiseHash.push_back(rng());
+        m_fourwise_hash.push_back(rng());
     }
 }
 
@@ -55,149 +55,152 @@ FastAMS::FastAMS(
 ) : m_seed(in.m_seed),
     m_counters(in.m_counters),
     m_hash(in.m_hash),
-    m_fourwiseHash(in.m_fourwiseHash) {
-    m_pFilter = new long[m_counters * m_hash.size()];
-    std::memcpy(m_pFilter, in.m_pFilter, m_counters * m_hash.size() * sizeof(long));
+    m_fourwise_hash(in.m_fourwise_hash) {
+    m_p_filter = new int32_t[m_counters * m_hash.size()];
+    std::memcpy(m_p_filter, in.m_p_filter, m_counters * m_hash.size() * sizeof(int32_t));
 }
 
 FastAMS::FastAMS(const byte* data) {
-    unsigned long hashes;
-    std::memcpy(&hashes, data, sizeof(unsigned long));
-    data += sizeof(unsigned long);
-    std::memcpy(&m_counters, data, sizeof(unsigned long));
-    data += sizeof(unsigned long);
-    std::memcpy(&m_seed, data, sizeof(unsigned long));
-    data += sizeof(unsigned long);
+    uint32_t hashes;
+    std::memcpy(&hashes, data, sizeof(uint32_t));
+    data += sizeof(uint32_t);
+    std::memcpy(&m_counters, data, sizeof(uint32_t));
+    data += sizeof(uint32_t);
+    std::memcpy(&m_seed, data, sizeof(uint32_t));
+    data += sizeof(uint32_t);
 
     MyRandomGenerator rng(m_seed);
-    for (unsigned long i = 0; i < hashes; i++) {
+    for (uint32_t i = 0; i < hashes; i++) {
         m_hash.push_back(rng());
-        m_fourwiseHash.push_back(rng());
+        m_fourwise_hash.push_back(rng());
     }
 
-    m_pFilter = new long[m_counters * hashes];
-    std::memcpy(m_pFilter, data, m_counters * hashes * sizeof(long));
+    m_p_filter = new int32_t[m_counters * hashes];
+    std::memcpy(m_p_filter, data, static_cast<uint32_t>(m_counters * hashes) * sizeof(int32_t));
 }
 
 FastAMS::~FastAMS() {
-    delete[] m_pFilter;
+    delete[] m_p_filter;
 }
 
 FastAMS& FastAMS::operator=(const FastAMS& in) {
     if (this != &in) {
         if (m_counters != in.m_counters || m_hash.size() != in.m_hash.size()) {
-            delete[] m_pFilter;
-            m_pFilter = new long[in.m_counters * in.m_hash.size()];
+            delete[] m_p_filter;
+            m_p_filter = new int32_t[in.m_counters * in.m_hash.size()];
         }
 
         m_counters = in.m_counters;
         m_hash = in.m_hash;
-        m_fourwiseHash = in.m_fourwiseHash;
+        m_fourwise_hash = in.m_fourwise_hash;
         m_seed = in.m_seed;
-        std::memcpy(m_pFilter, in.m_pFilter, m_counters * m_hash.size() * sizeof(long));
+        std::memcpy(m_p_filter, in.m_p_filter, m_counters * m_hash.size() * sizeof(int32_t));
     }
 
     return *this;
 }
 
-void FastAMS::insert(const std::string& id, long val) {
-    unsigned long long l = std::atoll(id.c_str());
-    insert(l, val);
+void FastAMS::Insert(const std::string& id, int32_t val) {
+    uint64_t l = std::atoll(id.c_str());
+    Insert(l, val);
 }
 
-void FastAMS::insert(
+void FastAMS::Insert(
     const UniversalHash::value_type& id,
-    long val
+    int32_t val
 ) {
     MyRandomGenerator rng(m_seed);
 
-    for (unsigned long i = 0; i < m_hash.size(); i++) {
-        unsigned long h = m_hash[i] % m_counters;
-        unsigned long m = m_fourwiseHash[i];
+    for (uint32_t i = 0; i < m_hash.size(); i++) {
+        uint32_t h = m_hash[i] % m_counters;
+        uint32_t m = m_fourwise_hash[i];
 
-        if ((m & 1) == 1)
-            m_pFilter[i * m_counters + h] += val;
-        else
-            m_pFilter[i * m_counters + h] -= val;
+        if ((m & 1) == 1) {
+            m_p_filter[i * m_counters + h] += val;
+        } else {
+            m_p_filter[i * m_counters + h] -= val;
+        }
     }
 }
 
-void FastAMS::erase(const std::string& id, long val) {
-    unsigned long long l = std::atoll(id.c_str());
-    erase(l, val);
+void FastAMS::Erase(const std::string& id, int32_t val) {
+    uint64_t l = std::atoll(id.c_str());
+    Erase(l, val);
 }
 
-void FastAMS::erase(
+void FastAMS::Erase(
     const UniversalHash::value_type& id,
-    long val
+    int32_t val
 ) {
-    MyRandomGenerator rng(m_seed);
 
-    for (unsigned long i = 0; i < m_hash.size(); i++) {
-        unsigned long h = m_hash[i] % m_counters;
-        unsigned long m = m_fourwiseHash[i];
+    for (uint32_t i = 0; i < m_hash.size(); i++) {
+        uint32_t h = m_hash[i] % m_counters;
+        uint32_t m = m_fourwise_hash[i];
 
-        if ((m & 1) == 1)
-            m_pFilter[i * m_counters + h] -= val;
-        else
-            m_pFilter[i * m_counters + h] += val;
+        if ((m & 1) == 1) {
+            m_p_filter[i * m_counters + h] -= val;
+        } else {
+            m_p_filter[i * m_counters + h] += val;
+        }
     }
 }
 
-void FastAMS::clear() {
-    std::fill(m_pFilter, m_pFilter + m_counters * m_hash.size(), 0);
+void FastAMS::Clear() {
+    std::fill(m_p_filter, m_p_filter + m_counters * m_hash.size(), 0);
 }
 
-long FastAMS::getFrequency(const std::string& id) const {
-    unsigned long long l = std::atoll(id.c_str());
-    return getFrequency(l);
+int32_t FastAMS::GetFrequency(const std::string& id) {
+    uint64_t l = std::atoll(id.c_str());
+    return GetFrequency(l);
 }
 
-long FastAMS::getFrequency(
+int32_t FastAMS::GetFrequency(
     const UniversalHash::value_type& id
-) const {
-    std::multiset<long> answer;
+) {
+    std::multiset<int32_t> answer;
 
-    for (unsigned long i = 0; i < m_hash.size(); i++) {
-        unsigned long h = m_hash[i] % m_counters;
-        unsigned long m = m_fourwiseHash[i];
+    for (uint64_t i = 0; i < m_hash.size(); i++) {
+        uint64_t h = m_hash[i] % m_counters;
+        uint64_t m = m_fourwise_hash[i];
 
-        if ((m & 1) == 1)
-            answer.insert(m_pFilter[i * m_counters + h]);
-        else
-            answer.insert(-m_pFilter[i * m_counters + h]);
+        if ((m & 1) == 1) {
+            answer.insert(m_p_filter[i * m_counters + h]);
+        }
+        else {
+            answer.insert(-m_p_filter[i * m_counters + h]);
+        }
     }
 
-    return getMedian<long>(answer);
+    return GetMedian<int32_t>(answer);
 }
 
-unsigned long FastAMS::getVectorLength() const {
+uint32_t FastAMS::GetVectorLength() const {
     return m_counters;
 }
 
-unsigned long FastAMS::getNumberOfHashes() const {
+uint32_t FastAMS::GetNumberOfHashes() const {
     return m_hash.size();
 }
 
-unsigned long FastAMS::getSize() const {
-    return 3 * sizeof(unsigned long) +
-        m_counters * m_hash.size() * sizeof(long);
+uint32_t FastAMS::GetSize() const {
+    return 3 * sizeof(uint32_t) +
+        m_counters * m_hash.size() * sizeof(int32_t);
 }
 
-void FastAMS::getData(byte** data, unsigned long& length) const {
-    length = getSize();
+void FastAMS::GetData(byte** data, uint32_t& length) const {
+    length = GetSize();
     *data = new byte[length];
     byte* p = *data;
 
-    unsigned long l = m_hash.size();
-    std::memcpy(p, &l, sizeof(unsigned long));
-    p += sizeof(unsigned long);
-    std::memcpy(p, &m_counters, sizeof(unsigned long));
-    p += sizeof(unsigned long);
-    std::memcpy(p, &m_seed, sizeof(unsigned long));
-    p += sizeof(unsigned long);
-    std::memcpy(p, m_pFilter, m_counters * m_hash.size() * sizeof(long));
-    p += m_counters * m_hash.size() * sizeof(long);
+    uint32_t l = m_hash.size();
+    std::memcpy(p, &l, sizeof(uint32_t));
+    p += sizeof(uint32_t);
+    std::memcpy(p, &m_counters, sizeof(uint32_t));
+    p += sizeof(uint32_t);
+    std::memcpy(p, &m_seed, sizeof(uint32_t));
+    p += sizeof(uint32_t);
+    std::memcpy(p, m_p_filter, m_counters * m_hash.size() * sizeof(int32_t));
+    p += m_counters * m_hash.size() * sizeof(int32_t);
 
     assert(p == (*data) + length);
 }
@@ -208,14 +211,17 @@ std::ostream& operator<<(
 ) {
     os << s.m_hash.size() << " " << s.m_counters;
 
-    for (unsigned long i = 0; i < s.m_hash.size(); i++)
+    for (uint32_t i = 0; i < s.m_hash.size(); i++) {
         os << " " << s.m_hash[i];
+    }
 
-    for (unsigned long i = 0; i < s.m_fourwiseHash.size(); i++)
-        os << " " << s.m_fourwiseHash[i];
+    for (uint32_t i = 0; i < s.m_fourwise_hash.size(); i++) {
+        os << " " << s.m_fourwise_hash[i];
+    }
 
-    for (unsigned long i = 0; i < s.m_counters * s.m_hash.size(); i++)
-        os << " " << s.m_pFilter[i];
+    for (uint32_t i = 0; i < s.m_counters * s.m_hash.size(); i++) {
+        os << " " << s.m_p_filter[i];
+    }
 
     return os;
 }

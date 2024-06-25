@@ -1,25 +1,20 @@
 #pragma once
 #include <vector>
-#include <cstring>
-#include <cassert>
 #include <set>
 #include <string>
-#include <sstream>
-#include <cstdlib>
 
 namespace duckdb {
-
 
 using byte = char;
 
 class MyRandomGenerator {
 public:
-    using result_type = unsigned long;
+    using result_type = uint32_t;
 
-    static constexpr result_type min() { return 0; }
-    static constexpr result_type max() { return std::numeric_limits<result_type>::max(); }
+    static constexpr result_type Min() { return 0; }
+    static constexpr result_type Max() { return std::numeric_limits<result_type>::max(); }
 
-    MyRandomGenerator(unsigned long seed) : m_seed(seed) {}
+    explicit MyRandomGenerator(uint32_t seed) : m_seed(seed) {}
 
     result_type operator()() {
         // Custom random number generation algorithm
@@ -29,53 +24,54 @@ public:
     }
 
 private:
-    unsigned long m_seed;
+    uint32_t m_seed;
 };
 
 class UniversalHash {
 public:
-    using value_type = unsigned long;
+    using value_type = uint32_t;
 
-    UniversalHash(MyRandomGenerator& rng);
+    explicit UniversalHash(MyRandomGenerator& rng);
 
-    unsigned long hash(value_type val);
+    uint32_t Hash(value_type val);
 
 private:
     MyRandomGenerator& m_rng;
 };
 
-template<typename T>
-T getMedian(std::multiset<T>& data);
+
 
 class FastAMS {
 public:
-    FastAMS(unsigned long counters, unsigned long hashes);
-    FastAMS(unsigned long counters, unsigned long hashes, unsigned long seed);
+    FastAMS(uint32_t counters, uint32_t hashes);
+    FastAMS(uint32_t counters, uint32_t hashes, uint32_t seed);
     FastAMS(const FastAMS& in);
-    FastAMS(const byte* data);
+    explicit FastAMS(const byte* data);
     ~FastAMS();
     FastAMS& operator=(const FastAMS& in);
 
-    void insert(const std::string& id, long val);
-    void insert(const UniversalHash::value_type& id, long val);
-    void erase(const std::string& id, long val);
-    void erase(const UniversalHash::value_type& id, long val);
-    void clear();
-    long getFrequency(const std::string& id) const;
-    long getFrequency(const UniversalHash::value_type& id) const;
-    unsigned long getVectorLength() const;
-    unsigned long getNumberOfHashes() const;
-    unsigned long getSize() const;
-    void getData(byte** data, unsigned long& length) const;
+    void Insert(const std::string& id, int32_t val);
+    void Insert(const UniversalHash::value_type& id, int32_t val);
+    void Erase(const std::string& id, int32_t val);
+    void Erase(const UniversalHash::value_type& id, int32_t val);
+    void Clear();
+    int32_t GetFrequency(const std::string& id);
+    int32_t GetFrequency(const UniversalHash::value_type& id);
+    uint32_t GetVectorLength() const;
+    uint32_t GetNumberOfHashes() const;
+    uint32_t GetSize() const;
+    void GetData(byte** data, uint32_t& length) const;
+    template <typename T>
+    T GetMedian(const std::multiset<T> &data);
 
     friend std::ostream& operator<<(std::ostream& os, const FastAMS& s);
 
 private:
-    unsigned long m_seed;
-    unsigned long m_counters;
-    long* m_pFilter;
-    std::vector<unsigned long> m_hash;
-    std::vector<unsigned long> m_fourwiseHash;
+    uint32_t m_seed;
+    uint32_t m_counters;
+    int32_t* m_p_filter;
+    std::vector<uint32_t> m_hash;
+    std::vector<uint32_t> m_fourwise_hash;
 };
 
 
