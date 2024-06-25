@@ -9,6 +9,7 @@ endif()
 add_library_unity(
   duckdb_common_types
   OBJECT
+  ams_sketch.cpp
   batched_data_collection.cpp
   bit.cpp
   blob.cpp
