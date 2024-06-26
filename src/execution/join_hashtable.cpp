@@ -826,6 +826,20 @@ void JoinHashTable::Finalize(idx_t chunk_idx_from, idx_t chunk_idx_to, bool para
 	} while (iterator.Next());
 }
 
+void JoinHashTable::CalculateAMSSketch() {
+	TupleDataChunkIterator iterator(*data_collection, TupleDataPinProperties::KEEP_EVERYTHING_PINNED, false);
+	const auto row_locations = iterator.GetRowLocations();
+	do {
+		const auto count = iterator.GetCurrentChunkCount();
+		for (idx_t i = 0; i < count; i++) {
+			const auto hash = Load<hash_t>(row_locations[i] + pointer_offset);
+			fast_ams_sketch.Insert(hash);
+		}
+	} while (iterator.Next());
+
+}
+
+
 void JoinHashTable::LogMetrics(){
 	const idx_t n_rows = Count();
 	const JoinMetrics metrics( n_rows, chains_count);

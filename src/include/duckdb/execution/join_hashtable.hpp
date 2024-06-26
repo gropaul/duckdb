@@ -199,6 +199,7 @@ public:
 
 public:
 
+	void CalculateAMSSketch();
 	void LogMetrics();
 
 	JoinHashTable(BufferManager &buffer_manager, const vector<JoinCondition> &conditions,
