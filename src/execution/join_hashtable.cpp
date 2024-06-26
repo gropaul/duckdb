@@ -836,7 +836,7 @@ void JoinHashTable::CalculateAMSSketch() {
 			fast_ams_sketch.Insert(hash);
 		}
 	} while (iterator.Next());
-
+	std::cout << fast_ams_sketch; // print the sketch
 }
 
 
