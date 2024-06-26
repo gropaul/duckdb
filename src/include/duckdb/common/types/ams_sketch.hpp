@@ -50,8 +50,7 @@ public:
     ~FastAMS();
     FastAMS& operator=(const FastAMS& in);
 
-    void Insert(const std::string& id, int32_t val);
-    void Insert(const UniversalHash::value_type& id, int32_t val);
+    void Insert(uint64_t val);
     void Erase(const std::string& id, int32_t val);
     void Erase(const UniversalHash::value_type& id, int32_t val);
     void Clear();
@@ -67,11 +66,11 @@ public:
     friend std::ostream& operator<<(std::ostream& os, const FastAMS& s);
 
 private:
-    uint32_t m_seed;
-    uint32_t m_counters;
-    int32_t* m_p_filter;
-    std::vector<uint32_t> m_hash;
-    std::vector<uint32_t> m_fourwise_hash;
+    uint64_t m_seed;
+    uint64_t m_counters;
+    int64_t* m_p_filter;
+    std::vector<uint64_t> m_hash;
+    std::vector<uint64_t> m_fourwise_hash;
 };
 
 

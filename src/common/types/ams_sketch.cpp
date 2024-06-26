@@ -23,7 +23,7 @@ using byte = char;
 
 FastAMS::FastAMS(uint32_t counters, uint32_t hashes)
     : m_seed(static_cast<uint32_t>(std::time(nullptr))), m_counters(counters) {
-	m_p_filter = new int32_t[m_counters * hashes];
+	m_p_filter = new int64_t[m_counters * hashes];
 	std::fill(m_p_filter, m_p_filter + static_cast<size_t>(m_counters * hashes), 0); // equivalent to bzero
 
 	MyRandomGenerator rng(m_seed);                // Mersenne Twister random number generator
@@ -36,7 +36,7 @@ FastAMS::FastAMS(uint32_t counters, uint32_t hashes)
 }
 
 FastAMS::FastAMS(uint32_t counters, uint32_t hashes, uint32_t seed) : m_seed(seed), m_counters(counters) {
-	m_p_filter = new int32_t[m_counters * hashes];
+	m_p_filter = new int64_t[m_counters * hashes];
 	std::fill(m_p_filter, m_p_filter + static_cast<size_t>(m_counters * hashes), 0);
 
 	MyRandomGenerator rng(seed);
@@ -49,7 +49,7 @@ FastAMS::FastAMS(uint32_t counters, uint32_t hashes, uint32_t seed) : m_seed(see
 
 FastAMS::FastAMS(const FastAMS &in)
     : m_seed(in.m_seed), m_counters(in.m_counters), m_hash(in.m_hash), m_fourwise_hash(in.m_fourwise_hash) {
-	m_p_filter = new int32_t[m_counters * m_hash.size()];
+	m_p_filter = new int64_t[m_counters * m_hash.size()];
 	std::memcpy(m_p_filter, in.m_p_filter, m_counters * m_hash.size() * sizeof(int32_t));
 }
 
@@ -68,7 +68,7 @@ FastAMS::FastAMS(const byte *data) {
 		m_fourwise_hash.push_back(rng());
 	}
 
-	m_p_filter = new int32_t[m_counters * hashes];
+	m_p_filter = new int64_t[m_counters * hashes];
 	std::memcpy(m_p_filter, data, static_cast<uint32_t>(m_counters * hashes) * sizeof(int32_t));
 }
 
@@ -80,7 +80,7 @@ FastAMS &FastAMS::operator=(const FastAMS &in) {
 	if (this != &in) {
 		if (m_counters != in.m_counters || m_hash.size() != in.m_hash.size()) {
 			delete[] m_p_filter;
-			m_p_filter = new int32_t[in.m_counters * in.m_hash.size()];
+			m_p_filter = new int64_t[in.m_counters * in.m_hash.size()];
 		}
 
 		m_counters = in.m_counters;
@@ -93,12 +93,7 @@ FastAMS &FastAMS::operator=(const FastAMS &in) {
 	return *this;
 }
 
-void FastAMS::Insert(const std::string &id, int32_t val) {
-	uint64_t l = std::atoll(id.c_str());
-	Insert(l, val);
-}
-
-void FastAMS::Insert(const UniversalHash::value_type &id, int32_t val) {
+void FastAMS::Insert(uint64_t val) {
 	for (uint32_t i = 0; i < m_hash.size(); i++) {
 		uint32_t h = m_hash[i] % m_counters;
 		uint32_t m = m_fourwise_hash[i];
