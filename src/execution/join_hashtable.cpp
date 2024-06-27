@@ -833,10 +833,11 @@ void JoinHashTable::CalculateAMSSketch() {
 		const auto count = iterator.GetCurrentChunkCount();
 		for (idx_t i = 0; i < count; i++) {
 			const auto hash = Load<hash_t>(row_locations[i] + pointer_offset);
+			std::cout << hash << std::endl;
 			fast_ams_sketch.Insert(hash);
 		}
 	} while (iterator.Next());
-	std::cout << fast_ams_sketch; // print the sketch
+    std::cout << fast_ams_sketch.Estimate() << std::endl; // print the estimated norm
 }
 
 
