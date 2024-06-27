@@ -299,6 +299,7 @@ static inline void GetRowPointersInternal(DataChunk &keys, TupleDataChunkState &
 inline bool JoinHashTable::UseSalt() const {
 	// only use salt for large hash tables and if there is only one equality condition as otherwise
 	// we potentially need to compare multiple keys
+	return false;
 	return this->capacity > USE_SALT_THRESHOLD && this->equality_predicate_columns.size() == 1;
 }
 
