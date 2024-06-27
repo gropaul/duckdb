@@ -6,19 +6,19 @@ statement ok
 CREATE TABLE R (
     a BIGINT NOT NULL,
     c BIGINT NOT NULL
-)
+);
 
 statement ok
 CREATE TABLE S (
     b BIGINT NOT NULL,
     e BIGINT NOT NULL
-)
+);
 
 statement ok
 CREATE TABLE T (
     d BIGINT NOT NULL,
     f BIGINT NOT NULL
-)
+);
 
 statement ok
 INSERT INTO R (a, c) VALUES
@@ -26,7 +26,7 @@ INSERT INTO R (a, c) VALUES
 (0,1),
 (0,2),
 (1,0),
-(2,0)
+(2,0);
 
 statement ok
 INSERT INTO S (b, e) VALUES
@@ -34,7 +34,7 @@ INSERT INTO S (b, e) VALUES
 (0,1),
 (0,2),
 (1,0),
-(2,0)
+(2,0);
 
 statement ok
 INSERT INTO T (d, f) VALUES
@@ -42,7 +42,7 @@ INSERT INTO T (d, f) VALUES
 (0,1),
 (0,2),
 (1,0),
-(2,0)
+(2,0);
 
 query IIIIII
 SELECT *
@@ -52,7 +52,7 @@ FROM R,
 WHERE R.a = S.b
   AND R.c = T.d
   AND S.e = T.f
-ORDER BY ALL
+ORDER BY ALL;
 ----
 0	0	0	0	0	0
 0	0	0	1	0	1
