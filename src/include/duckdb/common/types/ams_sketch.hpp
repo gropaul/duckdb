@@ -1,41 +1,29 @@
 #pragma once
 
-#include <vector>
-#include <random>
-#include <set>
-#include <cstdint>
+#include <duckdb/common/vector.hpp>
 
 namespace duckdb {
 
-class FastAMS {
+// AMS Sketch Class
+// AMS Sketch Class
+class AMSSketch {
 public:
-    FastAMS(uint64_t counters, uint64_t hashes);
-    FastAMS(const FastAMS &in);
-    FastAMS(const char *data);
-    ~FastAMS();
+    AMSSketch(int d, int t, int p);
 
-    FastAMS &operator=(const FastAMS &in);
+    // Hash function h_j that maps input domain to {1, 2, ..., t}
+    int HashH(uint64_t i, int j, int t);
 
-    void Insert(uint64_t val);
-    int64_t GetFrequency(const std::string &id);
-    void Clear();
-    void GetData(char **data, uint64_t &length) const;
-    uint64_t GetVectorLength() const;
-    uint64_t GetNumberOfHashes() const;
-    uint64_t GetSize() const;
-    double Estimate() const;
+    // Hash function g_j that maps elements to {-1, +1}
+    int HashG(uint64_t i, int j, int p);
 
-    // friend std::ostream &operator<<(std::ostream &os, const FastAMS &s);
+    void Update(uint64_t i, int64_t w);
+
+    double Estimate();
 
 private:
-    uint64_t m_seed;
-    uint64_t m_counters;
-    std::vector<uint64_t> m_hash;
-    std::vector<uint64_t> m_fourwise_hash;
-    int64_t *m_p_filter;
-
-    template <typename T>
-    T GetMedian(const std::multiset<T> &data) const;
+    int d, t, p; // d: number of hash functions, t: number of buckets, p: prime field
+    std::vector<std::vector<int64_t>> c; // Sketch array
 };
+
 
 } // namespace duckdb

@@ -199,7 +199,7 @@ public:
 
 public:
 
-	void CalculateAMSSketch();
+	double CalculateAMSSketch();
 	void LogMetrics();
 
 	JoinHashTable(BufferManager &buffer_manager, const vector<JoinCondition> &conditions,
@@ -308,7 +308,7 @@ public:
 	//! Distinct chain count
 	atomic<idx_t> chains_count;
 
-	FastAMS fast_ams_sketch;
+	AMSSketch ams_sketch;
 
 	//! The capacity of the HT. Is the same as hash_map.GetSize() / sizeof(ht_entry_t)
 	idx_t capacity;

@@ -56,7 +56,7 @@ JoinHashTable::JoinHashTable(BufferManager &buffer_manager_p, const vector<JoinC
       conditions(conditions_p), build_types(std::move(btypes)), output_columns(output_columns_p),
       chains_longer_than_one(false), chains_count(0), entry_size(0), tuple_size(0), vfound(Value::BOOLEAN(false)),
       join_type(type_p), finalized(false), has_null(false), radix_bits(INITIAL_RADIX_BITS), partition_start(0),
-      partition_end(0), fast_ams_sketch(8, 8) {
+      ams_sketch(5, 10, 101), partition_end(0) {
 
 	for (idx_t i = 0; i < conditions.size(); ++i) {
 		auto &condition = conditions[i];
@@ -826,24 +826,24 @@ void JoinHashTable::Finalize(idx_t chunk_idx_from, idx_t chunk_idx_to, bool para
 	} while (iterator.Next());
 }
 
-void JoinHashTable::CalculateAMSSketch() {
+double JoinHashTable::CalculateAMSSketch() {
 	TupleDataChunkIterator iterator(*data_collection, TupleDataPinProperties::KEEP_EVERYTHING_PINNED, false);
 	const auto row_locations = iterator.GetRowLocations();
 	do {
 		const auto count = iterator.GetCurrentChunkCount();
 		for (idx_t i = 0; i < count; i++) {
 			const auto hash = Load<hash_t>(row_locations[i] + pointer_offset);
-			std::cout << hash << std::endl;
-			fast_ams_sketch.Insert(hash);
+			ams_sketch.Update(hash, 1);
 		}
 	} while (iterator.Next());
-    std::cout << fast_ams_sketch.Estimate() << std::endl; // print the estimated norm
+    return ams_sketch.Estimate();
 }
 
 
 void JoinHashTable::LogMetrics(){
+	auto ams_sketch_estimate = CalculateAMSSketch();
 	const idx_t n_rows = Count();
-	const JoinMetrics metrics( n_rows, chains_count);
+	const JoinMetrics metrics( n_rows, chains_count, ams_sketch_estimate);
 	LogJoinMetrics(metrics);
 }
 
