@@ -9,6 +9,8 @@
 #include "duckdb/main/client_context.hpp"
 #include "duckdb/storage/buffer_manager.hpp"
 
+#include <chrono>
+
 namespace duckdb {
 
 using ValidityBytes = JoinHashTable::ValidityBytes;
@@ -841,9 +843,17 @@ double JoinHashTable::CalculateAMSSketch() {
 
 
 void JoinHashTable::LogMetrics(){
-	auto ams_sketch_estimate = CalculateAMSSketch();
+	using namespace std::chrono;  // This allows you to use the chrono library more easily.
+    // Start timing
+    auto start = high_resolution_clock::now();
+    auto ams_sketch_estimate = CalculateAMSSketch();
+    // Stop timing
+    auto stop = high_resolution_clock::now();
+
+    // Calculate the duration in milliseconds (you can also use microseconds, nanoseconds, etc.)
+    auto duration = duration_cast<milliseconds>(stop - start);
 	const idx_t n_rows = Count();
-	const JoinMetrics metrics( n_rows, chains_count, ams_sketch_estimate);
+	const JoinMetrics metrics( n_rows, chains_count, ams_sketch_estimate, duration.count());
 	LogJoinMetrics(metrics);
 }
 
