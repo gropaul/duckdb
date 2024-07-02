@@ -9,8 +9,6 @@
 #include "duckdb/main/client_context.hpp"
 #include "duckdb/storage/buffer_manager.hpp"
 
-#include <chrono>
-
 namespace duckdb {
 
 using ValidityBytes = JoinHashTable::ValidityBytes;
@@ -56,9 +54,9 @@ JoinHashTable::JoinHashTable(BufferManager &buffer_manager_p, const vector<JoinC
                              const bool emit_fact_vector_p, const idx_t emitter_id_p, const PhysicalOperator *op_p)
     : op(op_p), produce_fact_pointers(emit_fact_vector_p), producer_id(emitter_id_p), buffer_manager(buffer_manager_p),
       conditions(conditions_p), build_types(std::move(btypes)), output_columns(output_columns_p),
-      chains_longer_than_one(false), chains_count(0), entry_size(0), tuple_size(0), vfound(Value::BOOLEAN(false)),
-      join_type(type_p), finalized(false), has_null(false), radix_bits(INITIAL_RADIX_BITS), partition_start(0),
-      ams_sketch(5, 10, 101), partition_end(0) {
+      chains_longer_than_one(false), chains_count(0), ams_sketch_simple(16), ams_sketch(5, 10, 101), entry_size(0), tuple_size(0),
+      vfound(Value::BOOLEAN(false)), join_type(type_p), finalized(false), has_null(false), radix_bits(INITIAL_RADIX_BITS),
+      partition_start(0), partition_end(0) {
 
 	for (idx_t i = 0; i < conditions.size(); ++i) {
 		auto &condition = conditions[i];
@@ -820,7 +818,10 @@ void JoinHashTable::Finalize(idx_t chunk_idx_from, idx_t chunk_idx_to, bool para
 
 		const auto count = iterator.GetCurrentChunkCount();
 		for (idx_t i = 0; i < count; i++) {
-			hash_data[i] = Load<hash_t>(row_locations[i] + pointer_offset);
+			hash_t hash = Load<hash_t>(row_locations[i] + pointer_offset);
+			hash_data[i] = hash;
+			ams_sketch_simple.Update(hash, 1);
+			ams_sketch.Update(hash, 1);
 		}
 		TupleDataChunkState &chunk_state = iterator.GetChunkState();
 
@@ -828,32 +829,12 @@ void JoinHashTable::Finalize(idx_t chunk_idx_from, idx_t chunk_idx_to, bool para
 	} while (iterator.Next());
 }
 
-double JoinHashTable::CalculateAMSSketch() {
-	TupleDataChunkIterator iterator(*data_collection, TupleDataPinProperties::KEEP_EVERYTHING_PINNED, false);
-	const auto row_locations = iterator.GetRowLocations();
-	do {
-		const auto count = iterator.GetCurrentChunkCount();
-		for (idx_t i = 0; i < count; i++) {
-			const auto hash = Load<hash_t>(row_locations[i] + pointer_offset);
-			ams_sketch.Update(hash, 1);
-		}
-	} while (iterator.Next());
-    return ams_sketch.Estimate();
-}
-
 
 void JoinHashTable::LogMetrics(){
-	using namespace std::chrono;  // This allows you to use the chrono library more easily.
-    // Start timing
-    auto start = high_resolution_clock::now();
-    auto ams_sketch_estimate = CalculateAMSSketch();
-    // Stop timing
-    auto stop = high_resolution_clock::now();
-
-    // Calculate the duration in milliseconds (you can also use microseconds, nanoseconds, etc.)
-    auto duration = duration_cast<milliseconds>(stop - start);
+	auto ams_sketch_simple_estimate = ams_sketch_simple.Estimate();
+	auto ams_sketch_estimate = ams_sketch.Estimate();
 	const idx_t n_rows = Count();
-	const JoinMetrics metrics( n_rows, chains_count, ams_sketch_estimate, duration.count());
+	const JoinMetrics metrics( n_rows, chains_count, ams_sketch_estimate, ams_sketch_simple_estimate);
 	LogJoinMetrics(metrics);
 }
 
