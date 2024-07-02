@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <duckdb/common/vector.hpp>
+#include <algorithm>
 
 namespace duckdb {
 
