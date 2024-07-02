@@ -43,7 +43,7 @@ double AMSSketch::Estimate() {
 			estimates[j] += pow(c[j][k], 2);
 		}
 	}
-	sort(estimates.begin(), estimates.end());
-	return sqrt(estimates[d / 2]);
+	std::sort(estimates.begin(), estimates.end());
+	return std::sqrt(estimates[d / 2]);
 }
 } // namespace duckdb
