@@ -820,8 +820,8 @@ void JoinHashTable::Finalize(idx_t chunk_idx_from, idx_t chunk_idx_to, bool para
 		for (idx_t i = 0; i < count; i++) {
 			hash_t hash = Load<hash_t>(row_locations[i] + pointer_offset);
 			hash_data[i] = hash;
-			ams_sketch_simple.Update(hash, 1);
-			// ams_sketch.Update(hash, 1);
+			// ams_sketch_simple.Update(hash, 1);
+			ams_sketch.Update(hash, 1);
 		}
 		TupleDataChunkState &chunk_state = iterator.GetChunkState();
 
@@ -831,10 +831,10 @@ void JoinHashTable::Finalize(idx_t chunk_idx_from, idx_t chunk_idx_to, bool para
 
 
 void JoinHashTable::LogMetrics(){
-	auto ams_sketch_simple_estimate = ams_sketch_simple.Estimate();
-	// auto ams_sketch_estimate = ams_sketch.Estimate();
+	// auto ams_sketch_simple_estimate = ams_sketch_simple.Estimate();
+	auto ams_sketch_estimate = ams_sketch.Estimate();
 	const idx_t n_rows = Count();
-	const JoinMetrics metrics( n_rows, chains_count, ams_sketch_simple_estimate);
+	const JoinMetrics metrics( n_rows, chains_count, ams_sketch_estimate, 0);
 	LogJoinMetrics(metrics);
 }
 
