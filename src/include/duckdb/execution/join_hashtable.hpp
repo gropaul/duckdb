@@ -10,8 +10,6 @@
 
 #include "duckdb/common/common.hpp"
 #include "duckdb/common/radix_partitioning.hpp"
-#include "duckdb/common/types/ams_sketch.hpp"
-#include "duckdb/common/types/ams_sketch_simple.hpp"
 #include "duckdb/common/types/column/column_data_consumer.hpp"
 #include "duckdb/common/types/data_chunk.hpp"
 #include "duckdb/common/types/null_value.hpp"
@@ -23,6 +21,9 @@
 #include "duckdb/execution/ht_entry.hpp"
 #include "duckdb/planner/operator/logical_comparison_join.hpp"
 #include "duckdb/storage/storage_info.hpp"
+#include "duckdb/common/types/ams_sketch.hpp"
+#include "duckdb/common/types/ams_sketch_simple.hpp"
+
 
 namespace duckdb {
 
@@ -309,8 +310,8 @@ public:
 	//! Distinct chain count
 	atomic<idx_t> chains_count;
 
-	AMSSketchSimple ams_sketch_simple;
 	AMSSketch ams_sketch;
+	AMSSketchSimple ams_sketch_simple;
 
 	//! The capacity of the HT. Is the same as hash_map.GetSize() / sizeof(ht_entry_t)
 	idx_t capacity;
