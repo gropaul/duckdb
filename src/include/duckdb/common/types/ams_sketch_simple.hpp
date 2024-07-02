@@ -16,6 +16,7 @@ public:
 
 private:
 	uint64_t array_size; // Size of the sketch array
+	uint64_t update_count; // Number of updates to the sketch
     std::vector<int64_t> array;
 };
 
