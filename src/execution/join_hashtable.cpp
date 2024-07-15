@@ -54,7 +54,7 @@ JoinHashTable::JoinHashTable(BufferManager &buffer_manager_p, const vector<JoinC
                              const bool emit_fact_vector_p, const idx_t emitter_id_p, const PhysicalOperator *op_p)
     : op(op_p), produce_fact_pointers(emit_fact_vector_p), producer_id(emitter_id_p), buffer_manager(buffer_manager_p),
       conditions(conditions_p), build_types(std::move(btypes)), output_columns(output_columns_p),
-      chains_longer_than_one(false), chains_count(0), ams_sketch(5, 10, 101), ams_sketch_simple(16), entry_size(0), tuple_size(0),
+      chains_longer_than_one(false), chains_count(0), ams_sketch(5, 10, 101), ams_sketch_simple(128,2), entry_size(0), tuple_size(0),
       vfound(Value::BOOLEAN(false)), join_type(type_p), finalized(false), has_null(false), radix_bits(INITIAL_RADIX_BITS),
       partition_start(0), partition_end(0) {
 
@@ -820,7 +820,7 @@ void JoinHashTable::Finalize(idx_t chunk_idx_from, idx_t chunk_idx_to, bool para
 		for (idx_t i = 0; i < count; i++) {
 			hash_t hash = Load<hash_t>(row_locations[i] + pointer_offset);
 			hash_data[i] = hash;
-			ams_sketch_simple.Update(hash, 1);
+			ams_sketch_simple.Update(hash);
 			// ams_sketch.Update(hash, 1);
 		}
 		TupleDataChunkState &chunk_state = iterator.GetChunkState();
@@ -831,10 +831,8 @@ void JoinHashTable::Finalize(idx_t chunk_idx_from, idx_t chunk_idx_to, bool para
 
 
 void JoinHashTable::LogMetrics(){
-	auto ams_sketch_simple_estimate = ams_sketch_simple.Estimate();
-	// auto ams_sketch_estimate = ams_sketch.Estimate();
 	const idx_t n_rows = Count();
-	const JoinMetrics metrics( n_rows, chains_count, ams_sketch_simple_estimate);
+	const JoinMetrics metrics( n_rows, chains_count, ams_sketch_simple.GetArray());
 	LogJoinMetrics(metrics);
 }
 
