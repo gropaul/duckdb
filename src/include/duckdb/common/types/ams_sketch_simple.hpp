@@ -12,6 +12,8 @@ public:
 
 	void Update(uint64_t hash);
 
+	void Combine(const AMSSketchSimple &other);
+
 	vector<vector<int64_t>> GetArray() {
 		return array;
 	}

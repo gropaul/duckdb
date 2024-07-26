@@ -23,6 +23,18 @@ AMSSketchSimple::AMSSketchSimple(uint64_t array_size, uint8_t n_hash_functions)
 	array = vector<vector<int64_t>>(n_hash_functions, vector<int64_t>(array_size, 0));
 }
 
+
+void AMSSketchSimple::Combine(const duckdb::AMSSketchSimple &other) {
+	D_ASSERT(array_size == other.array_size);
+	D_ASSERT(n_hash_functions == other.n_hash_functions);
+
+	for (uint8_t hash_function_index = 0; hash_function_index < n_hash_functions; hash_function_index++) {
+		for (uint64_t index = 0; index < array_size; index++) {
+			array[hash_function_index][index] += other.array[hash_function_index][index];
+		}
+	}
+}
+
 void AMSSketchSimple::Update(uint64_t hash) {
 	update_count++;
 

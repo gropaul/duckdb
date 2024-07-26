@@ -243,6 +243,21 @@ SinkResultType PhysicalHashJoin::Sink(ExecutionContext &context, DataChunk &chun
 
 	// build the HT
 	auto &ht = *lstate.hash_table;
+
+	// update the ams sketch while streaming the data to the row collection
+	auto chain_keys_v = chunk.data[1];
+	idx_t payload_size = chunk.size();
+	Vector chain_key_hashes_v(LogicalType::HASH);
+	VectorOperations::Hash(chain_keys_v, chain_key_hashes_v, payload_size);
+
+	// get the data from the payload
+	auto *chain_key_hashes = FlatVector::GetData<hash_t>(chain_key_hashes_v);
+	for (idx_t i = 0; i < payload_size; i++) {
+		hash_t hash = chain_key_hashes[i];
+		ht.ams_sketch_simple.Update(hash);
+	}
+
+
 	if (payload_types.empty()) {
 		// there are only keys: place an empty chunk in the payload
 		lstate.payload_chunk.SetCardinality(chunk.size());
