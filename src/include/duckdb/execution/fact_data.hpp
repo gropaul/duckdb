@@ -37,11 +37,6 @@ struct fact_data_t { // NOLINT
 		ht_capacity = ht_capacity_p;
 		// as the capacity is a power of 2, we can use a bitmask to get the hash
 		ht_bitmask = ht_capacity - 1;
-
-		// initialize the key map
-		// key_map = make_uniq<unordered_map<uint64_t, PointerOccurrence>>();
-		// auto _key_map = make_uniq<unordered_map<uint64_t, PointerOccurrence>>();
-		// key_map = std::make_unique<unordered_map<uint64_t, PointerOccurrence>>();
 	}
 
 	uint64_t chain_length;
@@ -69,18 +64,6 @@ struct fact_data_t { // NOLINT
 		D_ASSERT(!ht_build);
 		ht_build = true;
 		FillHtWithIndex(keys, chain_length, chain_ht, ht_bitmask);
-	}
-};
-
-struct ht_fact_entry_t { // NOLINT
-	idx_t chain_length;
-	fact_data_t *data;
-
-	explicit ht_fact_entry_t(idx_t chain_length_p) : chain_length(chain_length_p) {
-	}
-
-	ht_fact_entry_t IncrementedCopy(ht_fact_entry_t original) {
-		return ht_fact_entry_t(original.chain_length += 1);
 	}
 };
 

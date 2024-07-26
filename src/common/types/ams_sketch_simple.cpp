@@ -6,16 +6,6 @@ inline uint64_t GetBitAtIndex(uint64_t hash, uint64_t bit) {
 	return (hash >> bit) & 1;
 }
 
-// Function to split a uint64_t into an array of uint8_t
-std::array<uint8_t, 8> SplitUint64(uint64_t value) {
-	std::array<uint8_t, 8> result;
-	for (int i = 0; i < 8; ++i) {
-		// Shift the value right by 8*i bits and mask out the relevant byte
-		result[7 - i] = (value >> (8 * i)) & 0xFF;
-	}
-	return result;
-}
-
 inline uint8_t GetByteAtIndex(uint64_t hash, uint8_t byte_index) {
 	return (hash >> (8 * byte_index)) & 0xFF;
 }

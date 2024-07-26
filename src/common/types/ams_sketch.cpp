@@ -10,7 +10,6 @@ namespace duckdb {
 AMSSketch::AMSSketch(int d, int t, int p) : d(d), t(t), p(p) {
 	// Initialize the sketch array
 	c = std::vector<std::vector<int64_t>>(d, std::vector<int64_t>(t, 0));
-	srand(time(0)); // Seed the random number generator
 }
 
 // Hash function h_j that maps input domain to {1, 2, ..., t}
