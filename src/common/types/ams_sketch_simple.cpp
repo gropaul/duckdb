@@ -38,9 +38,10 @@ void AMSSketchSimple::Combine(const duckdb::AMSSketchSimple &other) {
 void AMSSketchSimple::Update(uint64_t hash) {
 	update_count++;
 
-	int8_t sign = GetBitAtIndex(hash, 0) == 0 ? -1 : 1;
 
 	for (uint8_t hash_function_index = 0; hash_function_index < n_hash_functions; hash_function_index++) {
+
+		int8_t sign = GetBitAtIndex(hash, hash_function_index) == 0 ? -1 : 1;
 
 		uint8_t byte_index = hash_function_index + 1;
 		uint8_t byte = GetByteAtIndex(hash, byte_index);
