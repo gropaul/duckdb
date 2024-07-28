@@ -135,7 +135,7 @@ void JoinHashTable::Merge(JoinHashTable &other) {
 	{
 		lock_guard<mutex> guard(data_lock);
 		data_collection->Combine(*other.data_collection);
-		ams_sketch_simple.Combine(other.ams_sketch_simple.flat_array);
+		ams_sketch_simple.Combine(other.ams_sketch_simple);
 	}
 
 	if (join_type == JoinType::MARK) {

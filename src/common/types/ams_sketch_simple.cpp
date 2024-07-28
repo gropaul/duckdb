@@ -28,12 +28,6 @@ void AMSSketchSimple<ArraySize, NHashFunctions>::Update(uint64_t hash) {
 	}
 }
 
-template <uint64_t ArraySize, uint8_t NHashFunctions>
-void AMSSketchSimple<ArraySize, NHashFunctions>::Combine(const vector<int64_t> &other_flat_array) {
-	for (size_t i = 0; i < flat_array.size(); i++) {
-		flat_array[i] += other_flat_array[i];
-	}
-}
 // Explicit instantiation of the AMSSketchSimple template
 template class AMSSketchSimple<128, 2>;
 } // namespace duckdb

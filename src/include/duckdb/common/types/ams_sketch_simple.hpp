@@ -1,22 +1,28 @@
 #pragma once
 
-#include <duckdb/common/vector.hpp>
 
 namespace duckdb {
 
 template<uint64_t ArraySize, uint8_t NHashFunctions>
 class AMSSketchSimple {
 public:
-	explicit AMSSketchSimple() : flat_array(ArraySize * NHashFunctions),update_count(0) {}
+	explicit AMSSketchSimple() : update_count(0) {
+		// Initialize the flat_array to zero
+		for (uint64_t i = 0; i < ArraySize * NHashFunctions; i++) {
+			flat_array[i] = 0;
+		}
+	}
 
 	void Update(uint64_t hash);
 
-	void Combine(const vector<int64_t>& other_flat_array);
-
-	vector<int64_t> GetFlatArray() const {
-		return flat_array;
+	void Combine(AMSSketchSimple<ArraySize, NHashFunctions>& other) {
+		for (uint64_t i = 0; i < ArraySize * NHashFunctions; i++) {
+			flat_array[i] += other.flat_array[i];
+		}
+		this->update_count += other.update_count;
 	}
 
+	// only used for logging, will not be used in the actual implementation
 	vector<vector<int64_t>> GetArray() const {
 		vector<vector<int64_t>> array(NHashFunctions, vector<int64_t>(ArraySize));
 		for (uint8_t hash_function_index = 0; hash_function_index < NHashFunctions; hash_function_index++) {
@@ -26,8 +32,10 @@ public:
 		}
 		return array;
 	}
-	vector<int64_t> flat_array;          // Flat vector for sketch to improve NUMA locality
-	uint64_t update_count;                    // Number of updates to the sketch
+
+private:
+	int64_t flat_array[ArraySize * NHashFunctions];
+	uint64_t update_count;
 };
 
 } // namespace duckdb
