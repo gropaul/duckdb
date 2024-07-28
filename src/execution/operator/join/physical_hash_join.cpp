@@ -254,7 +254,11 @@ SinkResultType PhysicalHashJoin::Sink(ExecutionContext &context, DataChunk &chun
 	auto *chain_key_hashes = FlatVector::GetData<hash_t>(chain_key_hashes_v);
 	for (idx_t i = 0; i < payload_size; i++) {
 		hash_t hash = chain_key_hashes[i];
-		ht.ams_sketch_simple.Update(hash);
+		// todo: in the future, the hash would be stored here to reuse during fact intersection
+		// todo: or normal join, but for now we need just to make sure that the compiler does not optimize the hash away
+		if (hash == 0xffffffffffffffff) {
+			printf("");
+		}
 	}
 
 
