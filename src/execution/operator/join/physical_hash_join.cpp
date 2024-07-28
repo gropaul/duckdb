@@ -247,11 +247,7 @@ void PhysicalHashJoin::UpdateAMS(DataChunk &chunk, JoinHashTable &ht) const {
 	auto *chain_key_hashes = FlatVector::GetData<hash_t>(chain_key_hashes_v);
 	for (idx_t i = 0; i < payload_size; i++) {
 		hash_t hash = chain_key_hashes[i];
-//		ht.ams_sketch_simple.Update(hash);
-		if (hash == 0xFFFFFFFFFFFFFFFF) {
-			printf(" ");
-		}
-
+		ht.ams_sketch_simple.Update(hash);
 	}
 }
 
