@@ -47,4 +47,6 @@ double AMSSketch::Estimate() {
 	std::sort(estimates.begin(), estimates.end());
 	return std::sqrt(estimates[d / 2]);
 }
+
+
 } // namespace duckdb

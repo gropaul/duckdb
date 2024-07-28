@@ -35,7 +35,8 @@ PhysicalHashJoin::PhysicalHashJoin(LogicalOperator &op, unique_ptr<PhysicalOpera
 	unordered_map<idx_t, idx_t> build_columns_in_conditions;
 	for (idx_t cond_idx = 0; cond_idx < conditions.size(); cond_idx++) {
 		auto &condition = conditions[cond_idx];
-		// todo: super hacky hack, was (condition.left->return_type) before, but if we get fact on the left we still want the flat on the right
+		// todo: super hacky hack, was (condition.left->return_type) before, but if we get fact on the left we still
+		// want the flat on the right
 		condition_types_lhs.push_back(condition.left->return_type);
 		condition_types_rhs.push_back(condition.right->return_type);
 		if (condition.right->GetExpressionClass() == ExpressionClass::BOUND_REF) {
@@ -234,6 +235,26 @@ unique_ptr<LocalSinkState> PhysicalHashJoin::GetLocalSinkState(ExecutionContext 
 	return make_uniq<HashJoinLocalSinkState>(*this, context.client);
 }
 
+void PhysicalHashJoin::UpdateAMS(DataChunk &chunk, JoinHashTable &ht) const {
+
+	// update the ams sketch while streaming the data to the row collection
+	auto chain_keys_v = chunk.data[1];
+	idx_t payload_size = chunk.size();
+	Vector chain_key_hashes_v(LogicalType::HASH);
+	VectorOperations::Hash(chain_keys_v, chain_key_hashes_v, payload_size);
+
+	// get the data from the payload
+	auto *chain_key_hashes = FlatVector::GetData<hash_t>(chain_key_hashes_v);
+	for (idx_t i = 0; i < payload_size; i++) {
+		hash_t hash = chain_key_hashes[i];
+//		ht.ams_sketch_simple.Update(hash);
+		if (hash == 0xFFFFFFFFFFFFFFFF) {
+			printf(" ");
+		}
+
+	}
+}
+
 SinkResultType PhysicalHashJoin::Sink(ExecutionContext &context, DataChunk &chunk, OperatorSinkInput &input) const {
 	auto &lstate = input.local_state.Cast<HashJoinLocalSinkState>();
 
@@ -243,6 +264,9 @@ SinkResultType PhysicalHashJoin::Sink(ExecutionContext &context, DataChunk &chun
 
 	// build the HT
 	auto &ht = *lstate.hash_table;
+
+	UpdateAMS(chunk, ht);
+
 	if (payload_types.empty()) {
 		// there are only keys: place an empty chunk in the payload
 		lstate.payload_chunk.SetCardinality(chunk.size());
@@ -351,7 +375,7 @@ public:
 		sink.hash_table->GetDataCollection().VerifyEverythingPinned();
 		sink.hash_table->finalized = true;
 		sink.hash_table->LogMetrics();
-		if (sink.hash_table->produce_fact_pointers){
+		if (sink.hash_table->produce_fact_pointers) {
 			sink.hash_table->FinalizeFactDatas();
 		}
 	}
@@ -1110,7 +1134,7 @@ string PhysicalHashJoin::ParamsToString() const {
 		result += "\n[INFOSEPARATOR]\n";
 	}
 	result += StringUtil::Format("EC: %llu\n", estimated_cardinality);
-	if (this->produce_fact_vectors){
+	if (this->produce_fact_vectors) {
 		result += "\n[INFOSEPARATOR]\n";
 		result += "Produces Fact Vector\n";
 
@@ -1121,7 +1145,7 @@ string PhysicalHashJoin::ParamsToString() const {
 				break;
 			}
 		}
-		if (!has_factorized_conditions){
+		if (!has_factorized_conditions) {
 			result += "Emits Fact Vector\n";
 		}
 	}
@@ -1136,7 +1160,6 @@ TupleDataCollection *PhysicalHashJoin::GetHTDataCollection(const idx_t emitter_i
 	if (emitter_id != this->producer_id) {
 		return nullptr;
 	}
-
 
 	auto &sink = sink_state->Cast<HashJoinGlobalSinkState>();
 	return &sink.hash_table->GetDataCollection();

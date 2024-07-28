@@ -103,6 +103,8 @@ public:
 	bool ParallelSink() const override {
 		return true;
 	}
+
+	void UpdateAMS(DataChunk &chunk, JoinHashTable &ht) const;
 };
 
 } // namespace duckdb
