@@ -201,7 +201,6 @@ public:
 
 public:
 
-	double CalculateAMSSketch();
 	void LogMetrics();
 
 	JoinHashTable(BufferManager &buffer_manager, const vector<JoinCondition> &conditions,
@@ -310,7 +309,7 @@ public:
 	//! Distinct chain count
 	atomic<idx_t> chains_count;
 
-	AMSSketchSimple ams_sketch_simple;
+	AMSSketchSimple<128,2> ams_sketch_simple;
 
 	//! The capacity of the HT. Is the same as hash_map.GetSize() / sizeof(ht_entry_t)
 	idx_t capacity;
@@ -510,7 +509,6 @@ private:
 	idx_t partition_start;
 	idx_t partition_end;
 	void ProbeAndIntersectFacts(ProbeState &probe_state, unique_ptr<ScanStructure> &ss) const;
-	void InitializeIntersectionData(ProbeState &probe_state, unique_ptr<ScanStructure> &ss) const;
 };
 
 } // namespace duckdb

@@ -54,7 +54,7 @@ JoinHashTable::JoinHashTable(BufferManager &buffer_manager_p, const vector<JoinC
                              const bool emit_fact_vector_p, const idx_t emitter_id_p, const PhysicalOperator *op_p)
     : op(op_p), produce_fact_pointers(emit_fact_vector_p), producer_id(emitter_id_p), buffer_manager(buffer_manager_p),
       conditions(conditions_p), build_types(std::move(btypes)), output_columns(output_columns_p),
-      chains_longer_than_one(false), chains_count(0), ams_sketch_simple(128,2), entry_size(0), tuple_size(0),
+      chains_longer_than_one(false), chains_count(0), ams_sketch_simple(), entry_size(0), tuple_size(0),
       vfound(Value::BOOLEAN(false)), join_type(type_p), finalized(false), has_null(false), radix_bits(INITIAL_RADIX_BITS),
       partition_start(0), partition_end(0) {
 
@@ -135,7 +135,7 @@ void JoinHashTable::Merge(JoinHashTable &other) {
 	{
 		lock_guard<mutex> guard(data_lock);
 		data_collection->Combine(*other.data_collection);
-		ams_sketch_simple.Combine(other.ams_sketch_simple);
+		ams_sketch_simple.Combine(other.ams_sketch_simple.flat_array);
 	}
 
 	if (join_type == JoinType::MARK) {
