@@ -6,14 +6,21 @@ namespace duckdb {
 template<uint64_t ArraySize, uint8_t NHashFunctions>
 class AMSSketchSimple {
 public:
+
+	// as ArraySize is a power of 2, we can use a bitmask instead of modulo
+	static constexpr uint64_t ARRAY_BITMASK = ArraySize - 1;
+
 	explicit AMSSketchSimple() : update_count(0) {
 		// Initialize the flat_array to zero
 		for (uint64_t i = 0; i < ArraySize * NHashFunctions; i++) {
 			flat_array[i] = 0;
 		}
+
+		// the array size must be a power of 2
+		static_assert((ArraySize & (ArraySize - 1)) == 0, "ArraySize must be a power of 2");
 	}
 
-	void Update(uint64_t hash);
+	inline void Update(uint64_t hash);
 
 	void Combine(AMSSketchSimple<ArraySize, NHashFunctions>& other) {
 		for (uint64_t i = 0; i < ArraySize * NHashFunctions; i++) {

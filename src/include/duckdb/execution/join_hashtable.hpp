@@ -309,7 +309,7 @@ public:
 	//! Distinct chain count
 	atomic<idx_t> chains_count;
 
-	AMSSketchSimple<128,2> ams_sketch_simple;
+	AMSSketchSimple<128, 2> ams_sketch_simple;
 
 	//! The capacity of the HT. Is the same as hash_map.GetSize() / sizeof(ht_entry_t)
 	idx_t capacity;

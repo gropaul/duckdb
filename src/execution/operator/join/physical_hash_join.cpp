@@ -248,6 +248,9 @@ void PhysicalHashJoin::UpdateAMS(DataChunk &chunk, JoinHashTable &ht) const {
 	for (idx_t i = 0; i < payload_size; i++) {
 		hash_t hash = chain_key_hashes[i];
 		ht.ams_sketch_simple.Update(hash);
+//		if (hash == 0xffffffffffffffff) {
+//			printf("hash is 0\n");
+//		}
 	}
 }
 

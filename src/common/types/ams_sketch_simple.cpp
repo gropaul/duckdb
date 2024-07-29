@@ -11,7 +11,7 @@ inline uint8_t GetByteAtIndex(uint64_t hash, uint8_t byte_index) {
 }
 
 template <uint64_t ArraySize, uint8_t NHashFunctions>
-void AMSSketchSimple<ArraySize, NHashFunctions>::Update(uint64_t hash) {
+inline void AMSSketchSimple<ArraySize, NHashFunctions>::Update(uint64_t hash) {
 	update_count++;
 
 	for (uint8_t hash_function_index = 0; hash_function_index < NHashFunctions; hash_function_index++) {
@@ -20,10 +20,10 @@ void AMSSketchSimple<ArraySize, NHashFunctions>::Update(uint64_t hash) {
 		uint8_t byte_index = hash_function_index + 1;
 		uint8_t byte = GetByteAtIndex(hash, byte_index);
 
-		// Calculate the index for the flat array
-		uint64_t flat_index = hash_function_index * ArraySize + (byte % ArraySize);
+		uint8_t byte_offset = byte & this->ARRAY_BITMASK;
 
-		// Update the flat array
+		// Calculate the index for the flat array
+		uint64_t flat_index = hash_function_index * ArraySize + byte_offset;
 		flat_array[flat_index] += sign;
 	}
 }
