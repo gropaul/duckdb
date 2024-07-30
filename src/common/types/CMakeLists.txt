@@ -10,7 +10,6 @@ add_library_unity(
   duckdb_common_types
   OBJECT
   ams_sketch.cpp
-  ams_sketch_simple.cpp
   batched_data_collection.cpp
   bit.cpp
   blob.cpp

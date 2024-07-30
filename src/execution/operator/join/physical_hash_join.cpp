@@ -245,12 +245,13 @@ void PhysicalHashJoin::UpdateAMS(DataChunk &chunk, JoinHashTable &ht) const {
 
 	// get the data from the payload
 	auto *chain_key_hashes = FlatVector::GetData<hash_t>(chain_key_hashes_v);
+#pragma clang loop vectorize(assume_safety)
 	for (idx_t i = 0; i < payload_size; i++) {
 		hash_t hash = chain_key_hashes[i];
 		ht.ams_sketch_simple.Update(hash);
-//		if (hash == 0xffffffffffffffff) {
-//			printf("hash is 0\n");
-//		}
+		//		if (hash == 0xffffffffffffffff) {
+		//			printf("hash is 0\n");
+		//		}
 	}
 }
 
