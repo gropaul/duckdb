@@ -1,0 +1,35 @@
+# name: benchmark/mine/my_06f.benchmark
+# description: Run query 06f from the imdb benchmark (single-threaded)
+# group: [mine]
+
+cache my_06f.duckdb
+
+require httpfs
+require parquet
+
+storage persistent
+
+load
+CREATE TABLE cast_info AS SELECT * FROM read_parquet('https://github.com/duckdb/duckdb-data/releases/download/v1.0/job_cast_info.parquet');
+CREATE TABLE keyword AS SELECT * FROM read_parquet('https://github.com/duckdb/duckdb-data/releases/download/v1.0/job_keyword.parquet');
+CREATE TABLE movie_keyword AS SELECT * FROM read_parquet('https://github.com/duckdb/duckdb-data/releases/download/v1.0/job_movie_keyword.parquet');
+CREATE TABLE name AS SELECT * FROM read_parquet('https://github.com/duckdb/duckdb-data/releases/download/v1.0/job_name.parquet');
+CREATE TABLE title AS SELECT * FROM read_parquet('https://github.com/duckdb/duckdb-data/releases/download/v1.0/job_title.parquet');
+
+run
+SELECT MIN(k.keyword) AS movie_keyword,
+       MIN(n.name) AS actor_name,
+       MIN(t.title) AS marvel_movie
+FROM cast_info AS ci,
+     keyword AS k,
+     movie_keyword AS mk,
+     name AS n,
+     title AS t
+WHERE k.keyword = 'marvel-cinematic-universe'
+  AND n.name LIKE '%Downey%Robert%'
+  AND t.production_year > 2014
+  AND k.id = mk.keyword_id
+  AND t.id = mk.movie_id
+  AND t.id = ci.movie_id
+  AND ci.movie_id = mk.movie_id
+  AND n.id = ci.person_id;
