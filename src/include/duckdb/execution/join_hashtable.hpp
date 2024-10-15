@@ -142,7 +142,9 @@ public:
 		//! Directly point to the entry in the hash table
 		Vector pointers;
 
+		//! Contains the pointers to the fact_data_t elements of the LHS in case of a fact intersection
 		Vector lhs_pointers_v;
+		//! Data of the hash table from which the lhs fact pointers originated
 		TupleDataCollection *lhs_collection;
 
 		idx_t count;

@@ -10,6 +10,8 @@ static idx_t GetNextPointerOffset(const TupleDataCollection *data_collection) {
 	return data_collection->GetLayout().GetOffsets().back();
 }
 
+/// Populates the fact_data_t elements for the probe results. The pointers_v contains pointers to different fact_data_t.
+/// The function populates the fact_data_t element of a pointer if not already populated.
 static void GetChainData(Vector &pointers_v, TupleDataCollection *data_collection, column_t key_column,
                          const SelectionVector &sel, idx_t count, fact_data_t *(&fact_data_res)[STANDARD_VECTOR_SIZE],
                          JoinHashTable::FactProbeState &probe_state) {
@@ -57,7 +59,7 @@ static void GetChainData(Vector &pointers_v, TupleDataCollection *data_collectio
 		}
 	}
 
-	idx_t next_pointer_offset = GetNextPointerOffset(data_collection);
+	const idx_t next_pointer_offset = GetNextPointerOffset(data_collection);
 
 	idx_t chain_element_index = 0;
 	// Advance the pointers until we reach the end of the chain
@@ -139,8 +141,9 @@ static void DetermineSidesAndBuild(fact_data_t *&build_side, fact_data_t *&probe
 }
 
 // We always have to return the rhs pointers to make sure that we can expand on the rhs
-static void Intersect(fact_data_t *left_ptr, fact_data_t *right_ptr, data_ptr_t *lhs_pointers_res,
-                      data_ptr_t *rhs_pointers_res, idx_t &intersection_count) {
+
+void __attribute__((noinline)) Intersect(fact_data_t *left_ptr, fact_data_t *right_ptr, data_ptr_t *lhs_pointers_res,
+data_ptr_t *rhs_pointers_res, idx_t &intersection_count) {
 
 	// build on the lhs to probe with the rhs
 	DetermineSidesAndBuild(left_ptr, right_ptr, lhs_pointers_res, rhs_pointers_res);
