@@ -1149,7 +1149,7 @@ string PhysicalHashJoin::ParamsToString() const {
 
 	return result;
 }
-TupleDataCollection *PhysicalHashJoin::GetHTDataCollection(const idx_t emitter_id) const {
+JoinHashTable *PhysicalHashJoin::GetHashTable(const idx_t emitter_id) const {
 	if (!this->produce_fact_vectors) {
 		return nullptr;
 	}
@@ -1159,7 +1159,7 @@ TupleDataCollection *PhysicalHashJoin::GetHTDataCollection(const idx_t emitter_i
 	}
 
 	auto &sink = sink_state->Cast<HashJoinGlobalSinkState>();
-	return &sink.hash_table->GetDataCollection();
+	return sink.hash_table.get();
 }
 
 } // namespace duckdb

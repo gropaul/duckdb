@@ -1,24 +1,24 @@
 #pragma once
 
 #include "duckdb/common/extra_type_info.hpp"
-#include "duckdb/execution/operator/join/physical_hash_join.hpp"
 #include "duckdb/execution/fact_data.hpp"
+#include "duckdb/execution/operator/join/physical_hash_join.hpp"
 
 namespace duckdb {
 
-static inline TupleDataCollection *FindDataCollectionInOp(const PhysicalOperator *op, const idx_t &emitter_id) {
+static inline JoinHashTable* FindHTFromOp(const PhysicalOperator *op, const idx_t &emitter_id) {
 
 	if (op->type == PhysicalOperatorType::HASH_JOIN) {
 		auto physical_hash_join_op = reinterpret_cast<const PhysicalHashJoin *>(op);
-		auto collection = physical_hash_join_op->GetHTDataCollection(emitter_id);
+		auto hash_table = physical_hash_join_op->GetHashTable(emitter_id);
 		// can be null e.g. if wrong emitter id
-		if (collection != nullptr) {
-			return collection;
+		if (hash_table != nullptr) {
+			return hash_table;
 		}
 	}
 
 	for (auto &child : op->children) {
-		auto child_data_collection = FindDataCollectionInOp(child.get(), emitter_id);
+		auto child_data_collection = FindHTFromOp(child.get(), emitter_id);
 		if (child_data_collection) {
 			return child_data_collection;
 		}

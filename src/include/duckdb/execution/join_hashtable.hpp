@@ -87,8 +87,10 @@ public:
 
 		void Initialize(idx_t element_count, BufferManager &buffer_manager);
 
-		SelectionVector chains_remaining_sel;
-		Vector tmp_data_v;
+		SelectionVector chains_to_load_sel;
+		SelectionVector chains_to_wait_for_sel;
+		Vector tmp_pointer_v;
+		Vector tmp_key_data_v;
 
 		bool initialized_data = false;
 
@@ -104,9 +106,6 @@ public:
 
 		// the length of each row of the intersection result vector
 		idx_t ptrs_list_size[STANDARD_VECTOR_SIZE];
-
-		fact_data_t *data_ptrs_lhs[STANDARD_VECTOR_SIZE];
-		fact_data_t *data_ptrs_rhs[STANDARD_VECTOR_SIZE];
 	};
 
 	struct ProbeState : SharedState {
@@ -142,10 +141,12 @@ public:
 		//! Directly point to the entry in the hash table
 		Vector pointers;
 
-		//! Contains the pointers to the fact_data_t elements of the LHS in case of a fact intersection
+		//! Contains the offsets to the fact_data_t array for the specific fact_data_t
+		Vector lhs_fact_data_offsets_v;
 		Vector lhs_pointers_v;
-		//! Data of the hash table from which the lhs fact pointers originated
-		TupleDataCollection *lhs_collection;
+
+		//! Hash table from which the lhs fact pointers originated
+		JoinHashTable *lhs_hash_table;
 
 		idx_t count;
 		SelectionVector sel_vector;
@@ -389,22 +390,33 @@ private:
 
 public:
 	//===--------------------------------------------------------------------===//
-	// Factorization stuff
+	// Factorization elements
 	//===--------------------------------------------------------------------===//
+
+	// Same size as the HT, contains the length of the chains. After build is completed, this will hold the offset into
+	// the fact_data_t arrays for the specific hash table entry
 	AllocatedData chains_length_data;
 	idx_t *chain_lengths = nullptr;
 
-	AllocatedData chains_ht_data;
-	uint64_t *chains_ht = nullptr;
-
+	// Holds the fact_data_t which contains information on each chain's keys & pointer array as well as the HT reference
 	AllocatedData fact_datas_data;
 	fact_data_t *fact_datas = nullptr;
 
+	// Holds the state for each fact_data_t for multi-thread synchronization
+	AllocatedData fact_data_states_data;
+	FactDataState *fact_data_states = nullptr;
+
+	// One big array for all keys of all fact_data_t, each fact_data_t has an offset into this array for its keys
 	AllocatedData fact_keys_data;
 	uint64_t *fact_keys = nullptr;
 
+	// One big array for all pointers of all fact_data_t, each fact_data_t has an offset into this array for its pointers
 	AllocatedData fact_ptr_data;
 	data_ptr_t *fact_ptr = nullptr;
+
+	// Holds the chain heads for each chain
+	AllocatedData chains_ht_data;
+	uint64_t *chains_ht = nullptr;
 
 public:
 	//===--------------------------------------------------------------------===//
@@ -510,7 +522,7 @@ private:
 	//! First and last partition of the current probe round
 	idx_t partition_start;
 	idx_t partition_end;
-	void ProbeAndIntersectFacts(ProbeState &probe_state, unique_ptr<ScanStructure> &ss) const;
+	void IntersectedFactorizedProbe(ProbeState &probe_state, unique_ptr<ScanStructure> &ss) const;
 };
 
 } // namespace duckdb

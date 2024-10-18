@@ -6,170 +6,209 @@
 
 namespace duckdb {
 
-static idx_t GetNextPointerOffset(const TupleDataCollection *data_collection) {
-	return data_collection->GetLayout().GetOffsets().back();
+static idx_t GetNextPointerOffset(const TupleDataCollection &data_collection) {
+	return data_collection.GetLayout().GetOffsets().back();
 }
 
-/// Populates the fact_data_t elements for the probe results. The pointers_v contains pointers to different fact_data_t.
-/// The function populates the fact_data_t element of a pointer if not already populated.
-static void GetChainData(Vector &pointers_v, TupleDataCollection *data_collection, column_t key_column,
-                         const SelectionVector &sel, idx_t count, fact_data_t *(&fact_data_res)[STANDARD_VECTOR_SIZE],
-                         JoinHashTable::FactProbeState &probe_state) {
+static void LoadKeysIfNecessary(UnifiedVectorFormat &offsets_uvf, JoinHashTable *ht, column_t key_column, const SelectionVector &sel,
+                                idx_t count, JoinHashTable::FactProbeState &probe_state) {
 
-	D_ASSERT(pointers_v.GetType().id() == LogicalTypeId::FACT_POINTER ||
-	         pointers_v.GetType().id() == LogicalTypeId::POINTER);
+	auto offsets = UnifiedVectorFormat::GetData<idx_t>(offsets_uvf);
+	auto tmp_key_data = FlatVector::GetData<uint64_t>(probe_state.tmp_key_data_v);
 
-	// this can happen if e.g. the pointers come from the lhs
-	bool flatten_needed = pointers_v.GetVectorType() != VectorType::FLAT_VECTOR;
-	if (flatten_needed) {
-		pointers_v.Flatten(count);
-		pointers_v.Resize(count, STANDARD_VECTOR_SIZE);
-	}
+	idx_t remaining_chains_to_load = 0;
+	idx_t remaining_chains_to_wait_for = 0;
+	auto atomic_fact_data_states = reinterpret_cast<atomic<FactDataState> *>(ht->fact_data_states);
 
-	auto pointers = FlatVector::GetData<data_ptr_t>(pointers_v);
-
+	// Set chains_to_load_sel for keys needing loading
 	for (idx_t idx = 0; idx < count; idx++) {
 		idx_t sel_idx = sel.get_index(idx);
-		data_ptr_t ptr = flatten_needed ? pointers[idx] : pointers[sel_idx];
-		fact_data_res[sel_idx] = reinterpret_cast<fact_data_t *>(ptr);
+		idx_t uvf_idx = offsets_uvf.sel->get_index(sel_idx);
+		idx_t fact_data_offset = offsets[uvf_idx];
+
+		// we will now load the keys for the chains that need loading, so set the state to KEYS_LOADING_IN_PROGRESS
+		// with a CAS operation
+		FactDataState expected = FactDataState::KEYS_NOT_LOADED;
+		FactDataState desired = FactDataState::KEYS_LOADING_IN_PROGRESS;
+		bool needs_loading = atomic_fact_data_states[fact_data_offset].compare_exchange_weak(expected, desired);
+
+		probe_state.chains_to_load_sel.set_index(remaining_chains_to_load, sel_idx);
+		remaining_chains_to_load += needs_loading;
+
+		// if the state was already KEYS_LOADING_IN_PROGRESS, we need to wait for the keys to be loaded
+		bool is_loading = atomic_fact_data_states[fact_data_offset].load(std::memory_order_relaxed) == FactDataState::KEYS_LOADING_IN_PROGRESS;
+		probe_state.chains_to_wait_for_sel.set_index(remaining_chains_to_wait_for, sel_idx);
+		remaining_chains_to_wait_for += is_loading;
+
 	}
 
-	auto tmp_data = FlatVector::GetData<uint64_t>(probe_state.tmp_data_v);
-
-	idx_t chains_remaining = 0;
-	// insert the head into the data, set the selection vector to point to all heads
-	for (idx_t idx = 0; idx < count; idx++) {
-		idx_t sel_idx = sel.get_index(idx);
-		// the get row pointers has this informal dictionary vector consisting of a flat and a
-		// sel vector
-
-		// only process  the chain data if it has not been gathered yet
-		if (fact_data_res[sel_idx]->keys_gathered) {
-			continue;
-		} else {
-
-			fact_data_res[sel_idx]->keys_gathered = true;
-			pointers[sel_idx] = fact_data_res[sel_idx]->chain_head;
-
-			auto &data_ptrs = fact_data_res[sel_idx]->pointers;
-			data_ptrs[0] = pointers[sel_idx];
-
-			probe_state.chains_remaining_sel.set_index(chains_remaining, sel_idx);
-			chains_remaining += 1;
-		}
-	}
-
+	const TupleDataCollection &data_collection = ht->GetDataCollection();
 	const idx_t next_pointer_offset = GetNextPointerOffset(data_collection);
 
+	// initialize the pointers for the chains that need loading
+	auto tmp_pointers = FlatVector::GetData<data_ptr_t>(probe_state.tmp_pointer_v);
+	for (idx_t idx = 0; idx < remaining_chains_to_load; idx++) {
+		auto sel_idx = probe_state.chains_to_load_sel.get_index(idx);
+		auto uvf_idx = offsets_uvf.sel->get_index(sel_idx);
+		auto fact_offset = offsets[uvf_idx];
+		auto fact_data = ht->fact_datas[fact_offset];
+		auto chain_head = fact_data.chain_head;
+		tmp_pointers[sel_idx] = chain_head;
+	}
+
+	// we will now load for each fact_data first the 0th element, then the 1st element, etc. chain_element_index keeps
+	// track of the current element
 	idx_t chain_element_index = 0;
+
 	// Advance the pointers until we reach the end of the chain
-	while (chains_remaining != 0) {
+	while (remaining_chains_to_load != 0) {
 
 		// load the key column for the pointers we have
+		data_collection.Gather(probe_state.tmp_pointer_v, probe_state.chains_to_load_sel, remaining_chains_to_load,
+		                       key_column, probe_state.tmp_key_data_v, probe_state.chains_to_load_sel, nullptr);
 
-		data_collection->Gather(pointers_v, probe_state.chains_remaining_sel, chains_remaining, key_column,
-		                        probe_state.tmp_data_v, probe_state.chains_remaining_sel, nullptr);
+		for (idx_t idx = 0; idx < remaining_chains_to_load; idx++) {
+			auto sel_idx = probe_state.chains_to_load_sel.get_index(idx);
+			auto uvf_idx = offsets_uvf.sel->get_index(sel_idx);
+			auto fact_offset = offsets[uvf_idx];
+			auto fact_data = ht->fact_datas[fact_offset];
 
-		for (idx_t idx = 0; idx < chains_remaining; idx++) {
-			auto sel_idx = probe_state.chains_remaining_sel.get_index(idx);
-			auto &fact_data = fact_data_res[sel_idx];
-			auto key = tmp_data[sel_idx];
+			auto key = tmp_key_data[sel_idx];
 
-			fact_data->keys[chain_element_index] = key;
+			// update the key and the pointer to that key
+			fact_data.keys[chain_element_index] = key;
+			fact_data.pointers[chain_element_index] = tmp_pointers[sel_idx];
 		}
 
-		// advance the pointers
-		idx_t next_chains_remaining = 0;
+		// advance the pointers, keep all elements in the selection vector that still have chains to load
 		chain_element_index += 1;
+		idx_t next_chains_remaining = 0;
 
-		for (idx_t idx = 0; idx < chains_remaining; idx++) {
+		for (idx_t idx = 0; idx < remaining_chains_to_load; idx++) {
 
-			auto sel_idx = probe_state.chains_remaining_sel.get_index(idx);
-			auto &fact_data = fact_data_res[sel_idx];
+			auto sel_idx = probe_state.chains_to_load_sel.get_index(idx);
+			auto uvf_idx = offsets_uvf.sel->get_index(sel_idx);
+			auto fact_offset = offsets[uvf_idx];
+			auto fact_data = ht->fact_datas[fact_offset];
 
-			if (chain_element_index < fact_data->chain_length) {
+			if (chain_element_index < fact_data.chain_length) {
 
-				data_ptr_t &tail = pointers[sel_idx];
+				// update the pointer to the next pointer
+				data_ptr_t &tail = tmp_pointers[sel_idx];
 				data_ptr_t next_pointer = Load<data_ptr_t>(tail + next_pointer_offset);
+				tmp_pointers[sel_idx] = next_pointer;
 
-				fact_data->pointers[chain_element_index] = next_pointer;
-				pointers[sel_idx] = next_pointer;
-				probe_state.chains_remaining_sel.set_index(next_chains_remaining++, sel_idx);
+				probe_state.chains_to_load_sel.set_index(next_chains_remaining, sel_idx);
+				next_chains_remaining += 1;
+			} else {
+				// if we have reached the end of the chain, set the state to KEYS_LOADED
+				atomic_fact_data_states[fact_offset].store(FactDataState::KEYS_LOADED, std::memory_order_relaxed);
 			}
 		}
 
-		chains_remaining = next_chains_remaining;
+		remaining_chains_to_load = next_chains_remaining;
+	}
+
+	// wait for the keys to be loaded
+	for (idx_t idx = 0; idx < remaining_chains_to_wait_for; idx++) {
+		idx_t sel_idx = probe_state.chains_to_wait_for_sel.get_index(idx);
+		idx_t fact_data_offset = offsets[sel_idx];
+		while (atomic_fact_data_states[fact_data_offset].load(std::memory_order_relaxed) == FactDataState::KEYS_LOADING_IN_PROGRESS) {
+		}
 	}
 }
 
-// Function to determine which side of a join operation should be used for building and probing
-// 1. if one of the sides is already built, we should use the other side for building and probing
-// 2. if both sides are built or none of them is built, we should use the smaller side for building and probing
-static void DetermineSidesAndBuild(fact_data_t *&build_side, fact_data_t *&probe_side, data_ptr_t *&build_res,
-                                        data_ptr_t *&probe_res) {
+static void BuildFactHTIfNecessary(fact_data_t &fact_data, atomic<FactDataState> &state) {
+	// use a compare and swap operation to set the state to HT_BUILD_IN_PROGRESS
+	FactDataState expected = FactDataState::KEYS_LOADED;
+	FactDataState desired = FactDataState::HT_BUILD_IN_PROGRESS;
 
-	bool current_build_side_build = build_side->IsHTBuild();
-	bool current_probe_side_build = probe_side->IsHTBuild();
+	bool needs_building = state.compare_exchange_weak(expected, desired);
 
-	// Determine which side to build and which to probe
-	if (current_build_side_build && !current_probe_side_build) {
-		// Current build side is built, use the other side for probing, everything is already set up
-	} else if (!current_build_side_build && current_probe_side_build) {
-		// Current build side is not built, but the probe side is built, swap the sides
-		std::swap(build_side, probe_side);
-		std::swap(build_res, probe_res);
+	if (needs_building) {
+		fact_data.BuildHT();
+		state.store(FactDataState::HT_BUILT_COMPLETED, std::memory_order_relaxed);
 	} else {
-		// Either both sides are built or neither side is built
-		// Build the smaller side and probe the larger side
-		idx_t current_build_side_length = build_side->chain_length;
-		idx_t current_probe_side_length = probe_side->chain_length;
-
-		// If the build side is smaller than the probe side, swap the sides
-		if (current_build_side_length < current_probe_side_length) {
-			std::swap(build_side, probe_side);
-			std::swap(build_res, probe_res);
-		}
-
-		// if not both sides are built, build the build side
-		if (!current_build_side_build) {
-			// build the build side
-			build_side->BuildHT();
+		// spin lock until the state is HT_BUILT_COMPLETED
+		while (state.load(std::memory_order_relaxed) != FactDataState::HT_BUILT_COMPLETED) {
 		}
 	}
-
-	D_ASSERT(build_side->IsHTBuild());
 }
 
-// We always have to return the rhs pointers to make sure that we can expand on the rhs
+// Function to determine which side of a join operation should be used for building and probing, returns true of the
+// sides should be swapped. RHS is the original build side
+static bool DetermineSidesAndBuildHT(const JoinHashTable *lhs_ht, const JoinHashTable *rhs_ht,
+                                     const idx_t lhs_fact_data_offset, const idx_t rhs_fact_data_offset,
+                                     fact_data_t lhs_fact_data, fact_data_t rhs_fact_data) {
 
-void __attribute__((noinline)) Intersect(fact_data_t *left_ptr, fact_data_t *right_ptr, data_ptr_t *lhs_pointers_res,
-data_ptr_t *rhs_pointers_res, idx_t &intersection_count) {
+	auto atomic_lhs_states = reinterpret_cast<atomic<FactDataState> *>(lhs_ht->fact_data_states);
+	auto atomic_rhs_states = reinterpret_cast<atomic<FactDataState> *>(rhs_ht->fact_data_states);
 
-	// build on the lhs to probe with the rhs
-	DetermineSidesAndBuild(left_ptr, right_ptr, lhs_pointers_res, rhs_pointers_res);
+	atomic<FactDataState> &lhs_state = atomic_lhs_states[lhs_fact_data_offset];
+	atomic<FactDataState> &rhs_state = atomic_rhs_states[rhs_fact_data_offset];
 
-	auto left = *left_ptr;
-	auto right = *right_ptr;
+	bool current_lhs_build = lhs_state.load(std::memory_order_relaxed) == FactDataState::HT_BUILT_COMPLETED;
+	bool current_rhs_build = rhs_state.load(std::memory_order_relaxed) == FactDataState::HT_BUILT_COMPLETED;
 
-	auto &ht = left.chain_ht;
-	auto &bitmask = left.ht_bitmask;
+	if (!current_lhs_build && current_rhs_build) {
+		return false; // current lhs is not built, but the rhs is built -> no swap needed
+	} else if (current_lhs_build && !current_rhs_build) {
+		return true; // Current lhs is built, but the rhs is not built -> swap needed
+	}
+	// Either both sides are built or neither side is built -> build on the smaller side
+	else {
+		if (lhs_fact_data.chain_length > rhs_fact_data.chain_length) {
+			BuildFactHTIfNecessary(lhs_fact_data, lhs_state);
+			return true; // Build on the lhs side -> swap needed
+		} else {
+			BuildFactHTIfNecessary(rhs_fact_data, rhs_state);
+			return false; // Build on the rhs side -> no swap needed
+		}
+	}
+}
+
+static void IntersectFacts(const fact_data_t &lhs_fact_data, const fact_data_t &rhs_fact_data, data_ptr_t *lhs_pointers_res,
+						   data_ptr_t *rhs_pointers_res, idx_t &intersection_count) {
+	auto &ht = rhs_fact_data.chain_ht;
+	auto &bitmask = rhs_fact_data.ht_bitmask;
 
 	intersection_count = 0;
 
 	// probe the lhs with the rhs
-	for (idx_t rhs_idx = 0; rhs_idx < right.chain_length; rhs_idx++) {
-		auto rhs_key = right.keys[rhs_idx];
-		auto rhs_hash = FactHash(rhs_key, bitmask);
-		while (ht[rhs_hash] != NULL_ELEMENT) {
-			auto &lhs_idx = ht[rhs_hash];
-
-			if (left.keys[lhs_idx] == rhs_key) {
-				lhs_pointers_res[intersection_count] = left.pointers[lhs_idx];
-				rhs_pointers_res[intersection_count] = right.pointers[rhs_idx];
+	for (idx_t lhs_idx = 0; lhs_idx < lhs_fact_data.chain_length; lhs_idx++) {
+		auto lhs_key = lhs_fact_data.keys[lhs_idx];
+		auto lhs_offset = FactHash(lhs_key, bitmask);
+		while (ht[lhs_offset] != NULL_ELEMENT) {
+			idx_t &rhs_idx = ht[lhs_offset];
+			auto rhs_key = rhs_fact_data.keys[rhs_idx];
+			if (lhs_key == rhs_key) {
+				lhs_pointers_res[intersection_count] = lhs_fact_data.pointers[lhs_idx];
+				rhs_pointers_res[intersection_count] = rhs_fact_data.pointers[rhs_idx];
 				intersection_count += 1;
 			}
-			IncrementHash(rhs_hash, bitmask);
+			IncrementHash(lhs_offset, bitmask);
 		}
 	}
 }
+
+// We always have to return the rhs pointers to make sure that we can expand on the rhs
+static void BuildAndIntersectFacts(const JoinHashTable *lhs_ht, const JoinHashTable *rhs_ht, const idx_t lhs_fact_data_offset,
+                      const idx_t rhs_fact_data_offset, data_ptr_t *lhs_pointers_res, data_ptr_t *rhs_pointers_res,
+                      idx_t &intersection_count) {
+
+	fact_data_t &lhs_fact_data = lhs_ht->fact_datas[lhs_fact_data_offset];
+	fact_data_t &rhs_fact_data = rhs_ht->fact_datas[rhs_fact_data_offset];
+
+	// build on the lhs to probe with the rhs
+	bool swap_sides = DetermineSidesAndBuildHT(lhs_ht, rhs_ht, lhs_fact_data_offset, rhs_fact_data_offset,
+	                                           lhs_fact_data, rhs_fact_data);
+
+	if (swap_sides) {
+		IntersectFacts(rhs_fact_data, lhs_fact_data, rhs_pointers_res, lhs_pointers_res, intersection_count);
+	} else {
+		IntersectFacts(lhs_fact_data, rhs_fact_data, lhs_pointers_res, rhs_pointers_res, intersection_count);
+	}
+}
+
+
 } // namespace duckdb
