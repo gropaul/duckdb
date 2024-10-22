@@ -34,7 +34,7 @@ string ListToJsonString(const vector<vector<int64_t>> &list) {
 	return result;
 }
 
-inline void LogJoinMetrics(JoinMetrics metrics) {
+inline void LogJoinMetrics(JoinMetrics metrics, idx_t join_id) {
 	// check for env var LOG_METRICS_PATH
 	const char *log_metrics_path = getenv("LOG_METRICS_DIR");
 
@@ -48,7 +48,7 @@ inline void LogJoinMetrics(JoinMetrics metrics) {
 		    std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
 		        .count();
 
-		const string log_file_path = log_metrics_path_str + "/" + std::to_string(timestamp) + ".log";
+		const string log_file_path = log_metrics_path_str + "/" + std::to_string(join_id) + "-" + std::to_string(timestamp) + ".log";
 		FILE *log_file = fopen(log_file_path.c_str(), "w");
 		if (log_file) {
 

@@ -831,7 +831,9 @@ void JoinHashTable::Finalize(idx_t chunk_idx_from, idx_t chunk_idx_to, bool para
 void JoinHashTable::LogMetrics() {
 	const idx_t n_rows = Count();
 	const JoinMetrics metrics(n_rows, chains_count, ams_sketch_simple.GetArray());
-	LogJoinMetrics(metrics);
+
+	const idx_t join_id = producer_id;
+	LogJoinMetrics(metrics, join_id);
 }
 
 void JoinHashTable::FinalizeFactDatas() {
