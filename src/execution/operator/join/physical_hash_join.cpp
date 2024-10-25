@@ -345,7 +345,11 @@ public:
 		auto &ht = *sink.hash_table;
 		const auto chunk_count = ht.GetDataCollection().ChunkCount();
 		const idx_t num_threads = TaskScheduler::GetScheduler(context).NumberOfThreads();
-		if (num_threads == 1 || (ht.Count() < PARALLEL_CONSTRUCT_THRESHOLD && !context.config.verify_parallelism)) {
+
+		bool run_single_threaded = num_threads == 1 || (ht.Count() < PARALLEL_CONSTRUCT_THRESHOLD && !context.config.verify_parallelism);
+		ht.parallel_fact_intersection = num_threads != 1;
+
+		if (run_single_threaded) {
 			// Single-threaded finalize
 			finalize_tasks.push_back(
 			    make_uniq<HashJoinFinalizeTask>(shared_from_this(), context, sink, 0, chunk_count, false));

@@ -328,6 +328,8 @@ public:
 	JoinType join_type;
 	//! Whether or not the HT has been finalized
 	bool finalized;
+	//! Parallel fact intersection
+	bool parallel_fact_intersection;
 	//! Whether or not any of the key elements contain NULL
 	bool has_null;
 	//! Bitmask for getting relevant bits from the hashes to determine the position
@@ -522,7 +524,7 @@ private:
 	//! First and last partition of the current probe round
 	idx_t partition_start;
 	idx_t partition_end;
-	void IntersectedFactorizedProbe(ProbeState &probe_state, unique_ptr<ScanStructure> &ss) const;
+	void IntersectProbeResult(ProbeState &probe_state, unique_ptr<ScanStructure> &ss) const;
 };
 
 } // namespace duckdb

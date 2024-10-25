@@ -966,26 +966,24 @@ unique_ptr<ScanStructure> JoinHashTable::Probe(DataChunk &keys, TupleDataChunkSt
 	}
 
 	if (ss->use_intersected_chain_pointers && ss->count > 0) {
-		IntersectedFactorizedProbe(probe_state, ss);
+		IntersectProbeResult(probe_state, ss);
 	}
 
 	return ss;
 }
 
-void JoinHashTable::IntersectedFactorizedProbe(
+template <bool PARALLEL>
+static inline void IntersectProbeResultInternal(
     JoinHashTable::ProbeState &probe_state,
-    unique_ptr<ScanStructure> &ss) const { // only one equality predicate is supported atm
-	D_ASSERT(factorized_predicate_columns.size() == 1);
+unique_ptr<ScanStructure> &ss) { // only one equality predicate is supported atm
 
 	UnifiedVectorFormat offsets_lhs_uvf, offsets_rhs_uvf;
 	ss->lhs_fact_data_offsets_v.ToUnifiedFormat(ss->count, offsets_lhs_uvf);
 	ss->pointers.ToUnifiedFormat(ss->count, offsets_rhs_uvf);
 
 	// todo: The key column is hacky, need fact column binding
-	LoadKeysIfNecessary(offsets_lhs_uvf, ss->lhs_hash_table, 1, ss->sel_vector, ss->count, probe_state.fact);
-	LoadKeysIfNecessary(offsets_rhs_uvf, &ss->ht, 1, ss->sel_vector, ss->count, probe_state.fact);
-
-	probe_state.fact.Initialize(Count(), buffer_manager);
+	LoadKeysIfNecessary<PARALLEL>(offsets_lhs_uvf, ss->lhs_hash_table, 1, ss->sel_vector, ss->count, probe_state.fact);
+	LoadKeysIfNecessary<PARALLEL>(offsets_rhs_uvf, &ss->ht, 1, ss->sel_vector, ss->count, probe_state.fact);
 
 	auto list_data_lhs = reinterpret_cast<data_ptr_t *>(probe_state.fact.ptrs_list_data_lhs.get());
 	auto list_data_rhs = reinterpret_cast<data_ptr_t *>(probe_state.fact.ptrs_list_data_rhs.get());
@@ -1014,7 +1012,7 @@ void JoinHashTable::IntersectedFactorizedProbe(
 		idx_t lhs_offset = offsets_lhs[uvf_idx_lhs];
 		idx_t rhs_offset = offsets_rhs[uvf_idx_rhs];
 
-		BuildAndIntersectFacts(ss->lhs_hash_table, &ss->ht, lhs_offset, rhs_offset, lhs_pointers_res, rhs_pointers_res,
+		BuildAndIntersectFacts<PARALLEL>(ss->lhs_hash_table, &ss->ht, lhs_offset, rhs_offset, lhs_pointers_res, rhs_pointers_res,
 		                       intersection_count);
 
 		intersection_count_total += intersection_count;
@@ -1047,6 +1045,24 @@ void JoinHashTable::IntersectedFactorizedProbe(
 
 	ss->count = new_count;
 }
+
+
+void JoinHashTable::IntersectProbeResult(
+    JoinHashTable::ProbeState &probe_state,
+    unique_ptr<ScanStructure> &ss) const { // only one equality predicate is supported atm
+
+	D_ASSERT(factorized_predicate_columns.size() == 1);
+
+	// allocate memory for the pointer result
+	probe_state.fact.Initialize(Count(), buffer_manager);
+
+	if (ss->ht.parallel_fact_intersection) {
+		IntersectProbeResultInternal<true>(probe_state, ss);
+	} else {
+		IntersectProbeResultInternal<false>(probe_state, ss);
+	}
+}
+
 
 ScanStructure::ScanStructure(JoinHashTable &ht_p, TupleDataChunkState &key_state_p, ProbeState &probe_state_p,
                              LogicalType &pointer_type)
