@@ -22,8 +22,7 @@ JoinHashTable::SharedState::SharedState()
 }
 
 JoinHashTable::FactProbeState::FactProbeState()
-    : chains_to_load_sel(STANDARD_VECTOR_SIZE), chains_to_wait_for_sel(STANDARD_VECTOR_SIZE),
-      tmp_pointer_v(LogicalType::POINTER), tmp_key_data_v(LogicalType::BIGINT) {
+    : chains_remaining_sel(STANDARD_VECTOR_SIZE), tmp_data_v(LogicalType::BIGINT) {
 }
 
 JoinHashTable::ProbeState::ProbeState()
@@ -56,8 +55,8 @@ JoinHashTable::JoinHashTable(BufferManager &buffer_manager_p, const vector<JoinC
     : op(op_p), produce_fact_pointers(emit_fact_vector_p), producer_id(emitter_id_p), buffer_manager(buffer_manager_p),
       conditions(conditions_p), build_types(std::move(btypes)), output_columns(output_columns_p),
       chains_longer_than_one(false), chains_count(0), ams_sketch_simple(), entry_size(0), tuple_size(0),
-      vfound(Value::BOOLEAN(false)), join_type(type_p), finalized(false), has_null(false),
-      radix_bits(INITIAL_RADIX_BITS), partition_start(0), partition_end(0) {
+      vfound(Value::BOOLEAN(false)), join_type(type_p), finalized(false), has_null(false), radix_bits(INITIAL_RADIX_BITS),
+      partition_start(0), partition_end(0) {
 
 	for (idx_t i = 0; i < conditions.size(); ++i) {
 		auto &condition = conditions[i];
@@ -828,7 +827,8 @@ void JoinHashTable::Finalize(idx_t chunk_idx_from, idx_t chunk_idx_to, bool para
 	} while (iterator.Next());
 }
 
-void JoinHashTable::LogMetrics() {
+
+void JoinHashTable::LogMetrics(){
 	const idx_t n_rows = Count();
 	const JoinMetrics metrics(n_rows, chains_count, ams_sketch_simple.GetArray());
 
@@ -845,12 +845,6 @@ void JoinHashTable::FinalizeFactDatas() {
 	fact_datas_data = buffer_manager.GetBufferAllocator().Allocate(chains_count * sizeof(fact_data_t));
 	fact_datas = reinterpret_cast<fact_data_t *>(fact_datas_data.get());
 
-	// create one fact data state for each of the fact datas
-	fact_data_states_data = buffer_manager.GetBufferAllocator().Allocate(chains_count * sizeof(FactDataState));
-	fact_data_states = reinterpret_cast<FactDataState *>(fact_data_states_data.get());
-	std::fill_n(fact_data_states, chains_count.load(std::memory_order_relaxed), FactDataState::KEYS_NOT_LOADED);
-
-	// Create keys and ptr arrays for all elements in the hash table
 	idx_t ht_elements_count = Count();
 	fact_keys_data = buffer_manager.GetBufferAllocator().Allocate(ht_elements_count * sizeof(uint64_t));
 	fact_keys = reinterpret_cast<uint64_t *>(fact_keys_data.get());
@@ -881,7 +875,8 @@ void JoinHashTable::FinalizeFactDatas() {
 			chains_elements_offset += chain_length;
 
 			fact_data.Initialize(chain_length, chain_head, chain_fact_ptr, chain_fact_keys, chain_ht_capacity);
-			chain_lengths[entry_idx] = fact_data_idx;
+			uint64_t fact_data_ptr = reinterpret_cast<uint64_t>(&fact_data);
+			chain_lengths[entry_idx] = fact_data_ptr;
 
 			fact_data_idx++;
 
@@ -934,9 +929,9 @@ unique_ptr<ScanStructure> JoinHashTable::InitializeScanStructure(DataChunk &keys
 		auto fact_type = fact_key_vector.GetType();
 		D_ASSERT(fact_type.id() == LogicalTypeId::FACT_POINTER);
 
-		ss->lhs_fact_data_offsets_v.ReferenceAndSetType(fact_key_vector);
+		ss->lhs_pointers_v.ReferenceAndSetType(fact_key_vector);
 		auto type_info = reinterpret_cast<const FactPointerTypeInfo *>(fact_type.AuxInfo());
-		ss->lhs_hash_table = FindHTFromOp(op, type_info->emitter_id);
+		ss->lhs_collection = FindDataCollectionInOp(op, type_info->emitter_id);
 	}
 
 	// first prepare the keys for probing
@@ -966,24 +961,25 @@ unique_ptr<ScanStructure> JoinHashTable::Probe(DataChunk &keys, TupleDataChunkSt
 	}
 
 	if (ss->use_intersected_chain_pointers && ss->count > 0) {
-		IntersectProbeResult(probe_state, ss);
+		ProbeAndIntersectFacts(probe_state, ss);
 	}
 
 	return ss;
 }
 
-template <bool PARALLEL>
-static inline void IntersectProbeResultInternal(
+void JoinHashTable::ProbeAndIntersectFacts(
     JoinHashTable::ProbeState &probe_state,
-unique_ptr<ScanStructure> &ss) { // only one equality predicate is supported atm
+    unique_ptr<ScanStructure> &ss) const { // only one equality predicate is supported atm
+	D_ASSERT(factorized_predicate_columns.size() == 1);
 
-	UnifiedVectorFormat offsets_lhs_uvf, offsets_rhs_uvf;
-	ss->lhs_fact_data_offsets_v.ToUnifiedFormat(ss->count, offsets_lhs_uvf);
-	ss->pointers.ToUnifiedFormat(ss->count, offsets_rhs_uvf);
+	auto &lhs_data = probe_state.fact.data_ptrs_lhs;
+	auto &rhs_data = probe_state.fact.data_ptrs_rhs;
 
 	// todo: The key column is hacky, need fact column binding
-	LoadKeysIfNecessary<PARALLEL>(offsets_lhs_uvf, ss->lhs_hash_table, 1, ss->sel_vector, ss->count, probe_state.fact);
-	LoadKeysIfNecessary<PARALLEL>(offsets_rhs_uvf, &ss->ht, 1, ss->sel_vector, ss->count, probe_state.fact);
+	GetChainData(ss->lhs_pointers_v, ss->lhs_collection, 1, ss->sel_vector, ss->count, lhs_data, probe_state.fact);
+	GetChainData(ss->pointers, data_collection.get(), 1, ss->sel_vector, ss->count, rhs_data, probe_state.fact);
+
+	probe_state.fact.Initialize(Count(), buffer_manager);
 
 	auto list_data_lhs = reinterpret_cast<data_ptr_t *>(probe_state.fact.ptrs_list_data_lhs.get());
 	auto list_data_rhs = reinterpret_cast<data_ptr_t *>(probe_state.fact.ptrs_list_data_rhs.get());
@@ -991,29 +987,19 @@ unique_ptr<ScanStructure> &ss) { // only one equality predicate is supported atm
 	idx_t new_count = 0;
 	idx_t intersection_count_total = 0;
 
-	auto offsets_lhs = UnifiedVectorFormat::GetData<idx_t>(offsets_lhs_uvf);
-	auto offsets_rhs = UnifiedVectorFormat::GetData<idx_t>(offsets_rhs_uvf);
-
 	for (idx_t idx = 0; idx < ss->count; idx++) {
-
 		auto sel_idx = ss->sel_vector.get_index(idx);
+		auto lhs_chain = lhs_data[sel_idx];
+		auto rhs_chain = rhs_data[sel_idx];
 
-		idx_t uvf_idx_lhs = offsets_lhs_uvf.sel->get_index(sel_idx);
-		idx_t uvf_idx_rhs = offsets_rhs_uvf.sel->get_index(sel_idx);
+		data_ptr_t *&pointers_lhs = probe_state.fact.ptrs_lhs_lists[sel_idx];
+		data_ptr_t *&pointers_rhs = probe_state.fact.ptrs_rhs_lists[sel_idx];
 
-		data_ptr_t *&lhs_pointers_res = probe_state.fact.ptrs_lhs_lists[sel_idx];
-		data_ptr_t *&rhs_pointers_res = probe_state.fact.ptrs_rhs_lists[sel_idx];
-
-		lhs_pointers_res = &list_data_lhs[intersection_count_total];
-		rhs_pointers_res = &list_data_rhs[intersection_count_total];
+		pointers_lhs = &list_data_lhs[intersection_count_total];
+		pointers_rhs = &list_data_rhs[intersection_count_total];
 
 		idx_t &intersection_count = probe_state.fact.ptrs_list_size[sel_idx];
-
-		idx_t lhs_offset = offsets_lhs[uvf_idx_lhs];
-		idx_t rhs_offset = offsets_rhs[uvf_idx_rhs];
-
-		BuildAndIntersectFacts<PARALLEL>(ss->lhs_hash_table, &ss->ht, lhs_offset, rhs_offset, lhs_pointers_res, rhs_pointers_res,
-		                       intersection_count);
+		Intersect(lhs_chain, rhs_chain, pointers_lhs, pointers_rhs, intersection_count);
 
 		intersection_count_total += intersection_count;
 
@@ -1025,20 +1011,20 @@ unique_ptr<ScanStructure> &ss) { // only one equality predicate is supported atm
 		new_count += non_empty_intersection;
 	}
 
-	auto lhs_fact_result_ptrs = FlatVector::GetData<data_ptr_t>(ss->lhs_pointers_v);
-	auto rhs_fact_result_ptrs = FlatVector::GetData<data_ptr_t>(ss->pointers);
+	auto lhs_pointers_vector = FlatVector::GetData<data_ptr_t>(ss->lhs_pointers_v);
+	auto rhs_pointers_vector = FlatVector::GetData<data_ptr_t>(ss->pointers);
 
 	// update the lhs and rhs pointers to only point to the intersection
 	for (idx_t i = 0; i < new_count; i++) {
 		auto sel_idx = ss->sel_vector.get_index(i);
 
-		data_ptr_t *&lhs_pointers = probe_state.fact.ptrs_lhs_lists[sel_idx];
+		data_ptr_t *&lhs_pointers = probe_state.fact.ptrs_rhs_lists[sel_idx];
 		data_ptr_t *&rhs_pointers = probe_state.fact.ptrs_rhs_lists[sel_idx];
 
 		idx_t &pointers_list_size = probe_state.fact.ptrs_list_size[sel_idx];
 
-		lhs_fact_result_ptrs[sel_idx] = lhs_pointers[pointers_list_size - 1];
-		rhs_fact_result_ptrs[sel_idx] = rhs_pointers[pointers_list_size - 1];
+		lhs_pointers_vector[sel_idx] = lhs_pointers[pointers_list_size - 1];
+		rhs_pointers_vector[sel_idx] = rhs_pointers[pointers_list_size - 1];
 
 		pointers_list_size -= 1;
 	}
@@ -1046,28 +1032,9 @@ unique_ptr<ScanStructure> &ss) { // only one equality predicate is supported atm
 	ss->count = new_count;
 }
 
-
-void JoinHashTable::IntersectProbeResult(
-    JoinHashTable::ProbeState &probe_state,
-    unique_ptr<ScanStructure> &ss) const { // only one equality predicate is supported atm
-
-	D_ASSERT(factorized_predicate_columns.size() == 1);
-
-	// allocate memory for the pointer result
-	probe_state.fact.Initialize(Count(), buffer_manager);
-
-	if (ss->ht.parallel_fact_intersection) {
-		IntersectProbeResultInternal<true>(probe_state, ss);
-	} else {
-		IntersectProbeResultInternal<false>(probe_state, ss);
-	}
-}
-
-
 ScanStructure::ScanStructure(JoinHashTable &ht_p, TupleDataChunkState &key_state_p, ProbeState &probe_state_p,
                              LogicalType &pointer_type)
-    : key_state(key_state_p), probe_state(probe_state_p), pointers(pointer_type),
-      lhs_fact_data_offsets_v(LogicalType::POINTER), lhs_pointers_v(LogicalType::POINTER),
+    : key_state(key_state_p), probe_state(probe_state_p), pointers(pointer_type), lhs_pointers_v(LogicalType::POINTER),
       sel_vector(STANDARD_VECTOR_SIZE), chain_match_sel_vector(STANDARD_VECTOR_SIZE),
       chain_no_match_sel_vector(STANDARD_VECTOR_SIZE), ht(ht_p), finished(false) {
 	if (ht.HasFactorizedPredicates()) {
@@ -1251,8 +1218,8 @@ void ScanStructure::FlatAndGatherLHS(DataChunk &left, DataChunk &keys, DataChunk
 		// todo: hacky index
 		const auto output_col_idx = i;
 		D_ASSERT(vector.GetType() == ht.layout.GetTypes()[output_col_idx]);
-		lhs_hash_table->data_collection->Gather(lhs_pointers_v, chain_match_sel_vector, result_count,
-		                                        output_col_idx, vector, chain_match_sel_vector, nullptr);
+		lhs_collection->Gather(lhs_pointers_v, chain_match_sel_vector, result_count, output_col_idx, vector,
+		                       chain_match_sel_vector, nullptr);
 	}
 
 	// the rest of the columns are flat, so we only need to reference/slice them

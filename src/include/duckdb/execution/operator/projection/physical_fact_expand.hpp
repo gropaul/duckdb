@@ -330,7 +330,7 @@ public:
 		auto &fact_column_collection = this->data_collections[fact_column];
 
 		if (!fact_column_collection) {
-			fact_column_collection = &FindHTFromOp(op, emitter_id)->GetDataCollection();
+			fact_column_collection = FindDataCollectionInOp(op, emitter_id);
 			// throw an exception if we still don't have a data collection
 			if (!fact_column_collection) {
 				throw InternalException("Could not find data collection in fact expand");
