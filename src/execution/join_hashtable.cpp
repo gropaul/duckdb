@@ -867,14 +867,15 @@ void JoinHashTable::FinalizeFactDatas() {
 			auto &fact_data = fact_datas[fact_data_idx];
 			auto &chain_length = chain_lengths[entry_idx];
 			auto chain_head = entry.GetPointer();
-			auto chain_ht_capacity = NextPowerOfTwo(chain_length * 2);
+			auto chain_ht_capacity = CalculateHTCapacity(chain_length);
+
 			chains_total_ht_capacity += chain_ht_capacity;
 
 			auto chain_fact_ptr = &fact_ptr[chains_elements_offset];
 			auto chain_fact_keys = &fact_keys[chains_elements_offset];
 			chains_elements_offset += chain_length;
 
-			fact_data.Initialize(chain_length, chain_head, chain_fact_ptr, chain_fact_keys, chain_ht_capacity);
+			fact_data.Initialize(chain_length, chain_ht_capacity, chain_head, chain_fact_ptr, chain_fact_keys);
 			uint64_t fact_data_ptr = reinterpret_cast<uint64_t>(&fact_data);
 			chain_lengths[entry_idx] = fact_data_ptr;
 
@@ -897,7 +898,7 @@ void JoinHashTable::FinalizeFactDatas() {
 		auto chain_ht = &chains_ht[chains_ht_offset];
 		fact_data.chain_ht = chain_ht;
 
-		auto chain_ht_capacity = fact_data.ht_capacity;
+		auto chain_ht_capacity = fact_data.GetHTCapacity();
 		chains_ht_offset += chain_ht_capacity;
 	}
 }

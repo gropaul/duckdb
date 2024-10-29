@@ -152,7 +152,7 @@ data_ptr_t *rhs_pointers_res, idx_t &intersection_count) {
 	auto right = *right_ptr;
 
 	auto &ht = left.chain_ht;
-	auto &bitmask = left.ht_bitmask;
+	auto bitmask = left.GetHTBitmask();
 
 	intersection_count = 0;
 
