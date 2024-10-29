@@ -852,37 +852,45 @@ void JoinHashTable::FinalizeFactDatas() {
 	fact_ptr_data = buffer_manager.GetBufferAllocator().Allocate(ht_elements_count * sizeof(data_ptr_t));
 	fact_ptr = reinterpret_cast<data_ptr_t *>(fact_ptr_data.get());
 
-	// change the pointers in the hashtable to the fact data pointers
-	idx_t fact_data_idx = 0;
+
+	idx_t full_entry_count = 0;
+
+	// 1st run: Get total capacity needed and mark the entries that are occupied in the fact_keys array
+	for (idx_t entry_idx = 0; entry_idx < capacity; entry_idx++) {
+		auto &entry = entries[entry_idx];
+		bool occupied = entry.IsOccupied();
+
+		fact_keys[full_entry_count] = entry_idx;
+		full_entry_count += occupied;
+	}
+
+	D_ASSERT(full_entry_count == chains_count);
+
+	// 2nd run: change the pointers in the hashtable to the fact data pointers
 	idx_t chains_total_ht_capacity = 0;
 	idx_t chains_elements_offset = 0;
 
-	for (idx_t entry_idx = 0; entry_idx < capacity; entry_idx++) {
+	for (idx_t fact_data_idx = 0; fact_data_idx < chains_count; fact_data_idx++) {
+		idx_t entry_idx = fact_keys[fact_data_idx];
 		auto &entry = entries[entry_idx];
-		if (entry.IsOccupied()) {
 
-			// make sure there is enough data allocated
-			D_ASSERT(fact_data_idx < chains_count);
+		auto &fact_data = fact_datas[fact_data_idx];
+		auto &chain_length = chain_lengths[entry_idx];
+		auto chain_head = entry.GetPointer();
+		auto chain_ht_capacity = CalculateHTCapacity(chain_length);
 
-			auto &fact_data = fact_datas[fact_data_idx];
-			auto &chain_length = chain_lengths[entry_idx];
-			auto chain_head = entry.GetPointer();
-			auto chain_ht_capacity = CalculateHTCapacity(chain_length);
+		chains_total_ht_capacity += chain_ht_capacity;
 
-			chains_total_ht_capacity += chain_ht_capacity;
+		auto chain_fact_ptr = &fact_ptr[chains_elements_offset];
+		auto chain_fact_keys = &fact_keys[chains_elements_offset];
+		chains_elements_offset += chain_length;
 
-			auto chain_fact_ptr = &fact_ptr[chains_elements_offset];
-			auto chain_fact_keys = &fact_keys[chains_elements_offset];
-			chains_elements_offset += chain_length;
+		fact_data.Initialize(chain_length, chain_ht_capacity, chain_head, chain_fact_ptr, chain_fact_keys);
+		uint64_t fact_data_ptr = reinterpret_cast<uint64_t>(&fact_data);
+		chain_lengths[entry_idx] = fact_data_ptr;
 
-			fact_data.Initialize(chain_length, chain_ht_capacity, chain_head, chain_fact_ptr, chain_fact_keys);
-			uint64_t fact_data_ptr = reinterpret_cast<uint64_t>(&fact_data);
-			chain_lengths[entry_idx] = fact_data_ptr;
+		D_ASSERT(chains_elements_offset <= ht_elements_count);
 
-			fact_data_idx++;
-
-			D_ASSERT(chains_elements_offset <= ht_elements_count);
-		}
 	}
 
 	// initialize chains HTs
@@ -892,7 +900,7 @@ void JoinHashTable::FinalizeFactDatas() {
 
 	// set the pointer to the hashtable in the fact data
 	idx_t chains_ht_offset = 0;
-	for (fact_data_idx = 0; fact_data_idx < chains_count; fact_data_idx++) {
+	for (idx_t fact_data_idx = 0; fact_data_idx < chains_count; fact_data_idx++) {
 		auto &fact_data = fact_datas[fact_data_idx];
 
 		auto chain_ht = &chains_ht[chains_ht_offset];
