@@ -852,7 +852,6 @@ void JoinHashTable::FinalizeFactDatas() {
 	fact_ptr_data = buffer_manager.GetBufferAllocator().Allocate(ht_elements_count * sizeof(data_ptr_t));
 	fact_ptr = reinterpret_cast<data_ptr_t *>(fact_ptr_data.get());
 
-
 	idx_t full_entry_count = 0;
 
 	// 1st run: Get total capacity needed and mark the entries that are occupied in the fact_keys array
