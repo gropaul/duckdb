@@ -222,7 +222,11 @@ static inline void GetRowPointersInternal(DataChunk &keys, TupleDataChunkState &
 			const auto row_index = remaining_sel->get_index(i);
 
 			idx_t &ht_offset = ht_offsets[row_index];
+
 			bool occupied;
+			bool salt_match;
+			bool entry_has_collision;
+
 			ht_entry_t entry;
 
 			if (USE_SALTS) {
@@ -231,11 +235,17 @@ static inline void GetRowPointersInternal(DataChunk &keys, TupleDataChunkState &
 				while (true) {
 					entry = entries[ht_offset];
 					occupied = entry.IsOccupied();
-					bool salt_match = entry.GetSalt() == row_salt;
+					salt_match = entry.GetSalt() == row_salt;
 
-					// condition for incrementing the ht_offset: occupied and row_salt does not match -> move to next
-					// entry
+					entry_has_collision = entry.HasCollision();
+
+					// condition for incrementing the ht_offset: occupied and salt does not match and entry has
+					// collision reverse the condition to break out of the loop
 					if (!occupied || salt_match) {
+						break;
+					}
+
+					if (!entry_has_collision) {
 						break;
 					}
 
@@ -249,11 +259,26 @@ static inline void GetRowPointersInternal(DataChunk &keys, TupleDataChunkState &
 			// the entries we need to process in the next iteration are the ones that are occupied and the row_salt
 			// does not match, the ones that are empty need no further processing
 			state.salt_match_sel.set_index(salt_match_count, row_index);
-			salt_match_count += occupied;
 
 			// entry might be empty, so the pointer in the entry is nullptr, but this does not matter as the row
-			// will not be compared anyway as with an empty entry we are already done
-			row_ptr_insert_to[row_index] = entry.GetPointerOrNull();
+			// will not be compared anyway as with an empty entry we are already done. However, if we leave the loop
+			// because there is no collision, we also have no result, therefore we set the pointer to nullptr if
+			// entry_has_collision is false
+			if (USE_SALTS){
+
+				if (occupied && !salt_match && !entry_has_collision) {
+					// this is the case where we stopped because we had no collision
+					row_ptr_insert_to[row_index] = nullptr;
+					salt_match_count += 0;
+				} else {
+					// here we stopped because (a) we found an empty entry or (b) we found a matching salt
+					row_ptr_insert_to[row_index] = entry.GetPointerOrNull();
+					salt_match_count += occupied;
+				}
+			} else {
+				row_ptr_insert_to[row_index] = entry.GetPointerOrNull();
+				salt_match_count += occupied;
+			}
 		}
 
 		if (salt_match_count != 0) {
@@ -288,6 +313,7 @@ static inline void GetRowPointersInternal(DataChunk &keys, TupleDataChunkState &
 }
 
 inline bool JoinHashTable::UseSalt() const {
+	return true;
 	// only use salt for large hash tables and if there is only one equality condition as otherwise
 	// we potentially need to compare multiple keys
 	return this->capacity > USE_SALT_THRESHOLD && this->equality_predicate_columns.size() == 1;
@@ -456,7 +482,7 @@ static inline data_ptr_t InsertRowToEntry(atomic<ht_entry_t> &entry, const data_
 			// add nullptr to the end of the list to mark the end
 			StorePointer(nullptr, row_ptr_to_insert + pointer_offset);
 
-			ht_entry_t new_empty_entry = ht_entry_t::GetDesiredEntry(row_ptr_to_insert, salt);
+			ht_entry_t new_empty_entry = ht_entry_t::GetNewEntry(row_ptr_to_insert, salt);
 			ht_entry_t expected_empty_entry = ht_entry_t::GetEmptyEntry();
 			entry.compare_exchange_strong(expected_empty_entry, new_empty_entry, std::memory_order_acquire,
 			                              std::memory_order_relaxed);
@@ -469,13 +495,14 @@ static inline data_ptr_t InsertRowToEntry(atomic<ht_entry_t> &entry, const data_
 			// if we expect the entry to be full, we know that even if the insert fails the keys still match so we can
 			// just keep trying until we succeed
 			ht_entry_t expected_current_entry = entry.load(std::memory_order_relaxed);
-			ht_entry_t desired_new_entry = ht_entry_t::GetDesiredEntry(row_ptr_to_insert, salt);
 			D_ASSERT(expected_current_entry.IsOccupied());
+
+			ht_entry_t desired_updated_entry = ht_entry_t::UpdateWithPointer(expected_current_entry, row_ptr_to_insert);
 
 			do {
 				data_ptr_t current_row_pointer = expected_current_entry.GetPointer();
 				StorePointer(current_row_pointer, row_ptr_to_insert + pointer_offset);
-			} while (!entry.compare_exchange_weak(expected_current_entry, desired_new_entry, std::memory_order_release,
+			} while (!entry.compare_exchange_weak(expected_current_entry, desired_updated_entry, std::memory_order_release,
 			                                      std::memory_order_relaxed));
 
 			return nullptr;
@@ -485,7 +512,12 @@ static inline data_ptr_t InsertRowToEntry(atomic<ht_entry_t> &entry, const data_
 		ht_entry_t current_entry = entry.load(std::memory_order_relaxed);
 		data_ptr_t current_row_pointer = current_entry.GetPointerOrNull();
 		StorePointer(current_row_pointer, row_ptr_to_insert + pointer_offset);
-		entry = ht_entry_t::GetDesiredEntry(row_ptr_to_insert, salt);
+
+		if (EXPECT_EMPTY) {
+			entry = ht_entry_t::GetNewEntry(row_ptr_to_insert, salt);
+		} else {
+			entry = ht_entry_t::UpdateWithPointer(current_entry, row_ptr_to_insert);
+		}
 		return nullptr;
 	}
 }
@@ -537,15 +569,25 @@ static inline void InsertMatchesAndIncrementMisses(atomic<ht_entry_t> entries[],
 		InsertRowToEntry<PARALLEL, false>(entry, row_ptr_to_insert, salt, ht.pointer_offset);
 	}
 
-	// Linear probing: each of the entries that do not match move to the next entry in the HT
+	// Linear probing: each of the entries that do not match move to the next entry in the HT, also we mark them with
+	// the collision bit
 	for (idx_t i = 0; i < key_no_match_count; i++) {
 		const auto need_compare_idx = state.key_no_match_sel.get_index(i);
 		const auto entry_index = state.salt_match_sel.get_index(need_compare_idx);
 
+		// mark the entry as collided, we don't need to care about thread synchronisation as the mark is an OR operation
+		// and the worst case is that we mark the same entry multiple times
+		const auto &ht_offset = ht_offsets_and_salts[entry_index] & ht_entry_t::POINTER_MASK;
+		auto &atomic_entry = entries[ht_offset];
+		ht_entry_t::MarkAsCollided(atomic_entry);
+
+		// increment the ht_offset of the entry
 		idx_t &ht_offset_and_salt = ht_offsets_and_salts[entry_index];
 		IncrementAndWrap(ht_offset_and_salt, capacity_mask);
 
+		// add the entry to the remaining sel vector to get processed in the next loop iteration
 		state.remaining_sel.set_index(i, entry_index);
+
 	}
 }
 
@@ -621,6 +663,7 @@ static void InsertHashesLoop(atomic<ht_entry_t> entries[], Vector &row_locations
 					break;
 				}
 
+				ht_entry_t::MarkAsCollided(atomic_entry);
 				IncrementAndWrap(ht_offset_and_salt, capacity_mask);
 			}
 

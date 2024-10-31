@@ -21,8 +21,9 @@ namespace duckdb {
 */
 struct ht_entry_t { // NOLINT
 public:
+	static constexpr const hash_t COLLISION_BIT_MASK = 0x8000000000000000;
 	//! Upper 16 bits are salt
-	static constexpr const hash_t SALT_MASK = 0xFFFF000000000000;
+	static constexpr const hash_t SALT_MASK = 0x7FFF000000000000;
 	//! Lower 48 bits are the pointer
 	static constexpr const hash_t POINTER_MASK = 0x0000FFFFFFFFFFFF;
 
@@ -36,6 +37,22 @@ public:
 	inline bool IsOccupied() const {
 		return value != 0;
 	}
+
+	inline bool HasCollision() const {
+		return (value & COLLISION_BIT_MASK) != 0;
+	}
+
+	inline static void MarkAsCollided(std::atomic<ht_entry_t> &entry) {
+
+		auto current = entry.load(std::memory_order_relaxed);
+		ht_entry_t desired_entry;
+
+		do {
+			auto desired_value = current.value | COLLISION_BIT_MASK;
+			desired_entry = ht_entry_t(desired_value);
+		} while (!entry.compare_exchange_weak(current, desired_entry, std::memory_order_relaxed));
+	}
+
 
 	// Returns a pointer based on the stored value without checking cell occupancy.
 	// This can return a nullptr if the cell is not occupied.
@@ -58,12 +75,12 @@ public:
 		value &= cast_pointer_to_uint64(pointer) | SALT_MASK;
 	}
 
-	// Returns the salt, leaves upper salt bits intact, sets lower bits to all 1's
+	// Returns the salt, leaves upper salt bits intact, sets other bits to all 1's
 	static inline hash_t ExtractSalt(hash_t hash) {
-		return hash | POINTER_MASK;
+		return hash | ~SALT_MASK;
 	}
 
-	// Returns the salt, leaves upper salt bits intact, sets lower bits to all 0's
+	// Returns the salt, leaves upper salt bits intact, sets other bits to all 0's
 	static inline hash_t ExtractSaltWithNulls(hash_t hash) {
 		return hash & SALT_MASK;
 	}
@@ -81,9 +98,37 @@ public:
 		value = salt;
 	}
 
-	static inline ht_entry_t GetDesiredEntry(const data_ptr_t &pointer, const hash_t &salt) {
+
+
+	static inline ht_entry_t GetNewEntry(const data_ptr_t &pointer, const hash_t &salt) {
 		auto desired = cast_pointer_to_uint64(pointer) | (salt & SALT_MASK);
 		return ht_entry_t(desired);
+	}
+
+	/// Keeps the salt and the Collision bit intact, but updates the pointer
+	static inline ht_entry_t UpdateWithPointer(const ht_entry_t &entry, const data_ptr_t &pointer) {
+
+		// slot must be occupied and a pointer and salt
+		D_ASSERT(entry.IsOccupied());
+		data_ptr_t current_pointer = entry.GetPointer();
+		D_ASSERT(current_pointer != nullptr);
+		hash_t salt = ExtractSaltWithNulls(entry.value);
+		D_ASSERT(salt != 0);
+
+		// set the pointer bits in entry to zero
+		auto value_without_pointer = entry.value & ~POINTER_MASK;
+
+		// now update the bits with the new pointer
+		auto desired_value = value_without_pointer | cast_pointer_to_uint64(pointer);
+		auto desired = ht_entry_t(desired_value);
+
+		// check if the collision bit is kept intact
+		bool has_collision = entry.HasCollision();
+		bool has_collision_desired = desired.HasCollision();
+		D_ASSERT(has_collision == has_collision_desired);
+
+		return desired;
+
 	}
 
 	static inline ht_entry_t GetEmptyEntry() {

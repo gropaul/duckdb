@@ -20,7 +20,17 @@ struct interval_t; // NOLINT
 // bias
 // see: https://nullprogram.com/blog/2018/07/31/
 
+inline hash_t TempMod10(uint64_t x) {
+	uint64_t modulo = x % 10;
+	uint64_t hash = modulo;
+	// add salt as well, same as module but from bit 48
+	uint64_t salt = x << 48;
+
+	return hash + salt;
+}
+
 inline hash_t MurmurHash64(uint64_t x) {
+	// return TempMod10(x);
 	x ^= x >> 32;
 	x *= 0xd6e8feb86659fd93U;
 	x ^= x >> 32;
