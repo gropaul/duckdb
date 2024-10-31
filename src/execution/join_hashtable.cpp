@@ -266,15 +266,12 @@ static inline void GetRowPointersInternal(DataChunk &keys, TupleDataChunkState &
 			// entry_has_collision is false
 			if (USE_SALTS){
 
-				if (occupied && !salt_match && !entry_has_collision) {
-					// this is the case where we stopped because we had no collision
-					row_ptr_insert_to[row_index] = nullptr;
-					salt_match_count += 0;
-				} else {
-					// here we stopped because (a) we found an empty entry or (b) we found a matching salt
-					row_ptr_insert_to[row_index] = entry.GetPointerOrNull();
-					salt_match_count += occupied;
-				}
+				// here we stopped because
+				// (a) we found an empty entry or -> no result
+				// (b) we found a matching salt -> we need to compare the keys
+				// (c) or (no salt match and no collision) -> no result
+				row_ptr_insert_to[row_index] = entry.GetPointerOrNull();
+				salt_match_count += occupied && salt_match;
 			} else {
 				row_ptr_insert_to[row_index] = entry.GetPointerOrNull();
 				salt_match_count += occupied;
