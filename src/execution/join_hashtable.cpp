@@ -234,18 +234,14 @@ static inline void GetRowPointersInternal(DataChunk &keys, TupleDataChunkState &
 				// increment the ht_offset of the entry as long as next entry is occupied and salt does not match
 				while (true) {
 					entry = entries[ht_offset];
+
 					occupied = entry.IsOccupied();
 					salt_match = entry.GetSalt() == row_salt;
-
 					entry_has_collision = entry.HasCollision();
 
 					// condition for incrementing the ht_offset: occupied and salt does not match and entry has
 					// collision reverse the condition to break out of the loop
-					if (!occupied || salt_match) {
-						break;
-					}
-
-					if (!entry_has_collision) {
+					if (!occupied || salt_match || !entry_has_collision) {
 						break;
 					}
 
@@ -260,12 +256,8 @@ static inline void GetRowPointersInternal(DataChunk &keys, TupleDataChunkState &
 			// does not match, the ones that are empty need no further processing
 			state.salt_match_sel.set_index(salt_match_count, row_index);
 
-			// entry might be empty, so the pointer in the entry is nullptr, but this does not matter as the row
-			// will not be compared anyway as with an empty entry we are already done. However, if we leave the loop
-			// because there is no collision, we also have no result, therefore we set the pointer to nullptr if
-			// entry_has_collision is false
-			if (USE_SALTS){
 
+			if (USE_SALTS){
 				// here we stopped because
 				// (a) we found an empty entry or -> no result
 				// (b) we found a matching salt -> we need to compare the keys
@@ -310,7 +302,6 @@ static inline void GetRowPointersInternal(DataChunk &keys, TupleDataChunkState &
 }
 
 inline bool JoinHashTable::UseSalt() const {
-	return true;
 	// only use salt for large hash tables and if there is only one equality condition as otherwise
 	// we potentially need to compare multiple keys
 	return this->capacity > USE_SALT_THRESHOLD && this->equality_predicate_columns.size() == 1;

@@ -31,7 +31,7 @@ public:
 	}
 
 	// Add a default constructor for 32-bit linux test case
-	ht_entry_t() noexcept : value(0) {
+	inline ht_entry_t() noexcept : value(0) {
 	}
 
 	inline bool IsOccupied() const {
@@ -44,13 +44,11 @@ public:
 
 	inline static void MarkAsCollided(std::atomic<ht_entry_t> &entry) {
 
-		auto current = entry.load(std::memory_order_relaxed);
-		ht_entry_t desired_entry;
+		// cast ht_entry_t to hash_t in order to use atomic OR operation
+		atomic<hash_t> &entry_value = reinterpret_cast<atomic<hash_t>&>(entry);
 
-		do {
-			auto desired_value = current.value | COLLISION_BIT_MASK;
-			desired_entry = ht_entry_t(desired_value);
-		} while (!entry.compare_exchange_weak(current, desired_entry, std::memory_order_relaxed));
+		// set the collision using the atomic |= operation
+		entry_value |= COLLISION_BIT_MASK;
 	}
 
 
@@ -128,14 +126,13 @@ public:
 		D_ASSERT(has_collision == has_collision_desired);
 
 		return desired;
-
 	}
 
 	static inline ht_entry_t GetEmptyEntry() {
 		return ht_entry_t(0);
 	}
 
-private:
+protected:
 	hash_t value;
 };
 
