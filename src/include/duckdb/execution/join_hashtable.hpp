@@ -278,7 +278,7 @@ public:
 private:
 	void InitializeScanStructure(ScanStructure &scan_structure, DataChunk &keys, TupleDataChunkState &key_state,
 	                             const SelectionVector *&current_sel);
-	void Hash(DataChunk &keys, const SelectionVector &sel, idx_t count, Vector &hashes);
+	void Hash(DataChunk &keys, const SelectionVector &sel, idx_t count, Vector &hashes, bool mark_hashes);
 
 	bool UseSalt() const;
 

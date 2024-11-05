@@ -21,6 +21,9 @@ namespace duckdb {
 */
 struct ht_entry_t { // NOLINT
 public:
+
+	static constexpr const hash_t HASK_MARK_MASK = 0x8000000000000000;
+
 	static constexpr const hash_t COLLISION_BIT_MASK = 0x8000000000000000;
 	//! Upper 16 bits are salt
 	static constexpr const hash_t SALT_MASK = 0x7FFF000000000000;
@@ -61,7 +64,7 @@ public:
 	// Returns a pointer based on the stored value if the cell is occupied
 	inline data_ptr_t GetPointer() const {
 		D_ASSERT(IsOccupied());
-		return cast_uint64_to_pointer(value & POINTER_MASK);
+		return GetPointerOrNull();
 	}
 
 	inline void SetPointer(const data_ptr_t &pointer) {
@@ -70,7 +73,7 @@ public:
 		// Value should have all 1's in the pointer area
 		D_ASSERT((value & POINTER_MASK) == POINTER_MASK);
 		// Set upper bits to 1 in pointer so the salt stays intact
-		value &= cast_pointer_to_uint64(pointer) | SALT_MASK;
+		value &= cast_pointer_to_uint64(pointer) | ~POINTER_MASK;
 	}
 
 	// Returns the salt, leaves upper salt bits intact, sets other bits to all 1's
@@ -110,8 +113,6 @@ public:
 		D_ASSERT(entry.IsOccupied());
 		data_ptr_t current_pointer = entry.GetPointer();
 		D_ASSERT(current_pointer != nullptr);
-		hash_t salt = ExtractSaltWithNulls(entry.value);
-		D_ASSERT(salt != 0);
 
 		// set the pointer bits in entry to zero
 		auto value_without_pointer = entry.value & ~POINTER_MASK;
