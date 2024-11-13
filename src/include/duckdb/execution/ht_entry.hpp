@@ -132,7 +132,8 @@ protected:
 	hash_t value;
 };
 
-// uses an AND operation to apply the modulo operation instead of an if condition that could be branch mispredicted
+// uses an AND operation to apply the modulo operation instead of an if condition that could result in a branch
+// misprediction
 inline void IncrementAndWrap(idx_t &offset, const uint64_t &capacity_mask) {
 	++offset &= capacity_mask;
 }
