@@ -21,13 +21,14 @@ namespace duckdb {
 */
 struct ht_entry_t { // NOLINT
 public:
-
+	//! Bit 0 is used to mark all hashes in RowLayout entries so that we know when the next pointer of an entry is a
+	//! hash and therefore the chain is finished
 	static constexpr const hash_t HASK_MARK_MASK = 0x8000000000000000;
-
+	//! Bit 0 is the collision bit, marks that on this entry there was a collision during insertion
 	static constexpr const hash_t COLLISION_BIT_MASK = 0x8000000000000000;
-	//! Upper 16 bits are salt
+	//! Bits 1 to 15 are used as salt for pre-comparison of the key
 	static constexpr const hash_t SALT_MASK = 0x7FFF000000000000;
-	//! Lower 48 bits are the pointer
+	//! Lower 48 bits are the pointer to the row entry
 	static constexpr const hash_t POINTER_MASK = 0x0000FFFFFFFFFFFF;
 
 	explicit inline ht_entry_t(hash_t value_p) noexcept : value(value_p) {
@@ -48,12 +49,11 @@ public:
 	inline static void MarkAsCollided(std::atomic<ht_entry_t> &entry) {
 
 		// cast ht_entry_t to hash_t in order to use atomic OR operation
-		atomic<hash_t> &entry_value = reinterpret_cast<atomic<hash_t>&>(entry);
+		atomic<hash_t> &entry_value = reinterpret_cast<atomic<hash_t> &>(entry);
 
 		// set the collision using the atomic |= operation
 		entry_value |= COLLISION_BIT_MASK;
 	}
-
 
 	// Returns a pointer based on the stored value without checking cell occupancy.
 	// This can return a nullptr if the cell is not occupied.
@@ -99,8 +99,6 @@ public:
 		value = salt;
 	}
 
-
-
 	static inline ht_entry_t GetNewEntry(const data_ptr_t &pointer, const hash_t &salt) {
 		auto desired = cast_pointer_to_uint64(pointer) | (salt & SALT_MASK);
 		return ht_entry_t(desired);
@@ -109,10 +107,9 @@ public:
 	/// Keeps the salt and the Collision bit intact, but updates the pointer
 	static inline ht_entry_t UpdateWithPointer(const ht_entry_t &entry, const data_ptr_t &pointer) {
 
-		// slot must be occupied and a pointer and salt
+		// slot must be occupied and have a valid pointer
 		D_ASSERT(entry.IsOccupied());
-		data_ptr_t current_pointer = entry.GetPointer();
-		D_ASSERT(current_pointer != nullptr);
+		D_ASSERT(entry.GetPointer() != nullptr);
 
 		// set the pointer bits in entry to zero
 		auto value_without_pointer = entry.value & ~POINTER_MASK;
@@ -122,9 +119,7 @@ public:
 		auto desired = ht_entry_t(desired_value);
 
 		// check if the collision bit is kept intact
-		bool has_collision = entry.HasCollision();
-		bool has_collision_desired = desired.HasCollision();
-		D_ASSERT(has_collision == has_collision_desired);
+		D_ASSERT(entry.HasCollision() == desired.HasCollision());
 
 		return desired;
 	}

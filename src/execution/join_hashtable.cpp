@@ -691,6 +691,7 @@ static void InsertHashesLoop(atomic<ht_entry_t> entries[], Vector &row_locations
 					break;
 				}
 
+				// todo: only mark in first increment!
 				ht_entry_t::MarkAsCollided(atomic_entry);
 				IncrementAndWrap(ht_offset_and_salt, capacity_mask);
 			}
