@@ -228,7 +228,6 @@ static inline void GetRowPointersInternal(DataChunk &keys, TupleDataChunkState &
 
 			bool occupied;
 			bool salt_match;
-			bool entry_has_collision;
 
 			ht_entry_t entry;
 
@@ -240,11 +239,10 @@ static inline void GetRowPointersInternal(DataChunk &keys, TupleDataChunkState &
 
 					occupied = entry.IsOccupied();
 					salt_match = entry.GetSalt() == row_salt;
-					entry_has_collision = entry.HasCollision();
 
 					// condition for incrementing the ht_offset: occupied and salt does not match and entry has
 					// collision -> reverse the condition to break out of the loop
-					if (!occupied || salt_match || !entry_has_collision) {
+					if (!occupied || salt_match) {
 						break;
 					}
 
@@ -604,12 +602,6 @@ static inline void InsertMatchesAndIncrementMisses(atomic<ht_entry_t> entries[],
 		const auto need_compare_idx = state.key_no_match_sel.get_index(i);
 		const auto entry_index = state.salt_match_sel.get_index(need_compare_idx);
 
-		// mark the entry as collided, we don't need to care about thread synchronisation as the mark is an OR operation
-		// and the worst case is that we mark the same entry multiple times
-		const auto &ht_offset = ht_offsets_and_salts[entry_index] & ht_entry_t::POINTER_MASK;
-		auto &atomic_entry = entries[ht_offset];
-		ht_entry_t::MarkAsCollided(atomic_entry);
-
 		// increment the ht_offset of the entry
 		idx_t &ht_offset_and_salt = ht_offsets_and_salts[entry_index];
 		IncrementAndWrap(ht_offset_and_salt, capacity_mask);
@@ -691,8 +683,6 @@ static void InsertHashesLoop(atomic<ht_entry_t> entries[], Vector &row_locations
 					break;
 				}
 
-				// todo: only mark in first increment!
-				ht_entry_t::MarkAsCollided(atomic_entry);
 				IncrementAndWrap(ht_offset_and_salt, capacity_mask);
 			}
 

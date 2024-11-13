@@ -118,9 +118,6 @@ public:
 		auto desired_value = value_without_pointer | cast_pointer_to_uint64(pointer);
 		auto desired = ht_entry_t(desired_value);
 
-		// check if the collision bit is kept intact
-		D_ASSERT(entry.HasCollision() == desired.HasCollision());
-
 		return desired;
 	}
 
