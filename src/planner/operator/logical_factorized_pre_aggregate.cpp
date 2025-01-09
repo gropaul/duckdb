@@ -1,7 +1,5 @@
 #include "duckdb/planner/operator/logical_factorized_pre_aggregate.hpp"
 
-#include "duckdb/main/config.hpp"
-
 namespace duckdb {
 
 LogicalFactorizedPreAggregate::LogicalFactorizedPreAggregate()

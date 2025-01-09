@@ -14,7 +14,8 @@
 namespace duckdb {
 
 struct FactorConsumer {
-	explicit FactorConsumer(column_binding_set_t flat_columns) : flat_columns(std::move(flat_columns)) {
+	explicit FactorConsumer(column_binding_set_t flat_columns, const LogicalOperator &op)
+	    : flat_columns(std::move(flat_columns)), op(op) {
 	}
 
 	void Print() const {
@@ -27,10 +28,12 @@ struct FactorConsumer {
 
 	//! The columns that need to be flat, e.g. aggregate keys can be inside the factor
 	column_binding_set_t flat_columns;
+	const LogicalOperator &op;
 };
 
 struct FactorProducer {
-	explicit FactorProducer(column_binding_set_t factor_columns) : factor_columns(std::move(factor_columns)) {
+	explicit FactorProducer(column_binding_set_t factor_columns, const LogicalOperator &op)
+	    : factor_columns(std::move(factor_columns)), op(op) {
 	}
 
 	void Print() const {
@@ -43,6 +46,7 @@ struct FactorProducer {
 
 	//! The columns that are factorized
 	column_binding_set_t factor_columns;
+	const LogicalOperator &op;
 };
 
 class ColumnBindingAccumulator : public LogicalOperatorVisitor {

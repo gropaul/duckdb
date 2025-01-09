@@ -77,7 +77,7 @@ FactorProducer FactorizationOptimizer::GetFactorProducer(LogicalOperator &op) {
 	case LogicalOperatorType::LOGICAL_COMPARISON_JOIN: {
 		const auto &comparison_join = op.Cast<LogicalComparisonJoin>();
 		const auto rhs_bindings = VectorToSet(comparison_join.children[1]->GetColumnBindings());
-		return FactorProducer(rhs_bindings);
+		return FactorProducer(rhs_bindings, op);
 	}
 	default: {
 		throw NotImplementedException("This operator cannot produce factors");
@@ -94,8 +94,6 @@ bool FactorizationOptimizer::CanConsumeFactors(LogicalOperator &op) {
 	}
 }
 
-
-
 FactorConsumer FactorizationOptimizer::GetFactorConsumer(LogicalOperator &op) {
 	switch (op.type) {
 	case LogicalOperatorType::LOGICAL_AGGREGATE_AND_GROUP_BY: {
@@ -105,7 +103,7 @@ FactorConsumer FactorizationOptimizer::GetFactorConsumer(LogicalOperator &op) {
 			accumulator.VisitExpression(&group_by_expression);
 		}
 
-		return FactorConsumer(accumulator.GetColumnReferences());
+		return FactorConsumer(accumulator.GetColumnReferences(), op);
 	}
 	default: {
 		throw NotImplementedException("This operator cannot consume factors");
