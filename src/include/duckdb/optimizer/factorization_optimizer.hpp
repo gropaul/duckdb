@@ -17,7 +17,6 @@ struct FactorConsumer {
 	explicit FactorConsumer(column_binding_set_t flat_columns, const LogicalOperator &op)
 	    : flat_columns(std::move(flat_columns)), op(op) {
 	}
-
 	void Print() const {
 		Printer::Print("FactorConsumer");
 		for (auto &column : flat_columns) {
@@ -25,7 +24,6 @@ struct FactorConsumer {
 			    StringUtil::Format("ColumnIndex: %llu, TableIndex: %llu", column.column_index, column.table_index));
 		}
 	}
-
 	//! The columns that need to be flat, e.g. aggregate keys can be inside the factor
 	column_binding_set_t flat_columns;
 	const LogicalOperator &op;
@@ -35,7 +33,6 @@ struct FactorProducer {
 	explicit FactorProducer(column_binding_set_t factor_columns, const LogicalOperator &op)
 	    : factor_columns(std::move(factor_columns)), op(op) {
 	}
-
 	void Print() const {
 		Printer::Print("FactorProducer");
 		for (auto &column : factor_columns) {
@@ -43,16 +40,22 @@ struct FactorProducer {
 			    StringUtil::Format("ColumnIndex: %llu, TableIndex: %llu", column.column_index, column.table_index));
 		}
 	}
-
 	//! The columns that are factorized
 	column_binding_set_t factor_columns;
 	const LogicalOperator &op;
 };
 
-class ColumnBindingAccumulator : public LogicalOperatorVisitor {
+struct FactorOperatorMatch {
+	explicit FactorOperatorMatch(FactorConsumer &consumer, FactorProducer &producer)
+	    : consumer(consumer), producer(producer) {
+	}
+	FactorConsumer &consumer;
+	FactorProducer &producer;
+};
 
+class ColumnBindingCollector final : public LogicalOperatorVisitor {
 public:
-	explicit ColumnBindingAccumulator();
+	explicit ColumnBindingCollector();
 	column_binding_set_t GetColumnReferences() {
 		return column_references;
 	}
@@ -64,6 +67,42 @@ private:
 	column_binding_set_t column_references;
 };
 
+class FactorizedOperatorCollector final : public LogicalOperatorVisitor {
+public:
+	FactorizedOperatorCollector() : consumers() {
+	}
+
+	explicit FactorizedOperatorCollector(const vector<FactorConsumer> &consumers) : consumers(consumers) {
+	}
+	vector<FactorOperatorMatch> GetPotentialMatches() {
+		return matches;
+	}
+
+public:
+	void VisitOperator(LogicalOperator &op) override;
+
+protected:
+private:
+	vector<FactorConsumer> consumers;
+	vector<FactorOperatorMatch> matches;
+
+private:
+	static bool Match(const FactorConsumer &consumer, const FactorProducer &producer) {
+		// todo: check if this producer can work with the consumers to create a match
+		return true;
+	}
+
+	static bool HindersConsumption(LogicalOperator &op, FactorConsumer &consumer) {
+		// todo: filter out current sources that are not factorisable because of this operator
+		return false;
+	}
+
+	static bool CanProduceFactors(LogicalOperator &op);
+	static FactorProducer GetFactorProducer(LogicalOperator &op);
+
+	static bool CanConsumeFactors(LogicalOperator &op);
+	static FactorConsumer GetFactorConsumer(LogicalOperator &op);
+};
 
 //! Todo: Add a description
 class FactorizationOptimizer : public LogicalOperatorVisitor {
@@ -74,16 +113,8 @@ public:
 	void VisitOperator(LogicalOperator &op) override;
 
 private:
-
 private:
-
 	static void AddFactorizedPreAggregate(LogicalAggregate &aggregate);
-
-	static bool CanProduceFactors(LogicalOperator &op);
-	FactorProducer GetFactorProducer(LogicalOperator &op);
-
-	static bool CanConsumeFactors(LogicalOperator &op);
-	FactorConsumer GetFactorConsumer(LogicalOperator &op);
 };
 
 } // namespace duckdb

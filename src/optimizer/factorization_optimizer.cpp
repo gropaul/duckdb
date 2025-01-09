@@ -11,10 +11,11 @@ static column_binding_set_t VectorToSet(const std::vector<ColumnBinding> &vector
 	return set;
 }
 
-ColumnBindingAccumulator::ColumnBindingAccumulator() {
+ColumnBindingCollector::ColumnBindingCollector() {
+
 }
 
-unique_ptr<Expression> ColumnBindingAccumulator::VisitReplace(BoundColumnRefExpression &expr,
+unique_ptr<Expression> ColumnBindingCollector::VisitReplace(BoundColumnRefExpression &expr,
 							    unique_ptr<Expression> *expr_ptr) {
 	column_references.insert(expr.binding);
 	return nullptr;
@@ -24,23 +25,12 @@ FactorizationOptimizer::FactorizationOptimizer() {
 }
 
 void FactorizationOptimizer::VisitOperator(LogicalOperator &op) {
-	auto column_bindings = op.GetColumnBindings();
+	FactorizedOperatorCollector collector;
+	collector.VisitOperator(op);
 
-	if (CanConsumeFactors(op)) {
-		const auto consumer = GetFactorConsumer(op);
-	}
+	const auto matches = collector.GetPotentialMatches();
 
-	if (CanProduceFactors(op)) {
-		const auto producer = GetFactorProducer(op);
-	}
-
-	if (op.type == LogicalOperatorType::LOGICAL_AGGREGATE_AND_GROUP_BY) {
-		AddFactorizedPreAggregate(op.Cast<LogicalAggregate>());
-	}
-
-	for (auto &child : op.children) {
-		VisitOperator(*child);
-	}
+	printf("Matches: %lu\n", matches.size());
 }
 
 void FactorizationOptimizer::AddFactorizedPreAggregate(LogicalAggregate &aggregate) {
@@ -52,7 +42,7 @@ void FactorizationOptimizer::AddFactorizedPreAggregate(LogicalAggregate &aggrega
 	aggregate.children[0] = std::move(pre_aggregate);
 }
 
-bool FactorizationOptimizer::CanProduceFactors(LogicalOperator &op) {
+bool FactorizedOperatorCollector::CanProduceFactors(LogicalOperator &op) {
 	switch (op.type) {
 	case LogicalOperatorType::LOGICAL_COMPARISON_JOIN: {
 		const JoinType join_type = op.Cast<LogicalComparisonJoin>().join_type;
@@ -72,7 +62,7 @@ bool FactorizationOptimizer::CanProduceFactors(LogicalOperator &op) {
 	}
 }
 
-FactorProducer FactorizationOptimizer::GetFactorProducer(LogicalOperator &op) {
+FactorProducer FactorizedOperatorCollector::GetFactorProducer(LogicalOperator &op) {
 	switch (op.type) {
 	case LogicalOperatorType::LOGICAL_COMPARISON_JOIN: {
 		const auto &comparison_join = op.Cast<LogicalComparisonJoin>();
@@ -85,7 +75,7 @@ FactorProducer FactorizationOptimizer::GetFactorProducer(LogicalOperator &op) {
 	}
 }
 
-bool FactorizationOptimizer::CanConsumeFactors(LogicalOperator &op) {
+bool FactorizedOperatorCollector::CanConsumeFactors(LogicalOperator &op) {
 	switch (op.type) {
 	case LogicalOperatorType::LOGICAL_AGGREGATE_AND_GROUP_BY:
 		return true;
@@ -94,11 +84,11 @@ bool FactorizationOptimizer::CanConsumeFactors(LogicalOperator &op) {
 	}
 }
 
-FactorConsumer FactorizationOptimizer::GetFactorConsumer(LogicalOperator &op) {
+FactorConsumer FactorizedOperatorCollector::GetFactorConsumer(LogicalOperator &op) {
 	switch (op.type) {
 	case LogicalOperatorType::LOGICAL_AGGREGATE_AND_GROUP_BY: {
 
-		ColumnBindingAccumulator accumulator;
+		ColumnBindingCollector accumulator;
 		for (auto &group_by_expression : op.Cast<LogicalAggregate>().groups) {
 			accumulator.VisitExpression(&group_by_expression);
 		}
@@ -108,6 +98,40 @@ FactorConsumer FactorizationOptimizer::GetFactorConsumer(LogicalOperator &op) {
 	default: {
 		throw NotImplementedException("This operator cannot consume factors");
 	}
+	}
+}
+
+void FactorizedOperatorCollector::VisitOperator(LogicalOperator &op) {
+
+	if (CanProduceFactors(op)) {
+		auto producer = GetFactorProducer(op);
+
+		for (auto &consumer : consumers) {
+			if (Match(consumer, producer)) {
+				matches.push_back(FactorOperatorMatch(consumer, producer));
+			}
+		}
+	}
+
+	vector<FactorConsumer> consumer_for_children;
+	for (auto &consumers : consumers) {
+		if (!HindersConsumption(op, consumers)) {
+			consumer_for_children.push_back(consumers);
+		}
+	}
+
+	if (CanConsumeFactors(op)) {
+		const auto consumer = GetFactorConsumer(op);
+		consumer_for_children.push_back(consumer);
+	}
+
+	for (auto &child : op.children) {
+		FactorizedOperatorCollector collector(consumer_for_children);
+		collector.VisitOperator(*child);
+
+		for (auto &match : collector.GetPotentialMatches()) {
+			matches.push_back(match);
+		}
 	}
 }
 
