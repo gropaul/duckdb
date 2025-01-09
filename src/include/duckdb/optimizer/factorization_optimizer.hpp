@@ -72,6 +72,9 @@ public:
 private:
 
 private:
+
+	static void AddFactorizedPreAggregate(LogicalAggregate &aggregate);
+
 	static bool CanProduceFactors(LogicalOperator &op);
 	FactorProducer GetFactorProducer(LogicalOperator &op);
 

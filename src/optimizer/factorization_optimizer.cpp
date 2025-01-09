@@ -1,4 +1,5 @@
 #include "duckdb/optimizer/factorization_optimizer.hpp"
+#include "duckdb/planner/operator/logical_factorized_pre_aggregate.hpp"
 
 namespace duckdb {
 
@@ -8,6 +9,9 @@ static column_binding_set_t VectorToSet(const std::vector<ColumnBinding> &vector
 		set.insert(binding);
 	}
 	return set;
+}
+
+ColumnBindingAccumulator::ColumnBindingAccumulator() {
 }
 
 unique_ptr<Expression> ColumnBindingAccumulator::VisitReplace(BoundColumnRefExpression &expr,
@@ -26,14 +30,26 @@ void FactorizationOptimizer::VisitOperator(LogicalOperator &op) {
 		const auto consumer = GetFactorConsumer(op);
 	}
 
-
 	if (CanProduceFactors(op)) {
 		const auto producer = GetFactorProducer(op);
+	}
+
+	if (op.type == LogicalOperatorType::LOGICAL_AGGREGATE_AND_GROUP_BY) {
+		AddFactorizedPreAggregate(op.Cast<LogicalAggregate>());
 	}
 
 	for (auto &child : op.children) {
 		VisitOperator(*child);
 	}
+}
+
+void FactorizationOptimizer::AddFactorizedPreAggregate(LogicalAggregate &aggregate) {
+	auto pre_aggregate = make_uniq<LogicalFactorizedPreAggregate>();
+
+	// set the child of the pre-aggregate to the child of the aggregate
+	pre_aggregate->children.push_back(std::move(aggregate.children[0]));
+	// set the child of the aggregate to the pre-aggregate
+	aggregate.children[0] = std::move(pre_aggregate);
 }
 
 bool FactorizationOptimizer::CanProduceFactors(LogicalOperator &op) {
