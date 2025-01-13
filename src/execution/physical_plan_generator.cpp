@@ -56,6 +56,9 @@ unique_ptr<PhysicalOperator> PhysicalPlanGenerator::CreatePlan(LogicalOperator &
 	case LogicalOperatorType::LOGICAL_EMPTY_RESULT:
 		plan = CreatePlan(op.Cast<LogicalEmptyResult>());
 		break;
+	case LogicalOperatorType::LOGICAL_FACTORIZED_PRE_AGGREGATE:
+		plan = CreatePlan(op.Cast<LogicalFactorizedPreAggregate>());
+		break;
 	case LogicalOperatorType::LOGICAL_FILTER:
 		plan = CreatePlan(op.Cast<LogicalFilter>());
 		break;

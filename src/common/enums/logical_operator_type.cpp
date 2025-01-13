@@ -50,6 +50,8 @@ string LogicalOperatorToString(LogicalOperatorType type) {
 		return "COPY_TO_FILE";
 	case LogicalOperatorType::LOGICAL_COPY_DATABASE:
 		return "COPY_DATABASE";
+	case LogicalOperatorType::LOGICAL_FACTORIZED_PRE_AGGREGATE:
+		return "FACTORIZED_PRE_AGGREGATE";
 	case LogicalOperatorType::LOGICAL_JOIN:
 		return "JOIN";
 	case LogicalOperatorType::LOGICAL_CROSS_PRODUCT:

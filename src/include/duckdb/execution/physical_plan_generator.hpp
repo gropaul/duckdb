@@ -65,6 +65,7 @@ protected:
 	unique_ptr<PhysicalOperator> CreatePlan(LogicalEmptyResult &op);
 	unique_ptr<PhysicalOperator> CreatePlan(LogicalExpressionGet &op);
 	unique_ptr<PhysicalOperator> CreatePlan(LogicalExport &op);
+	unique_ptr<PhysicalOperator> CreatePlan(LogicalFactorizedPreAggregate &op);
 	unique_ptr<PhysicalOperator> CreatePlan(LogicalFilter &op);
 	unique_ptr<PhysicalOperator> CreatePlan(LogicalGet &op);
 	unique_ptr<PhysicalOperator> CreatePlan(LogicalLimit &op);
@@ -91,7 +92,6 @@ protected:
 	unique_ptr<PhysicalOperator> CreatePlan(LogicalMaterializedCTE &op);
 	unique_ptr<PhysicalOperator> CreatePlan(LogicalCTERef &op);
 	unique_ptr<PhysicalOperator> CreatePlan(LogicalPivot &op);
-
 	unique_ptr<PhysicalOperator> PlanAsOfJoin(LogicalComparisonJoin &op);
 	unique_ptr<PhysicalOperator> PlanComparisonJoin(LogicalComparisonJoin &op);
 	unique_ptr<PhysicalOperator> PlanDelimJoin(LogicalComparisonJoin &op);

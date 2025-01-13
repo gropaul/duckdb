@@ -34,6 +34,7 @@ class LogicalExecute;
 class LogicalExplain;
 class LogicalExport;
 class LogicalExpressionGet;
+class LogicalFactorizedPreAggregate;
 class LogicalFilter;
 class LogicalGet;
 class LogicalInsert;

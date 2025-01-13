@@ -32,6 +32,7 @@
 #include "duckdb/optimizer/sum_rewriter.hpp"
 #include "duckdb/optimizer/topn_optimizer.hpp"
 #include "duckdb/optimizer/unnest_rewriter.hpp"
+#include "duckdb/optimizer/factorization_optimizer.hpp"
 #include "duckdb/planner/binder.hpp"
 #include "duckdb/planner/planner.hpp"
 
@@ -251,6 +252,11 @@ void Optimizer::RunBuiltInOptimizers() {
 	RunOptimizer(OptimizerType::REORDER_FILTER, [&]() {
 		ExpressionHeuristics expression_heuristics(*this);
 		plan = expression_heuristics.Rewrite(std::move(plan));
+	});
+
+	RunOptimizer(OptimizerType::FACTORIZATION, [&]() {
+		FactorizationOptimizer factorization_optimizer;
+		factorization_optimizer.VisitOperator(*plan);
 	});
 
 	// perform join filter pushdown after the dust has settled

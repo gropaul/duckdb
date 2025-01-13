@@ -488,6 +488,16 @@ unique_ptr<LogicalOperator> LogicalFilter::Deserialize(Deserializer &deserialize
 	return std::move(result);
 }
 
+void LogicalFactorizedPreAggregate::Serialize(Serializer &serializer) const {
+	LogicalOperator::Serialize(serializer);
+}
+
+unique_ptr<LogicalOperator> LogicalFactorizedPreAggregate::Deserialize(Deserializer &deserializer) {
+	auto result = duckdb::unique_ptr<LogicalFactorizedPreAggregate>(new LogicalFactorizedPreAggregate());
+	return std::move(result);
+}
+
+
 void LogicalInsert::Serialize(Serializer &serializer) const {
 	LogicalOperator::Serialize(serializer);
 	serializer.WritePropertyWithDefault<unique_ptr<CreateInfo>>(200, "table_info", table.GetInfo());

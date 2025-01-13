@@ -22,6 +22,7 @@ add_library_unity(
   plan_execute.cpp
   plan_explain.cpp
   plan_export.cpp
+  plan_factorized_pre_aggregate.cpp
   plan_filter.cpp
   plan_get.cpp
   plan_insert.cpp
