@@ -30,16 +30,8 @@ void FactorizationOptimizer::VisitOperator(LogicalOperator &op) {
 
 	const auto matches = collector.GetPotentialMatches();
 
-	printf("Matches: %lu\n", matches.size());
-}
-
-void FactorizationOptimizer::AddFactorizedPreAggregate(LogicalAggregate &aggregate) {
-	auto pre_aggregate = make_uniq<LogicalFactorizedPreAggregate>();
-
-	// set the child of the pre-aggregate to the child of the aggregate
-	pre_aggregate->children.push_back(std::move(aggregate.children[0]));
-	// set the child of the aggregate to the pre-aggregate
-	aggregate.children[0] = std::move(pre_aggregate);
+	FactorizedPlanRewriter rewriter(op, matches);
+	rewriter.Rewrite(op);
 }
 
 bool FactorizedOperatorCollector::CanProduceFactors(LogicalOperator &op) {

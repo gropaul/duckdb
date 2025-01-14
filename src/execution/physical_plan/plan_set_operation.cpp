@@ -84,7 +84,7 @@ unique_ptr<PhysicalOperator> PhysicalPlanGenerator::CreatePlan(LogicalSetOperati
 
 		JoinType join_type = op.type == LogicalOperatorType::LOGICAL_EXCEPT ? JoinType::ANTI : JoinType::SEMI;
 		result = make_uniq<PhysicalHashJoin>(op, std::move(left), std::move(right), std::move(conditions), join_type,
-		                                     op.estimated_cardinality);
+		                                     op.estimated_cardinality, false);
 
 		// For EXCEPT ALL / INTERSECT ALL we need to remove the row number column again
 		if (op.setop_all) {

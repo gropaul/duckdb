@@ -83,9 +83,9 @@ public:
 		bool is_null;
 
 		// it records the RHS pointers for the result chunk
-		Vector rhs_pointers;
+		Vector compacted_rhs_pointers;
 		// it records the LHS sel vector for the result chunk
-		SelectionVector lhs_sel_vector;
+		SelectionVector compaction_lhs_sel_vector;
 		// these two variable records the last match results
 		idx_t last_match_count;
 		SelectionVector last_sel_vector;
@@ -128,10 +128,17 @@ public:
 	public:
 		void AdvancePointers();
 		void AdvancePointers(const SelectionVector &sel, idx_t sel_count);
+
+		void GatherResult(Vector &result, const SelectionVector &result_vector, Vector &pointers,
+				 const SelectionVector &sel_vector, const idx_t count, const idx_t col_no);
 		void GatherResult(Vector &result, const SelectionVector &result_vector, const SelectionVector &sel_vector,
 		                  const idx_t count, const idx_t col_idx);
 		void GatherResult(Vector &result, const SelectionVector &sel_vector, const idx_t count, const idx_t col_idx);
-		void GatherResult(Vector &result, const idx_t count, const idx_t col_idx);
+
+		void GatherRHSResult(DataChunk &result, Vector &pointers, idx_t left_column_count,
+		                     const SelectionVector &sel_vector, idx_t count);
+		void GatherRHSResult(DataChunk &result, Vector &pointers, idx_t left_column_count, idx_t count);
+
 		idx_t ResolvePredicates(DataChunk &keys, SelectionVector &match_sel, SelectionVector *no_match_sel);
 	};
 
@@ -168,7 +175,7 @@ public:
 	};
 
 	JoinHashTable(ClientContext &context, const vector<JoinCondition> &conditions, vector<LogicalType> build_types,
-	              JoinType type, const vector<idx_t> &output_columns);
+	              JoinType type, const vector<idx_t> &output_columns, bool emit_factor_pointers);
 	~JoinHashTable();
 
 	//! Add the given data to the HT
@@ -267,6 +274,8 @@ public:
 	uint64_t bitmask = DConstants::INVALID_INDEX;
 	//! Whether or not we error on multiple rows found per match in a SINGLE join
 	bool single_join_error_on_multiple_rows = true;
+	//! Whether to emit factorized vectors in the form of pointers
+	bool emit_factor_pointers = false;
 
 	struct {
 		mutex mj_lock;

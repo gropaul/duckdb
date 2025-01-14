@@ -9,10 +9,9 @@
 #pragma once
 
 #include "duckdb/planner/logical_operator_visitor.hpp"
-#include "duckdb/common/types/value.hpp"
+#include "duckdb/common/types.hpp"
 
 namespace duckdb {
-
 struct FactorConsumer {
 	explicit FactorConsumer(column_binding_set_t flat_columns, const LogicalOperator &op)
 	    : flat_columns(std::move(flat_columns)), op(op) {
@@ -52,6 +51,22 @@ struct FactorOperatorMatch {
 	FactorConsumer &consumer;
 	FactorProducer &producer;
 };
+
+class FactorizedPlanRewriter {
+public:
+	FactorizedPlanRewriter(LogicalOperator &root, const vector<FactorOperatorMatch> &matches);
+	void Rewrite(LogicalOperator &op);
+
+private:
+	LogicalOperator &root;
+	vector<FactorOperatorMatch> matches;
+
+private:
+	void RewriteAggregate(LogicalAggregate &aggregate);
+
+	void RewriteComparisonJoin(LogicalComparisonJoin &join) const;
+};
+
 
 class ColumnBindingCollector final : public LogicalOperatorVisitor {
 public:
