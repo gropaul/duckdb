@@ -1384,5 +1384,18 @@ InsertionOrderPreservingMap<string> PhysicalHashJoin::ParamsToString() const {
 	SetEstimatedCardinality(result, estimated_cardinality);
 	return result;
 }
+TupleDataCollection *PhysicalHashJoin::GetHTDataCollection(const idx_t emitter_id) const {
+
+	// if (!this->produce_fact_vectors) {
+	// 	return nullptr;
+	// }
+	//
+	// if (emitter_id != this->producer_id) {
+	// 	return nullptr;
+	// }
+
+	auto &sink = sink_state->Cast<HashJoinGlobalSinkState>();
+	return &sink.hash_table->GetDataCollection();
+}
 
 } // namespace duckdb

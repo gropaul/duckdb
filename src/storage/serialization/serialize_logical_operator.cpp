@@ -490,10 +490,19 @@ unique_ptr<LogicalOperator> LogicalFilter::Deserialize(Deserializer &deserialize
 
 void LogicalFactorizedPreAggregate::Serialize(Serializer &serializer) const {
 	LogicalOperator::Serialize(serializer);
+	serializer.WritePropertyWithDefault<vector<unique_ptr<Expression>>>(200, "bound_defaults", expressions);
+	serializer.WritePropertyWithDefault<vector<LogicalType>>(201, "parent_aggregate_types", parent_aggregate_types);
+	serializer.WritePropertyWithDefault<vector<ColumnBinding>>(202, "parent_aggregate_bindings",
+	                                                           parent_aggregate_bindings);
+	serializer.WritePropertyWithDefault<vector<LogicalType>>(203, "factor_types", factor_types);
 }
 
 unique_ptr<LogicalOperator> LogicalFactorizedPreAggregate::Deserialize(Deserializer &deserializer) {
-	auto result = duckdb::unique_ptr<LogicalFactorizedPreAggregate>(new LogicalFactorizedPreAggregate());
+	auto expressions = deserializer.ReadPropertyWithDefault<vector<unique_ptr<Expression>>>(200, "expressions");
+	auto parent_aggregate_types = deserializer.ReadPropertyWithDefault<vector<LogicalType>>(201, "parent_aggregate_types");
+	auto parent_aggregate_bindings = deserializer.ReadPropertyWithDefault<vector<ColumnBinding>>(202, "parent_aggregate_bindings");
+	auto factor_types = deserializer.ReadPropertyWithDefault<vector<LogicalType>>(203, "factor_types");
+	auto result = duckdb::unique_ptr<LogicalFactorizedPreAggregate>(new LogicalFactorizedPreAggregate(std::move(expressions), std::move(parent_aggregate_types), std::move(parent_aggregate_bindings), std::move(factor_types)));
 	return std::move(result);
 }
 

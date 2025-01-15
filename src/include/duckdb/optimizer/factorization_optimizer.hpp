@@ -13,7 +13,7 @@
 
 namespace duckdb {
 struct FactorConsumer {
-	explicit FactorConsumer(column_binding_set_t flat_columns, const LogicalOperator &op)
+	explicit FactorConsumer(column_binding_set_t flat_columns, LogicalOperator &op)
 	    : flat_columns(std::move(flat_columns)), op(op) {
 	}
 	void Print() const {
@@ -25,12 +25,12 @@ struct FactorConsumer {
 	}
 	//! The columns that need to be flat, e.g. aggregate keys can be inside the factor
 	column_binding_set_t flat_columns;
-	const LogicalOperator &op;
+	LogicalOperator &op;
 };
 
 struct FactorProducer {
-	explicit FactorProducer(column_binding_set_t factor_columns, const LogicalOperator &op)
-	    : factor_columns(std::move(factor_columns)), op(op) {
+	FactorProducer(column_binding_set_t factor_columns, vector<LogicalType> factor_types, LogicalOperator &op)
+	    : factor_columns(std::move(factor_columns)), factor_types(std::move(factor_types)), op(op) {
 	}
 	void Print() const {
 		Printer::Print("FactorProducer");
@@ -41,31 +41,34 @@ struct FactorProducer {
 	}
 	//! The columns that are factorized
 	column_binding_set_t factor_columns;
-	const LogicalOperator &op;
+	vector<LogicalType> factor_types;
+	LogicalOperator &op;
 };
 
 struct FactorOperatorMatch {
-	explicit FactorOperatorMatch(FactorConsumer &consumer, FactorProducer &producer)
+	explicit FactorOperatorMatch(FactorConsumer consumer, FactorProducer producer)
 	    : consumer(consumer), producer(producer) {
 	}
-	FactorConsumer &consumer;
-	FactorProducer &producer;
+	FactorConsumer consumer;
+	FactorProducer producer;
 };
 
 class FactorizedPlanRewriter {
 public:
-	FactorizedPlanRewriter(LogicalOperator &root, const vector<FactorOperatorMatch> &matches);
+	FactorizedPlanRewriter(LogicalOperator &root, const vector<unique_ptr<FactorOperatorMatch>> &matches);
 	void Rewrite(LogicalOperator &op);
 
 private:
 	LogicalOperator &root;
-	vector<FactorOperatorMatch> matches;
+	const vector<unique_ptr<FactorOperatorMatch>> &matches;
 
 private:
-	void RewriteAggregate(LogicalAggregate &aggregate);
+	void RewriteInternal(LogicalOperator &op, const unique_ptr<FactorOperatorMatch> &match);
+	void RewriteAggregate(LogicalAggregate &aggregate, const unique_ptr<FactorOperatorMatch> &match);
 
-	void RewriteComparisonJoin(LogicalComparisonJoin &join) const;
+	void RewriteComparisonJoin(LogicalComparisonJoin &join, const unique_ptr<FactorOperatorMatch> &match) const;
 };
+
 
 
 class ColumnBindingCollector final : public LogicalOperatorVisitor {
@@ -89,7 +92,7 @@ public:
 
 	explicit FactorizedOperatorCollector(const vector<FactorConsumer> &consumers) : consumers(consumers) {
 	}
-	vector<FactorOperatorMatch> GetPotentialMatches() {
+	vector<unique_ptr<FactorOperatorMatch>> &GetPotentialMatches() {
 		return matches;
 	}
 
@@ -99,7 +102,7 @@ public:
 protected:
 private:
 	vector<FactorConsumer> consumers;
-	vector<FactorOperatorMatch> matches;
+	vector<unique_ptr<FactorOperatorMatch>> matches;
 
 private:
 	static bool Match(const FactorConsumer &consumer, const FactorProducer &producer) {

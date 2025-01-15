@@ -25,10 +25,32 @@ FactorizationOptimizer::FactorizationOptimizer() {
 }
 
 void FactorizationOptimizer::VisitOperator(LogicalOperator &op) {
+
+	/*
+	// print column bindings and types
+	if (op.type == LogicalOperatorType::LOGICAL_CREATE_TABLE || op.type == LogicalOperatorType::LOGICAL_INSERT) {
+		return;
+	}
+
+	const auto bindings = op.GetColumnBindings();
+	const auto length = bindings.size();
+	op.ResolveOperatorTypes();
+
+	printf("Operator: %s\n", op.GetName().c_str());
+	for (int i = 0; i < length; i++) {
+		const auto &binding = bindings[i];
+		const auto &type = op.types[i];
+		printf("Binding: %s, Type: %s\n", binding.ToString().c_str(), type.ToString().c_str());
+	}
+
+	for (auto &child : op.children) {
+		VisitOperator(*child);
+	}
+	 */
 	FactorizedOperatorCollector collector;
 	collector.VisitOperator(op);
 
-	const auto matches = collector.GetPotentialMatches();
+	const auto &matches = collector.GetPotentialMatches();
 
 	FactorizedPlanRewriter rewriter(op, matches);
 	rewriter.Rewrite(op);
@@ -58,8 +80,15 @@ FactorProducer FactorizedOperatorCollector::GetFactorProducer(LogicalOperator &o
 	switch (op.type) {
 	case LogicalOperatorType::LOGICAL_COMPARISON_JOIN: {
 		const auto &comparison_join = op.Cast<LogicalComparisonJoin>();
-		const auto rhs_bindings = VectorToSet(comparison_join.children[1]->GetColumnBindings());
-		return FactorProducer(rhs_bindings, op);
+
+		const auto &build_side_op = comparison_join.children[0];
+		const auto rhs_bindings = VectorToSet(build_side_op->GetColumnBindings());
+
+		build_side_op->ResolveOperatorTypes();
+		const auto rhs_types = LogicalOperator::MapTypes(build_side_op->types, comparison_join.right_projection_map);
+
+
+		return FactorProducer(rhs_bindings, rhs_types, op);
 	}
 	default: {
 		throw NotImplementedException("This operator cannot produce factors");
@@ -100,7 +129,7 @@ void FactorizedOperatorCollector::VisitOperator(LogicalOperator &op) {
 
 		for (auto &consumer : consumers) {
 			if (Match(consumer, producer)) {
-				matches.push_back(FactorOperatorMatch(consumer, producer));
+				matches.push_back(make_uniq<FactorOperatorMatch>(consumer, producer));
 			}
 		}
 	}
@@ -118,11 +147,14 @@ void FactorizedOperatorCollector::VisitOperator(LogicalOperator &op) {
 	}
 
 	for (auto &child : op.children) {
-		FactorizedOperatorCollector collector(consumer_for_children);
-		collector.VisitOperator(*child);
+		FactorizedOperatorCollector child_collector(consumer_for_children);
+		child_collector.VisitOperator(*child);
 
-		for (auto &match : collector.GetPotentialMatches()) {
-			matches.push_back(match);
+		// Access elements through the getter and merge
+		auto& child_elements = child_collector.GetPotentialMatches();
+
+		for (auto& element : child_elements) {
+			matches.push_back(std::move(element));
 		}
 	}
 }

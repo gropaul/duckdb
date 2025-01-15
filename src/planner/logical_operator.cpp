@@ -84,7 +84,11 @@ void LogicalOperator::ResolveOperatorTypes() {
 	}
 	// now resolve the types for this operator
 	ResolveTypes();
+	if (types.size() != GetColumnBindings().size()) {
+		printf("Mismatch in types and column bindings for operator %s\n", GetName().c_str());
+	}
 	D_ASSERT(types.size() == GetColumnBindings().size());
+
 }
 
 vector<ColumnBinding> LogicalOperator::GenerateColumnBindings(idx_t table_idx, idx_t column_count) {

@@ -8,9 +8,9 @@ namespace duckdb {
 unique_ptr<PhysicalOperator> PhysicalPlanGenerator::CreatePlan(LogicalFactorizedPreAggregate &op) {
 	D_ASSERT(op.children.size() == 1);
 	unique_ptr<PhysicalOperator> plan = CreatePlan(*op.children[0]);
-	auto projection = make_uniq<PhysicalFactorizedPreAggregate>(op.types, op.estimated_cardinality);
-	projection->children.push_back(std::move(plan));
-	return std::move(projection);
+	auto pre_aggregate = make_uniq<PhysicalFactorizedPreAggregate>(op.types, std::move(op.expressions), op.factor_types, op.estimated_cardinality);
+	pre_aggregate->children.push_back(std::move(plan));
+	return std::move(pre_aggregate);
 }
 
 

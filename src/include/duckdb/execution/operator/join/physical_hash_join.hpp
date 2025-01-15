@@ -60,6 +60,7 @@ public:
 public:
 	InsertionOrderPreservingMap<string> ParamsToString() const override;
 
+	TupleDataCollection *GetHTDataCollection(const idx_t emitter_id) const;
 public:
 	// Operator Interface
 	unique_ptr<OperatorState> GetOperatorState(ExecutionContext &context) const override;

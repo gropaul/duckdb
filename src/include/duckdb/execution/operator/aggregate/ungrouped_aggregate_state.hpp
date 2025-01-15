@@ -64,6 +64,7 @@ struct LocalUngroupedAggregateState {
 public:
 	explicit LocalUngroupedAggregateState(GlobalUngroupedAggregateState &gstate);
 
+
 	//! Local arena allocator
 	ArenaAllocator &allocator;
 	//! The local aggregate state
