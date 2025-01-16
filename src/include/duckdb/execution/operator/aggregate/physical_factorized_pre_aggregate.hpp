@@ -20,16 +20,34 @@ class FactorScanStructure {
 
 	// the source collection of the factorized vectors
 	TupleDataCollection *source_collection;
+	idx_t pointer_offset;
+	vector<idx_t> fact_column_offsets;
 
-	explicit FactorScanStructure(TupleDataCollection *source_collection)
-	    : pointers_v(LogicalType::POINTER), count(0), pointers_sel(STANDARD_VECTOR_SIZE), source_collection(source_collection) {
-
+public:
+	explicit FactorScanStructure(TupleDataCollection *source_collection, vector<idx_t> fact_column_offsets)
+	    : pointers_v(LogicalType::POINTER), count(0), pointers_sel(STANDARD_VECTOR_SIZE), source_collection(source_collection), fact_column_offsets(std::move(fact_column_offsets)) {
+		// the pointer offset is the last offset
+		const auto offsets = source_collection->GetLayout().GetOffsets();
+		pointer_offset = offsets[offsets.size() - 1];
 	}
 
 	void Initialize(Vector &pointers, const SelectionVector &sel, idx_t count);
 	void Next(DataChunk &result);
-	void AdvancePointers(const SelectionVector &sel, const idx_t sel_count);
 	bool PointersExhausted() const;
+	void AdvancePointers();
+
+	SelectionVector &GetPointersSel() {
+		return pointers_sel;
+	}
+
+	idx_t GetCount() const {
+		return count;
+	}
+
+private:
+	void AdvancePointers(const SelectionVector &sel, const idx_t sel_count);
+
+
 };
 
 class PhysicalFactorizedPreAggregateState : public OperatorState {
@@ -37,13 +55,13 @@ public:
 	explicit PhysicalFactorizedPreAggregateState(const ExecutionContext &context,
 	                                             const vector<unique_ptr<Expression>> &aggregates,
 	                                             const vector<LogicalType> &factor_types,
+	                                             const vector<idx_t> &fact_column_offsets,
 	                                             TupleDataCollection *source_collection)
-	    : aggr_data_addresses_v(LogicalType::POINTER),
-	      source_collection(source_collection) {
+	    : factor_scan_structure(source_collection, fact_column_offsets), aggr_data_addresses_v(LogicalType::POINTER) {
 
 		/* Infrastructure for retrieving factorized vectors */
 
-		factor_vector.Initialize(context.client, factor_types);
+		factor_data.Initialize(context.client, factor_types);
 
 		/* Infrastructure for computing the aggregates */
 
@@ -84,6 +102,9 @@ public:
 		aggregate_cache_collection = make_uniq<TupleDataCollection>(buffer_manager, aggregate_cache_layout);
 	}
 
+	FactorScanStructure factor_scan_structure;
+	DataChunk factor_data;
+
 	TupleDataLayout aggr_data_layout;
 	data_ptr_t aggr_data;
 	unsafe_unique_array<data_t> aggr_owned_data;
@@ -98,7 +119,8 @@ public:
 
 public:
 	void Finalize(const PhysicalOperator &op, ExecutionContext &context) override {
-		context.thread.profiler.Flush(op);
+		// context.thread.profiler.Flush(op);
+		// todo: do we need to flush the profiler here
 	}
 };
 
