@@ -10,39 +10,6 @@
 
 namespace duckdb {
 
-class PhysicalFactorizedPreAggregateState : public OperatorState {
-public:
-	explicit PhysicalFactorizedPreAggregateState(const ExecutionContext &context,
-	                                             const vector<unique_ptr<Expression>> &aggregates,
-	                                             const vector<LogicalType> &factor_types,
-	                                             TupleDataCollection *data_collection)
-	    : data_collection(data_collection) {
-
-		vector<LogicalType> aggregate_types;
-		for (auto &aggr : aggregates) {
-			auto &aggr_expr = aggr->Cast<BoundAggregateExpression>();
-			aggregate_types.push_back(aggr_expr.return_type);
-		}
-
-		factor_vector.Initialize(context.client, factor_types);
-		global_aggregate_state =make_uniq<GlobalUngroupedAggregateState>(BufferAllocator::Get(context.client), aggregates);
-		local_aggregate_state = make_uniq<LocalUngroupedAggregateState>(*global_aggregate_state);
-
-		aggregate_count = aggregates.size();
-	}
-
-	idx_t aggregate_count;
-	DataChunk factor_vector;
-	TupleDataCollection *data_collection;
-
-	unique_ptr<GlobalUngroupedAggregateState> global_aggregate_state;
-	unique_ptr<LocalUngroupedAggregateState> local_aggregate_state;
-
-public:
-	void Finalize(const PhysicalOperator &op, ExecutionContext &context) override {
-		context.thread.profiler.Flush(op);
-	}
-};
 
 PhysicalFactorizedPreAggregate::PhysicalFactorizedPreAggregate(vector<LogicalType> types,
                                                                vector<unique_ptr<Expression>> expressions,
@@ -76,9 +43,10 @@ static TupleDataCollection *FindDataCollectionInOp(const PhysicalOperator *op, c
 unique_ptr<OperatorState> PhysicalFactorizedPreAggregate::GetOperatorState(ExecutionContext &context) const {
 
 	auto data_collection = FindDataCollectionInOp(children[0].get(), 0);
-	auto state = make_uniq<PhysicalFactorizedPreAggregateState>(context, aggregates,  factor_types, data_collection);
+	auto state = make_uniq<PhysicalFactorizedPreAggregateState>(context, aggregates, factor_types,data_collection);
 	return std::move(state);
 }
+
 
 OperatorResultType PhysicalFactorizedPreAggregate::Execute(ExecutionContext &context, DataChunk &input,
                                                            DataChunk &output, GlobalOperatorState &gstate,
@@ -86,10 +54,10 @@ OperatorResultType PhysicalFactorizedPreAggregate::Execute(ExecutionContext &con
 
 	auto &state = state_p.Cast<PhysicalFactorizedPreAggregateState>();
 	idx_t column_count = input.ColumnCount();
-	auto &pointers_v = input.data[column_count -1];
+	auto &pointers_v = input.data[column_count - 1];
 
 	// get the data collection
-	auto &data_collection = state.data_collection;
+	auto &data_collection = state.source_collection;
 
 	const idx_t fact_columns_count = state.factor_vector.ColumnCount();
 	vector<column_t> column_ids;
@@ -99,14 +67,27 @@ OperatorResultType PhysicalFactorizedPreAggregate::Execute(ExecutionContext &con
 		caches.push_back(nullptr);
 	}
 	state.factor_vector.SetCardinality(input.size());
-	data_collection->Gather(pointers_v, *FlatVector::IncrementalSelectionVector(), input.size(), column_ids, state.factor_vector, *FlatVector::IncrementalSelectionVector(), caches);
+	data_collection->Gather(pointers_v, *FlatVector::IncrementalSelectionVector(), input.size(), column_ids,
+	                        state.factor_vector, *FlatVector::IncrementalSelectionVector(), caches);
 
-	for (idx_t aggr_idx = 0; aggr_idx < state.aggregate_count; aggr_idx ++) {
-		state.local_aggregate_state->Sink(state.factor_vector, 0, aggr_idx);
+
+	RowOperationsState row_state(*state.aggregate_allocator);
+	// Copy the addresses
+	Vector addresses_copy(LogicalType::POINTER);
+	VectorOperations::Copy(state.aggr_data_addresses_v, addresses_copy, STANDARD_VECTOR_SIZE, 0, 0);
+
+	idx_t payload_idx = 0;
+	for (idx_t aggr_idx = 0; aggr_idx < state.aggregate_objects.size(); aggr_idx++) {
+		auto &aggregate = state.aggregate_objects[aggr_idx];
+		RowOperations::UpdateStates(row_state, aggregate, addresses_copy, state.factor_vector, payload_idx,
+		                            state.factor_vector.size());
+		// todo: we need to reset the vector again
+		VectorOperations::AddInPlace(addresses_copy, NumericCast<int64_t>(aggregate.payload_size), state.factor_vector.size());
 	}
 
-	state.global_aggregate_state->Combine(*state.local_aggregate_state);
-	state.global_aggregate_state->Finalize(output,0);
+	// finalize the aggregates
+	output.SetCardinality(state.factor_vector.size());
+	RowOperations::FinalizeStates(row_state, state.aggr_data_layout, state.aggr_data_addresses_v, output, 0);
 
 	return OperatorResultType::NEED_MORE_INPUT;
 }
