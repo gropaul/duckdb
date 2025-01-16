@@ -147,6 +147,8 @@ OperatorResultType PhysicalFactorizedPreAggregate::Execute(ExecutionContext &con
 	output.SetCardinality(input.size());
 	RowOperations::FinalizeStates(row_state, state.aggr_data_layout, state.aggr_data_addresses_v, output, 0);
 
+	RowOperations::InitializeStates(state.aggr_data_layout, state.aggr_data_addresses_v,
+								*FlatVector::IncrementalSelectionVector(), STANDARD_VECTOR_SIZE);
 	return OperatorResultType::NEED_MORE_INPUT;
 }
 
