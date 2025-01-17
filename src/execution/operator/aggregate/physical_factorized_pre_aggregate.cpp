@@ -10,14 +10,25 @@
 
 namespace duckdb {
 
-void FactorScanStructure::Initialize(Vector &pointers, const SelectionVector &sel, idx_t count) {
+void FactorScanStructure::Initialize(Vector &initial_pointers_v, idx_t count) {
 
-	pointers_v.Reference(pointers);
+	// transform pointers to uniform vector format and initialize the internal pointers as flat vector
+	UnifiedVectorFormat initial_pointers_v_uni;
+	initial_pointers_v.ToUnifiedFormat(count, initial_pointers_v_uni);
+	auto initial_pointers = UnifiedVectorFormat::GetData<data_ptr_t>(initial_pointers_v_uni);
+
+	auto pointers = FlatVector::GetData<data_ptr_t>(pointers_v);
+
+	for (idx_t idx = 0; idx < count; idx++) {
+		auto unified_idx = initial_pointers_v_uni.sel->get_index(idx);
+		pointers[idx] = initial_pointers[unified_idx];
+	}
+
 	this->count = count;
 
+	// reset the selection vector
 	for (idx_t i = 0; i < count; i++) {
-		auto idx = sel.get_index(i);
-		pointers_sel.set_index(i, idx);
+		pointers_sel.set_index(i, i);
 	}
 
 }
@@ -109,7 +120,7 @@ OperatorResultType PhysicalFactorizedPreAggregate::Execute(ExecutionContext &con
 
 	idx_t column_count = input.ColumnCount();
 	auto &pointers_v = input.data[column_count - 1];
-	scan_structure.Initialize(pointers_v,  *FlatVector::IncrementalSelectionVector(), input.size());
+	scan_structure.Initialize(pointers_v, input.size());
 
 	RowOperationsState row_state(*state.aggregate_allocator);
 
@@ -153,3 +164,4 @@ OperatorResultType PhysicalFactorizedPreAggregate::Execute(ExecutionContext &con
 }
 
 } // namespace duckdb
+

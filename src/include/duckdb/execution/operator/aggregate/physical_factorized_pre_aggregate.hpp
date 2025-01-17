@@ -1,3 +1,4 @@
+
 //===----------------------------------------------------------------------===//
 //                         DuckDB
 //
@@ -31,7 +32,7 @@ public:
 		pointer_offset = offsets[offsets.size() - 1];
 	}
 
-	void Initialize(Vector &pointers, const SelectionVector &sel, idx_t count);
+	void Initialize(Vector &initial_pointers_v, idx_t count);
 	void Next(DataChunk &result);
 	bool PointersExhausted() const;
 	void AdvancePointers();
@@ -46,8 +47,6 @@ public:
 
 private:
 	void AdvancePointers(const SelectionVector &sel, const idx_t sel_count);
-
-
 };
 
 class PhysicalFactorizedPreAggregateState : public OperatorState {
