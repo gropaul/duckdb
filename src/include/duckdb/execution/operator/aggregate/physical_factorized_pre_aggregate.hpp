@@ -13,6 +13,9 @@
 
 namespace duckdb {
 
+// uppermost bit is used to indicate if the pointer is a cache pointer
+constexpr hash_t CACHE_POINTER_MASK = 0x8000000000000000;
+
 class FactorScanStructure {
 
 	Vector pointers_v;
@@ -26,13 +29,14 @@ class FactorScanStructure {
 
 public:
 	explicit FactorScanStructure(TupleDataCollection *source_collection, vector<idx_t> fact_column_offsets)
-	    : pointers_v(LogicalType::POINTER), count(0), pointers_sel(STANDARD_VECTOR_SIZE), source_collection(source_collection), fact_column_offsets(std::move(fact_column_offsets)) {
+	    : pointers_v(LogicalType::POINTER), count(0), pointers_sel(STANDARD_VECTOR_SIZE),
+	      source_collection(source_collection), fact_column_offsets(std::move(fact_column_offsets)) {
 		// the pointer offset is the last offset
 		const auto offsets = source_collection->GetLayout().GetOffsets();
 		pointer_offset = offsets[offsets.size() - 1];
 	}
 
-	void Initialize(Vector &initial_pointers_v, idx_t count);
+	void Initialize(Vector &initial_pointers_v, SelectionVector &initial_pointers_sel, idx_t count);
 	void Next(DataChunk &result);
 	bool PointersExhausted() const;
 	void AdvancePointers();
@@ -43,6 +47,10 @@ public:
 
 	idx_t GetCount() const {
 		return count;
+	}
+
+	idx_t GetNextPointerOffset() const {
+		return pointer_offset;
 	}
 
 private:
@@ -56,7 +64,9 @@ public:
 	                                             const vector<LogicalType> &factor_types,
 	                                             const vector<idx_t> &fact_column_offsets,
 	                                             TupleDataCollection *source_collection)
-	    : factor_scan_structure(source_collection, fact_column_offsets), aggr_data_addresses_v(LogicalType::POINTER) {
+	    : factor_scan_structure(source_collection, fact_column_offsets), aggr_data_addresses_v(LogicalType::POINTER),
+	      row_locations_load_cache_v(LogicalType::POINTER), compute_aggregates_sel(STANDARD_VECTOR_SIZE),
+	      load_aggregates_sel(STANDARD_VECTOR_SIZE) {
 
 		/* Infrastructure for retrieving factorized vectors */
 
@@ -83,8 +93,6 @@ public:
 			aggr_data_addresses[i] = uintptr_t(aggr_data) + (aggr_row_width * i);
 		}
 
-		RowOperations::InitializeStates(aggr_data_layout, aggr_data_addresses_v,
-										*FlatVector::IncrementalSelectionVector(), STANDARD_VECTOR_SIZE);
 		aggregate_allocator = make_uniq<ArenaAllocator>(Allocator::Get(context.client));
 
 		/* Infrastructure for caching the aggregates */
@@ -98,12 +106,16 @@ public:
 		auto &buffer_manager = BufferManager::GetBufferManager(context.client);
 		TupleDataLayout aggregate_cache_layout;
 		aggregate_cache_layout.Initialize(aggregate_return_types);
+		aggregate_data.Initialize(context.client, aggregate_return_types);
+
 		aggregate_cache_collection = make_uniq<TupleDataCollection>(buffer_manager, aggregate_cache_layout);
+		aggregate_cache_collection->InitializeAppend(this->aggregate_cache_append_state);
 	}
 
 	FactorScanStructure factor_scan_structure;
 	DataChunk factor_data;
 
+	DataChunk aggregate_data;
 	TupleDataLayout aggr_data_layout;
 	data_ptr_t aggr_data;
 	unsafe_unique_array<data_t> aggr_owned_data;
@@ -113,8 +125,16 @@ public:
 	//! The aggregates to be computed
 	vector<AggregateObject> aggregate_objects;
 
+	// Infrastructure for caching the aggregates
+	Vector row_locations_load_cache_v;
 	unique_ptr<TupleDataCollection> aggregate_cache_collection;
+	TupleDataAppendState aggregate_cache_append_state;
 
+	//! Selection vectors for which aggregates we have to compute and which we can load from cache
+	SelectionVector compute_aggregates_sel;
+	idx_t compute_aggregates_count;
+	SelectionVector load_aggregates_sel;
+	idx_t load_aggregates_count;
 
 public:
 	void Finalize(const PhysicalOperator &op, ExecutionContext &context) override {
@@ -142,6 +162,5 @@ public:
 	bool ParallelOperator() const override {
 		return true;
 	}
-
 };
 } // namespace duckdb

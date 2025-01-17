@@ -7,10 +7,11 @@
 #include "duckdb/execution/operator/aggregate/physical_factorized_pre_aggregate.hpp"
 
 #include <duckdb/execution/operator/aggregate/ungrouped_aggregate_state.hpp>
+#include <sys/stat.h>
 
 namespace duckdb {
 
-void FactorScanStructure::Initialize(Vector &initial_pointers_v, idx_t count) {
+void FactorScanStructure::Initialize(Vector &initial_pointers_v, SelectionVector &initial_pointers_sel, idx_t count) {
 
 	// transform pointers to uniform vector format and initialize the internal pointers as flat vector
 	UnifiedVectorFormat initial_pointers_v_uni;
@@ -20,16 +21,15 @@ void FactorScanStructure::Initialize(Vector &initial_pointers_v, idx_t count) {
 	auto pointers = FlatVector::GetData<data_ptr_t>(pointers_v);
 
 	for (idx_t idx = 0; idx < count; idx++) {
-		auto unified_idx = initial_pointers_v_uni.sel->get_index(idx);
+		auto sel_idx = initial_pointers_sel.get_index(idx);
+		auto unified_idx = initial_pointers_v_uni.sel->get_index(sel_idx);
+
+		// todo: (open) maybe we need to use sel_idx here
 		pointers[idx] = initial_pointers[unified_idx];
+		pointers_sel.set_index(idx, idx);
 	}
 
 	this->count = count;
-
-	// reset the selection vector
-	for (idx_t i = 0; i < count; i++) {
-		pointers_sel.set_index(i, i);
-	}
 
 }
 
@@ -115,14 +115,43 @@ unique_ptr<OperatorState> PhysicalFactorizedPreAggregate::GetOperatorState(Execu
 OperatorResultType PhysicalFactorizedPreAggregate::Execute(ExecutionContext &context, DataChunk &input,
                                                            DataChunk &output, GlobalOperatorState &gstate,
                                                            OperatorState &state_p) const {
+
 	auto &state = state_p.Cast<PhysicalFactorizedPreAggregateState>();
 	auto &scan_structure = state.factor_scan_structure;
+	const auto &next_pointer_offset = state.factor_scan_structure.GetNextPointerOffset();
 
+	// check which factors aggregate we need to compute and which to load from cache
 	idx_t column_count = input.ColumnCount();
-	auto &pointers_v = input.data[column_count - 1];
-	scan_structure.Initialize(pointers_v, input.size());
+	idx_t row_count = input.size();
+	auto &row_locations_factors_v = input.data[column_count - 1];
 
-	RowOperationsState row_state(*state.aggregate_allocator);
+	// transform pointers to uniform vector format and initialize the internal pointers as flat vector
+	UnifiedVectorFormat row_locations_factors_unified;
+	row_locations_factors_v.ToUnifiedFormat(row_count, row_locations_factors_unified);
+	auto row_locations_factors = UnifiedVectorFormat::GetData<data_ptr_t>(row_locations_factors_unified);
+	auto row_locations_load_cache = FlatVector::GetData<data_ptr_t>(state.row_locations_load_cache_v);
+
+	state.compute_aggregates_count = 0;
+	state.load_aggregates_count = 0;
+	for (idx_t idx = 0; idx < row_count; idx++) {
+		auto unified_idx = row_locations_factors_unified.sel->get_index(idx);
+		uint64_t next_pointer = Load<uint64_t>(row_locations_factors[unified_idx] + next_pointer_offset);
+
+		bool is_aggregate_pointer = (next_pointer & CACHE_POINTER_MASK) == CACHE_POINTER_MASK;
+
+		if (is_aggregate_pointer) {
+			state.load_aggregates_sel.set_index(state.load_aggregates_count, idx);
+			row_locations_load_cache[state.load_aggregates_count] = cast_uint64_to_pointer(next_pointer & ~CACHE_POINTER_MASK);
+			state.load_aggregates_count += 1;
+		} else {
+			state.compute_aggregates_sel.set_index(state.compute_aggregates_count, idx);
+			state.compute_aggregates_count += 1;
+		}
+
+	}
+
+	// initialize the scan structure for factors we need to compute
+	scan_structure.Initialize(row_locations_factors_v,  state.compute_aggregates_sel, state.compute_aggregates_count);
 
 	// Copy the addresses
 	Vector aggregate_addresses_v(LogicalType::POINTER);
@@ -130,6 +159,12 @@ OperatorResultType PhysicalFactorizedPreAggregate::Execute(ExecutionContext &con
 	auto aggregate_addresses_initial = FlatVector::GetData<data_ptr_t>(state.aggr_data_addresses_v);
 	DataChunk &payload = state.factor_data;
 
+	// reset the aggregate states
+	RowOperations::InitializeStates(state.aggr_data_layout, state.aggr_data_addresses_v,
+							scan_structure.GetPointersSel(), scan_structure.GetCount());
+	RowOperationsState row_state(*state.aggregate_allocator);
+
+	// compute the aggregates that are not in the cache
 	do {
 
 		// get the next set of pointers
@@ -154,12 +189,47 @@ OperatorResultType PhysicalFactorizedPreAggregate::Execute(ExecutionContext &con
 
 	} while (!scan_structure.PointersExhausted());
 
-	// finalize the aggregates
-	output.SetCardinality(input.size());
-	RowOperations::FinalizeStates(row_state, state.aggr_data_layout, state.aggr_data_addresses_v, output, 0);
+	// todo: must be behind if we also have column bindings for the groups
+	const idx_t aggr_idx = 0;
 
-	RowOperations::InitializeStates(state.aggr_data_layout, state.aggr_data_addresses_v,
-								*FlatVector::IncrementalSelectionVector(), STANDARD_VECTOR_SIZE);
+	// finalize the aggregates (-> compute the final result)
+	state.aggregate_data.SetCardinality(state.compute_aggregates_count);
+	RowOperations::FinalizeStates(row_state, state.aggr_data_layout, state.aggr_data_addresses_v, state.aggregate_data, aggr_idx);
+
+	// save aggregates to cache
+	state.aggregate_cache_collection->Append(state.aggregate_cache_append_state, state.aggregate_data, state.compute_aggregates_sel, state.compute_aggregates_count);
+
+	// mark cache row pointers with mask and save the cache row pointers to the factor scan structure
+	auto &row_locations_cache_v = state.aggregate_cache_append_state.chunk_state.row_locations;
+	auto row_locations_cache = FlatVector::GetData<data_ptr_t>(row_locations_cache_v);
+
+	for (idx_t idx = 0; idx < state.compute_aggregates_count; idx++) {
+
+		idx_t sel_idx = state.compute_aggregates_sel.get_index(idx);
+		idx_t fact_pointer_unified_idx = row_locations_factors_unified.sel->get_index(sel_idx);
+		data_ptr_t fact_pointer = row_locations_factors[fact_pointer_unified_idx];
+
+		data_ptr_t cache_pointer = row_locations_cache[idx];
+		D_ASSERT(cache_pointer != nullptr);
+		uint64_t cache_pointer_marked = cast_pointer_to_uint64(cache_pointer) | CACHE_POINTER_MASK;
+
+		Store(cache_pointer_marked, fact_pointer + next_pointer_offset);
+	}
+
+	// copy the now freshly computed aggregates to the output
+
+	// gather the aggregates from the cache
+	vector<unique_ptr<Vector>> caches;
+	for (column_t col_idx = 0; col_idx < column_count; col_idx++) {
+		caches.push_back(nullptr);
+	}
+
+	output.SetCardinality(state.load_aggregates_count);
+	state.aggregate_cache_collection->Gather(state.row_locations_load_cache_v, *FlatVector::IncrementalSelectionVector(), state.load_aggregates_count, output, *FlatVector::IncrementalSelectionVector(), caches);
+
+	// increment the &state.compute_aggregates_sel by state.load_aggregates_count
+	output.Append(state.aggregate_data, false, nullptr, state.compute_aggregates_count);
+
 	return OperatorResultType::NEED_MORE_INPUT;
 }
 
