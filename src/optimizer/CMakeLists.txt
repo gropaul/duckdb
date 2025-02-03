@@ -20,6 +20,8 @@ add_library_unity(
   deliminator.cpp
   expression_heuristics.cpp
   expression_rewriter.cpp
+  factorization_optimizer.cpp
+  plan_rewriter.cpp
   filter_combiner.cpp
   filter_pullup.cpp
   filter_pushdown.cpp

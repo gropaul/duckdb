@@ -31,9 +31,9 @@ public:
 	PhysicalHashJoin(LogicalOperator &op, unique_ptr<PhysicalOperator> left, unique_ptr<PhysicalOperator> right,
 	                 vector<JoinCondition> cond, JoinType join_type, const vector<idx_t> &left_projection_map,
 	                 const vector<idx_t> &right_projection_map, vector<LogicalType> delim_types,
-	                 idx_t estimated_cardinality, unique_ptr<JoinFilterPushdownInfo> pushdown_info);
+	                 idx_t estimated_cardinality, unique_ptr<JoinFilterPushdownInfo> pushdown_info, bool emit_factor_pointers);
 	PhysicalHashJoin(LogicalOperator &op, unique_ptr<PhysicalOperator> left, unique_ptr<PhysicalOperator> right,
-	                 vector<JoinCondition> cond, JoinType join_type, idx_t estimated_cardinality);
+	                 vector<JoinCondition> cond, JoinType join_type, idx_t estimated_cardinality, bool emit_factor_pointers);
 
 	//! Initialize HT for this operator
 	unique_ptr<JoinHashTable> InitializeHashTable(ClientContext &context) const;
@@ -54,9 +54,13 @@ public:
 	//! Join Keys statistics (optional)
 	vector<unique_ptr<BaseStatistics>> join_stats;
 
+	//! Whether to emit factorized vectors in the form of pointers
+	bool emit_factor_pointers = false;
+
 public:
 	InsertionOrderPreservingMap<string> ParamsToString() const override;
 
+	TupleDataCollection *GetHTDataCollection(const idx_t emitter_id) const;
 public:
 	// Operator Interface
 	unique_ptr<OperatorState> GetOperatorState(ExecutionContext &context) const override;

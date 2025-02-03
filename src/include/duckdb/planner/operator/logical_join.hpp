@@ -35,6 +35,8 @@ public:
 	JoinType join_type;
 	//! Table index used to refer to the MARK column (in case of a MARK join)
 	idx_t mark_index {};
+	//! Whether to emit pointers to the chains which represent factorized d-representations instead of a flat expanded result
+	bool emit_factor_pointers = false;
 	//! The columns of the LHS that are output by the join
 	vector<idx_t> left_projection_map;
 	//! The columns of the RHS that are output by the join

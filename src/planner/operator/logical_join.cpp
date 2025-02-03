@@ -22,10 +22,14 @@ vector<ColumnBinding> LogicalJoin::GetColumnBindings() {
 		return left_bindings;
 	}
 	// for other join types we project both the LHS and the RHS
-	auto right_bindings = MapBindings(children[1]->GetColumnBindings(), right_projection_map);
+	vector<ColumnBinding> right_bindings = MapBindings(children[1]->GetColumnBindings(), right_projection_map);
+	if (emit_factor_pointers) {
+		right_bindings = {ColumnBinding(right_bindings[0].table_index, 0)};
+	}
 	if (join_type == JoinType::RIGHT_SEMI || join_type == JoinType::RIGHT_ANTI) {
 		return right_bindings;
 	}
+
 	left_bindings.insert(left_bindings.end(), right_bindings.begin(), right_bindings.end());
 	return left_bindings;
 }
@@ -42,10 +46,15 @@ void LogicalJoin::ResolveTypes() {
 		return;
 	}
 	// for any other join we project both sides
-	auto right_types = MapTypes(children[1]->types, right_projection_map);
-	if (join_type == JoinType::RIGHT_SEMI || join_type == JoinType::RIGHT_ANTI) {
-		types = right_types;
-		return;
+	vector<LogicalType> right_types;
+	if (emit_factor_pointers) {
+		right_types = {LogicalType::POINTER};
+	} else {
+		right_types = MapTypes(children[1]->types, right_projection_map);
+		if (join_type == JoinType::RIGHT_SEMI || join_type == JoinType::RIGHT_ANTI) {
+			types = right_types;
+			return;
+		}
 	}
 	types.insert(types.end(), right_types.begin(), right_types.end());
 }

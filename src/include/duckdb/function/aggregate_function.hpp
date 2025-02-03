@@ -277,6 +277,9 @@ public:
 	template <class STATE, class OP>
 	static void NullaryUpdate(Vector inputs[], AggregateInputData &aggr_input_data, idx_t input_count, data_ptr_t state,
 	                          idx_t count) {
+		if (input_count != 0) {
+			printf("input_count: %d\n", input_count);
+		}
 		D_ASSERT(input_count == 0);
 		AggregateExecutor::NullaryUpdate<STATE, OP>(state, aggr_input_data, count);
 	}

@@ -33,9 +33,9 @@ PhysicalHashJoin::PhysicalHashJoin(LogicalOperator &op, unique_ptr<PhysicalOpera
                                    unique_ptr<PhysicalOperator> right, vector<JoinCondition> cond, JoinType join_type,
                                    const vector<idx_t> &left_projection_map, const vector<idx_t> &right_projection_map,
                                    vector<LogicalType> delim_types, idx_t estimated_cardinality,
-                                   unique_ptr<JoinFilterPushdownInfo> pushdown_info_p)
+                                   unique_ptr<JoinFilterPushdownInfo> pushdown_info_p, bool emit_factor_pointers_p)
     : PhysicalComparisonJoin(op, PhysicalOperatorType::HASH_JOIN, std::move(cond), join_type, estimated_cardinality),
-      delim_types(std::move(delim_types)) {
+      delim_types(std::move(delim_types)), emit_factor_pointers(emit_factor_pointers_p) {
 
 	filter_pushdown = std::move(pushdown_info_p);
 
@@ -104,9 +104,9 @@ PhysicalHashJoin::PhysicalHashJoin(LogicalOperator &op, unique_ptr<PhysicalOpera
 
 PhysicalHashJoin::PhysicalHashJoin(LogicalOperator &op, unique_ptr<PhysicalOperator> left,
                                    unique_ptr<PhysicalOperator> right, vector<JoinCondition> cond, JoinType join_type,
-                                   idx_t estimated_cardinality)
+                                   idx_t estimated_cardinality, bool emit_factor_pointers)
     : PhysicalHashJoin(op, std::move(left), std::move(right), std::move(cond), join_type, {}, {}, {},
-                       estimated_cardinality, nullptr) {
+                       estimated_cardinality, nullptr, emit_factor_pointers) {
 }
 
 //===--------------------------------------------------------------------===//
@@ -252,7 +252,7 @@ public:
 
 unique_ptr<JoinHashTable> PhysicalHashJoin::InitializeHashTable(ClientContext &context) const {
 	auto result = make_uniq<JoinHashTable>(context, conditions, payload_columns.col_types, join_type,
-	                                       rhs_output_columns.col_idxs);
+	                                       rhs_output_columns.col_idxs, emit_factor_pointers);
 	if (!delim_types.empty() && join_type == JoinType::MARK) {
 		// correlated MARK join
 		if (delim_types.size() + 1 == conditions.size()) {
@@ -1383,6 +1383,19 @@ InsertionOrderPreservingMap<string> PhysicalHashJoin::ParamsToString() const {
 
 	SetEstimatedCardinality(result, estimated_cardinality);
 	return result;
+}
+TupleDataCollection *PhysicalHashJoin::GetHTDataCollection(const idx_t emitter_id) const {
+
+	// if (!this->produce_fact_vectors) {
+	// 	return nullptr;
+	// }
+	//
+	// if (emitter_id != this->producer_id) {
+	// 	return nullptr;
+	// }
+
+	auto &sink = sink_state->Cast<HashJoinGlobalSinkState>();
+	return &sink.hash_table->GetDataCollection();
 }
 
 } // namespace duckdb
