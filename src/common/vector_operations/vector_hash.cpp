@@ -29,11 +29,25 @@ static inline hash_t CombineHashScalar(hash_t a, hash_t b) {
 template <bool HAS_RSEL, class T>
 static inline void TightLoopHash(const T *__restrict ldata, hash_t *__restrict result_data, const SelectionVector *rsel,
                                  idx_t count, const SelectionVector *__restrict sel_vector, ValidityMask &mask) {
+
+	SelectionVector test(STANDARD_VECTOR_SIZE);
+
 	if (!mask.AllValid()) {
+
+		uint16_t invalid_count = 0;
+
 		for (idx_t i = 0; i < count; i++) {
 			auto ridx = HAS_RSEL ? rsel->get_index(i) : i;
 			auto idx = sel_vector->get_index(ridx);
-			result_data[ridx] = HashOp::Operation(ldata[idx], !mask.RowIsValid(idx));
+			result_data[ridx] = duckdb::Hash<T>(ldata[idx]);
+
+			test.set_index(invalid_count, ridx);
+			invalid_count += !mask.RowIsValid(idx);
+		}
+
+		for (uint16_t i = 0; i < invalid_count; i++) {
+			auto ridx = test.get_index(i);
+			result_data[ridx] = HashOp::NULL_HASH;
 		}
 	} else {
 		for (idx_t i = 0; i < count; i++) {
@@ -57,6 +71,8 @@ static inline void TemplatedLoopHash(Vector &input, Vector &result, const Select
 
 		UnifiedVectorFormat idata;
 		input.ToUnifiedFormat(count, idata);
+		//
+		// auto dict_size = DictionaryVector::DictionarySize(input);
 
 		TightLoopHash<HAS_RSEL, T>(UnifiedVectorFormat::GetData<T>(idata), FlatVector::GetData<hash_t>(result), rsel,
 		                           count, idata.sel, idata.validity);
