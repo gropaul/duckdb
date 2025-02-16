@@ -27,6 +27,11 @@ class ColumnDataCollection;
 struct ColumnDataAppendState;
 struct ClientConfig;
 
+struct PartitionRange {
+	idx_t chunk_idx_from;
+	idx_t chunk_idx_to;
+};
+
 struct JoinHTScanState {
 public:
 	JoinHTScanState(TupleDataCollection &collection, idx_t chunk_idx_from, idx_t chunk_idx_to,
@@ -183,6 +188,7 @@ public:
 	//! Finalize must be called before any call to Probe, and after Finalize is called Build should no longer be
 	//! ever called.
 	void Finalize(idx_t chunk_idx_from, idx_t chunk_idx_to, bool parallel);
+	void FinalizePartitioned(vector<PartitionRange> partition_ranges, idx_t threads_idx);
 	//! Probe the HT with the given input chunk, resulting in the given result
 	void Probe(ScanStructure &scan_structure, DataChunk &keys, TupleDataChunkState &key_state, ProbeState &probe_state,
 	           optional_ptr<Vector> precomputed_hashes = nullptr);
@@ -193,7 +199,11 @@ public:
 	static idx_t FillWithHTOffsets(JoinHTScanState &state, Vector &addresses);
 
 	idx_t Count() const {
-		return data_collection->Count();
+		if (populate_hash_map_partitioned) {
+			return sink_collection->Count();
+		} else {
+			return data_collection->Count();
+		}
 	}
 	idx_t SizeInBytes() const {
 		return data_collection->SizeInBytes();
@@ -263,8 +273,13 @@ public:
 	bool finalized;
 	//! Whether or not any of the key elements contain NULL
 	bool has_null;
+	//! Whether we will populate the hash_map array partitioned or not
+	bool populate_hash_map_partitioned = false;
+	//! The locks for each partition indicating whether a thread is currently building the partition
+	vector<unique_ptr<mutex>> partition_locks;
 	//! Bitmask for getting relevant bits from the hashes to determine the position
 	uint64_t bitmask = DConstants::INVALID_INDEX;
+	uint64_t partition_bitmask = DConstants::INVALID_INDEX;
 	//! Whether or not we error on multiple rows found per match in a SINGLE join
 	bool single_join_error_on_multiple_rows = true;
 
@@ -301,7 +316,7 @@ private:
 private:
 	//! Insert the given set of locations into the HT with the given set of hashes_v
 	void InsertHashes(Vector &hashes_v, idx_t count, TupleDataChunkState &chunk_state, InsertState &insert_statebool,
-	                  bool parallel);
+	                  bool parallel, const idx_t partition_offset);
 	//! Prepares keys by filtering NULLs
 	idx_t PrepareKeys(DataChunk &keys, vector<TupleDataVectorFormat> &vector_data, const SelectionVector *&current_sel,
 	                  SelectionVector &sel, bool build_side);
