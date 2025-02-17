@@ -422,12 +422,25 @@ class HashJoinFinalizeTask : public ExecutorTask {
 public:
 	HashJoinFinalizeTask(shared_ptr<Event> event_p, ClientContext &context, HashJoinGlobalSinkState &sink_p,
 	                     idx_t chunk_idx_from_p, idx_t chunk_idx_to_p, bool parallel_p, const PhysicalOperator &op_p)
+	    : HashJoinFinalizeTask(std::move(event_p), context, sink_p, chunk_idx_from_p, chunk_idx_to_p, parallel_p, false,
+	                           0, {}, op_p) {
+	}
+
+	HashJoinFinalizeTask(shared_ptr<Event> event_p, ClientContext &context, HashJoinGlobalSinkState &sink_p,
+	                     idx_t chunk_idx_from_p, idx_t chunk_idx_to_p, bool parallel_p,
+	                     const bool populate_partitioned_p, const idx_t thread_idx_p,
+	                     const vector<PartitionRange> &partition_ranges_p, const PhysicalOperator &op_p)
 	    : ExecutorTask(context, std::move(event_p), op_p), sink(sink_p), chunk_idx_from(chunk_idx_from_p),
-	      chunk_idx_to(chunk_idx_to_p), parallel(parallel_p) {
+	      chunk_idx_to(chunk_idx_to_p), parallel(parallel_p), populate_partitioned(populate_partitioned_p),
+	      partition_ranges(partition_ranges_p), thread_idx(thread_idx_p) {
 	}
 
 	TaskExecutionResult ExecuteTask(TaskExecutionMode mode) override {
-		sink.hash_table->Finalize(chunk_idx_from, chunk_idx_to, parallel);
+		if (populate_partitioned) {
+			sink.hash_table->FinalizePartitioned(partition_ranges, thread_idx);
+		} else {
+			sink.hash_table->Finalize(chunk_idx_from, chunk_idx_to, parallel);
+		}
 		event->FinishTask();
 		return TaskExecutionResult::TASK_FINISHED;
 	}
@@ -437,6 +450,11 @@ private:
 	idx_t chunk_idx_from;
 	idx_t chunk_idx_to;
 	bool parallel;
+
+	bool populate_partitioned;
+	vector<PartitionRange> partition_ranges;
+
+	idx_t thread_idx;
 };
 
 class HashJoinFinalizeEvent : public BasePipelineEvent {
@@ -463,18 +481,59 @@ public:
 		    sink.max_partition_size + JoinHashTable::PointerTableSize(sink.max_partition_count);
 		const auto skew = static_cast<double>(max_partition_ht_size) / static_cast<double>(sink.total_size);
 
-		if (num_threads == 1 || (ht.Count() < PARALLEL_CONSTRUCT_THRESHOLD && skew > SKEW_SINGLE_THREADED_THRESHOLD &&
+		if (num_threads == -1 || (ht.Count() < PARALLEL_CONSTRUCT_THRESHOLD && skew > SKEW_SINGLE_THREADED_THRESHOLD &&
 		                         !context.config.verify_parallelism)) {
 			// Single-threaded finalize
 			finalize_tasks.push_back(
 			    make_uniq<HashJoinFinalizeTask>(shared_from_this(), context, sink, 0U, chunk_count, false, sink.op));
 		} else {
 			// Parallel finalize
-			const idx_t chunks_per_task = context.config.verify_parallelism ? 1 : CHUNKS_PER_TASK;
-			for (idx_t chunk_idx = 0; chunk_idx < chunk_count; chunk_idx += chunks_per_task) {
-				auto chunk_idx_to = MinValue<idx_t>(chunk_idx + chunks_per_task, chunk_count);
-				finalize_tasks.push_back(make_uniq<HashJoinFinalizeTask>(shared_from_this(), context, sink, chunk_idx,
-				                                                         chunk_idx_to, true, sink.op));
+			auto build_partitioned = ht.populate_hash_map_partitioned;
+			if (!build_partitioned) {
+				const idx_t chunks_per_task = context.config.verify_parallelism ? 1 : CHUNKS_PER_TASK;
+				for (idx_t chunk_idx = 0; chunk_idx < chunk_count; chunk_idx += chunks_per_task) {
+					auto chunk_idx_to = MinValue<idx_t>(chunk_idx + chunks_per_task, chunk_count);
+					finalize_tasks.push_back(make_uniq<HashJoinFinalizeTask>(shared_from_this(), context, sink,
+					                                                         chunk_idx, chunk_idx_to, true, sink.op));
+				}
+			} else {
+
+				auto num_threads = sink.num_threads;
+
+				auto &sink_collection = ht.GetSinkCollection();
+				auto &partitions = sink_collection.GetPartitions();
+				const uint64_t num_partitions = sink_collection.PartitionCount();
+				vector<idx_t> partition_chunk_count(num_partitions, 0);
+				vector<idx_t> partition_chunks_per_thread(num_partitions, 0);
+
+				for (idx_t partition_idx = 0; partition_idx < num_partitions; partition_idx++) {
+					const auto &partition = partitions[partition_idx];
+					const uint64_t partition_count = partition->ChunkCount();
+					partition_chunk_count[partition_idx] = partition_count;
+					partition_chunks_per_thread[partition_idx] =
+					    partition_count / num_threads; // this will result in a floor
+				}
+
+				for (idx_t thread_idx = 0; thread_idx < num_threads; thread_idx++) {
+
+					vector<PartitionRange> thread_partition_ranges(num_partitions);
+					for (idx_t partition_idx = 0; partition_idx < num_partitions; partition_idx++) {
+						const idx_t &chunks_pre_thread = partition_chunks_per_thread[partition_idx];
+						const idx_t chunk_idx_from = thread_idx * chunks_pre_thread;
+						idx_t chunk_idx_to = (thread_idx + 1) * chunks_pre_thread;
+
+						// if this is the last thread, just take the rest of the partition
+						if (thread_idx == num_threads - 1) {
+							chunk_idx_to = partition_chunk_count[partition_idx];
+						}
+
+						thread_partition_ranges[partition_idx] = {chunk_idx_from, chunk_idx_to};
+					}
+
+					finalize_tasks.push_back(make_uniq<HashJoinFinalizeTask>(shared_from_this(), context, sink, 0,
+					                                                         chunk_count, true, true, thread_idx,
+					                                                         thread_partition_ranges, sink.op));
+				}
 			}
 		}
 		SetTasks(std::move(finalize_tasks));
@@ -745,7 +804,15 @@ SinkFinalizeType PhysicalHashJoin::Finalize(Pipeline &pipeline, Event &event, Cl
 		ht.Merge(*local_ht);
 	}
 	sink.local_hash_tables.clear();
-	ht.Unpartition();
+	ht.populate_hash_map_partitioned = true;
+
+	// initialize the partition locks which is a vector of atomic<bool> that is used to lock partitions
+	uint64_t partitions_count = ht.GetSinkCollection().PartitionCount();
+	ht.partition_locks.resize(partitions_count);
+	for (int i = 0; i < partitions_count; i++) {
+		ht.partition_locks[i] = make_uniq<std::mutex>();
+	}
+
 
 	Value min;
 	Value max;
