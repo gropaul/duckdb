@@ -70,13 +70,13 @@ public:
 		value &= cast_pointer_to_uint64(pointer) | SALT_MASK;
 	}
 
-	// Returns the salt, leaves upper salt bits intact, sets lower bits to all 1's
+	// Returns the salt, leaves upper salt bits intact, sets lower bits to all 0's
 	static inline hash_t ExtractSalt(const hash_t &hash) {
-		return hash | POINTER_MASK;
+		return hash << 48;
 	}
 
 	inline hash_t GetSalt() const {
-		return ExtractSalt(value);
+		return value & SALT_MASK;
 	}
 
 	inline void SetSalt(const hash_t &salt) {
