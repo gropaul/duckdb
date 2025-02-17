@@ -728,78 +728,40 @@ void JoinHashTable::Finalize(idx_t chunk_idx_from, idx_t chunk_idx_to, bool para
 	} while (iterator.Next());
 }
 
-void JoinHashTable::FinalizePartitioned(vector<PartitionRange> partition_ranges, idx_t threads_idx) {
+void JoinHashTable::FinalizePartitioned(idx_t partition_idx) {
 	// Pointer table should be allocated
 	D_ASSERT(hash_map.get());
 
 	const auto n_partitions = sink_collection->PartitionCount();
 	auto &partitions = sink_collection->GetPartitions();
+	auto &partition = partitions[partition_idx];
 
 	const auto partitions_size = capacity / n_partitions;
 	partition_bitmask = partitions_size - 1;
-
-	vector<uint64_t> remaining_partitions(n_partitions);
-	for (idx_t i = 0; i < n_partitions; i++) {
-		remaining_partitions[i] = i;
-	}
-	// we guarantee that max(threads_idx) < n_partitions
-	D_ASSERT(threads_idx < n_partitions);
-	// therefore, we can start with partition at index threads_idx
-	idx_t current_partition_idx = threads_idx;
-	partition_locks[current_partition_idx]->lock();
+	D_ASSERT(partition_idx < n_partitions);
 
 	Vector hashes(LogicalType::HASH);
 	auto hash_data = FlatVector::GetData<hash_t>(hashes);
 
-	while (!remaining_partitions.empty()) {
+	constexpr auto chunk_idx_from = 0;
+	const auto chunk_idx_to = partition->ChunkCount();
 
-		const auto &range = partition_ranges[current_partition_idx];
-		const auto chunk_idx_from = range.chunk_idx_from;
-		const auto chunk_idx_to = range.chunk_idx_to;
-		const auto &partition = partitions[current_partition_idx];
+	const auto partition_offset = partitions_size * partition_idx;
+	TupleDataChunkIterator iterator(*partition, TupleDataPinProperties::KEEP_EVERYTHING_PINNED, chunk_idx_from,
+									chunk_idx_to, false);
 
-		const auto partition_offset = partitions_size * current_partition_idx;
-		TupleDataChunkIterator iterator(*partition, TupleDataPinProperties::KEEP_EVERYTHING_PINNED, chunk_idx_from,
-										chunk_idx_to, false);
-		const auto row_locations = iterator.GetRowLocations();
+	const auto row_locations = iterator.GetRowLocations();
 
-		InsertState insert_state(*this);
-		do {
-			const auto count = iterator.GetCurrentChunkCount();
-			for (idx_t i = 0; i < count; i++) {
-				hash_data[i] = Load<hash_t>(row_locations[i] + pointer_offset);
-			}
-			TupleDataChunkState &chunk_state = iterator.GetChunkState();
-
-			InsertHashes(hashes, count, chunk_state, insert_state, false, partition_offset);
-		} while (iterator.Next());
-
-		// unlock the partition
-		partition_locks[current_partition_idx]->unlock();
-
-		remaining_partitions.erase(std::remove(remaining_partitions.begin(), remaining_partitions.end(), current_partition_idx),
-		                           remaining_partitions.end());
-
-		if (remaining_partitions.empty()) {
-			break;
+	InsertState insert_state(*this);
+	do {
+		const auto count = iterator.GetCurrentChunkCount();
+		for (idx_t i = 0; i < count; i++) {
+			hash_data[i] = Load<hash_t>(row_locations[i] + pointer_offset);
 		}
+		TupleDataChunkState &chunk_state = iterator.GetChunkState();
 
-		// look for the next partition to process which is not locked
-		bool found = false;
-		do {
-			for (const auto remaining_partition : remaining_partitions) {
-				if (partition_locks[remaining_partition]->try_lock()) {
-					current_partition_idx = remaining_partition;
-					found = true;
-					break;
-				}
-			}
-			if (!found) {
-				// printf("Thread %d could not find a partition to process\n", threads_idx);
-			}
-
-		} while (!found);
-	}
+		InsertHashes(hashes, count, chunk_state, insert_state, false, partition_offset);
+	} while (iterator.Next());
 }
 
 void JoinHashTable::InitializeScanStructure(ScanStructure &scan_structure, DataChunk &keys,

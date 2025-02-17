@@ -190,7 +190,7 @@ public:
 	//! Finalize must be called before any call to Probe, and after Finalize is called Build should no longer be
 	//! ever called.
 	void Finalize(idx_t chunk_idx_from, idx_t chunk_idx_to, bool parallel);
-	void FinalizePartitioned(vector<PartitionRange> partition_ranges, idx_t threads_idx);
+	void FinalizePartitioned(idx_t threads_idx);
 	//! Probe the HT with the given input chunk, resulting in the given result
 	void Probe(ScanStructure &scan_structure, DataChunk &keys, TupleDataChunkState &key_state, ProbeState &probe_state,
 	           optional_ptr<Vector> precomputed_hashes = nullptr);
@@ -277,8 +277,6 @@ public:
 	bool has_null;
 	//! Whether we will populate the hash_map array partitioned or not
 	bool populate_hash_map_partitioned = false;
-	//! The locks for each partition indicating whether a thread is currently building the partition
-	vector<unique_ptr<mutex>> partition_locks;
 	//! Bitmask for getting relevant bits from the hashes to determine the position
 	uint64_t bitmask = DConstants::INVALID_INDEX;
 	uint64_t partition_bitmask = DConstants::INVALID_INDEX;
