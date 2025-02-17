@@ -13,6 +13,15 @@ using ScanStructure = JoinHashTable::ScanStructure;
 using ProbeSpill = JoinHashTable::ProbeSpill;
 using ProbeSpillLocalState = JoinHashTable::ProbeSpillLocalAppendState;
 
+
+static uint64_t GetOffset(const uint64_t hash, const uint64_t offset_shift) {
+	// if offset shift is 64, return 0
+	// offset shift may never be larger or equal to 64
+	D_ASSERT(offset_shift < sizeof(uint64_t) * 8);
+	return hash >> offset_shift;
+}
+
+
 JoinHashTable::SharedState::SharedState()
     : rhs_row_locations(LogicalType::POINTER), salt_v(LogicalType::UBIGINT), salt_match_sel(STANDARD_VECTOR_SIZE),
       key_no_match_sel(STANDARD_VECTOR_SIZE) {
@@ -134,7 +143,7 @@ void JoinHashTable::Merge(JoinHashTable &other) {
 	sink_collection->Combine(*other.sink_collection);
 }
 
-static void ApplyBitmaskAndGetSaltBuild(Vector &hashes_v, Vector &salt_v, const idx_t &count, const idx_t &bitmask, const idx_t partition_offset) {
+static void ApplyBitmaskAndGetSaltBuild(Vector &hashes_v, Vector &salt_v, const idx_t &count, const idx_t &offset_shift) {
 	if (hashes_v.GetVectorType() == VectorType::CONSTANT_VECTOR) {
 		auto &hash = *ConstantVector::GetData<hash_t>(hashes_v);
 		salt_v.SetVectorType(VectorType::CONSTANT_VECTOR);
@@ -142,7 +151,7 @@ static void ApplyBitmaskAndGetSaltBuild(Vector &hashes_v, Vector &salt_v, const 
 		*ConstantVector::GetData<hash_t>(salt_v) = ht_entry_t::ExtractSalt(hash);
 		salt_v.Flatten(count);
 
-		hash = (hash & bitmask) + partition_offset;
+		hash = GetOffset(hash, offset_shift);
 		hashes_v.Flatten(count);
 	} else {
 		hashes_v.Flatten(count);
@@ -150,7 +159,7 @@ static void ApplyBitmaskAndGetSaltBuild(Vector &hashes_v, Vector &salt_v, const 
 		auto hashes = FlatVector::GetData<hash_t>(hashes_v);
 		for (idx_t i = 0; i < count; i++) {
 			salts[i] = ht_entry_t::ExtractSalt(hashes[i]);
-			hashes[i] = (hashes[i] & bitmask) + partition_offset;
+			hashes[i] = GetOffset(hashes[i], offset_shift);
 		}
 	}
 }
@@ -177,7 +186,7 @@ static inline void GetRowPointersInternal(DataChunk &keys, TupleDataChunkState &
 	for (idx_t i = 0; i < count; i++) {
 		const auto row_index = sel.get_index(i);
 		auto uvf_index = hashes_v_unified.sel->get_index(row_index);
-		auto ht_offset = hashes[uvf_index] & ht.bitmask;
+		auto ht_offset = GetOffset(hashes[uvf_index], ht.offset_shift);
 		ht_offsets_dense[i] = ht_offset;
 		ht_offsets[row_index] = ht_offset;
 	}
@@ -215,6 +224,8 @@ static inline void GetRowPointersInternal(DataChunk &keys, TupleDataChunkState &
 	idx_t &match_count = count;
 	match_count = 0;
 
+	uint64_t capacity_mask = ht.capacity - 1;
+
 	while (remaining_count > 0) {
 		idx_t salt_match_count = 0;
 		idx_t key_no_match_count = 0;
@@ -243,7 +254,7 @@ static inline void GetRowPointersInternal(DataChunk &keys, TupleDataChunkState &
 						break;
 					}
 
-					IncrementAndWrap(ht_offset, ht.bitmask);
+					IncrementAndWrap(ht_offset, capacity_mask);
 				}
 			} else {
 				entry = entries[ht_offset];
@@ -282,7 +293,7 @@ static inline void GetRowPointersInternal(DataChunk &keys, TupleDataChunkState &
 				const auto row_index = state.key_no_match_sel.get_index(i);
 				auto &ht_offset = ht_offsets[row_index];
 
-				IncrementAndWrap(ht_offset, ht.bitmask);
+				IncrementAndWrap(ht_offset, capacity_mask);
 			}
 		}
 
@@ -552,9 +563,9 @@ static inline void InsertMatchesAndIncrementMisses(ht_entry_t entries[], JoinHas
 template <bool PARALLEL>
 static void InsertHashesLoop(ht_entry_t entries[], Vector &row_locations, Vector &hashes_v, const idx_t &count,
                              JoinHashTable::InsertState &state, const TupleDataCollection &data_collection,
-                             JoinHashTable &ht, const idx_t partition_offset) {
+                             JoinHashTable &ht, const idx_t offset_shift) {
 	D_ASSERT(hashes_v.GetType().id() == LogicalType::HASH);
-	ApplyBitmaskAndGetSaltBuild(hashes_v, state.salt_v, count, ht.partition_bitmask, partition_offset);
+	ApplyBitmaskAndGetSaltBuild(hashes_v, state.salt_v, count, offset_shift);
 
 	// the salts offset for each row to insert
 	const auto ht_offsets = FlatVector::GetData<idx_t>(hashes_v);
@@ -593,8 +604,7 @@ static void InsertHashesLoop(ht_entry_t entries[], Vector &row_locations, Vector
 		}
 	}
 
-	// use the ht bitmask to make the modulo operation faster but keep the salt bits intact
-	idx_t capacity_mask = ht.bitmask | ht_entry_t::SALT_MASK;
+	uint64_t capacity_mask = ht.capacity - 1;
 	while (remaining_count > 0) {
 		idx_t salt_match_count = 0;
 
@@ -666,12 +676,12 @@ static void InsertHashesLoop(ht_entry_t entries[], Vector &row_locations, Vector
 }
 
 void JoinHashTable::InsertHashes(Vector &hashes_v, const idx_t count, TupleDataChunkState &chunk_state,
-                                 InsertState &insert_state, bool parallel, const idx_t partition_offset) {
+                                 InsertState &insert_state, bool parallel) {
 	auto row_locations = chunk_state.row_locations;
 	if (parallel) {
-		InsertHashesLoop<true>(entries, row_locations, hashes_v, count, insert_state, *data_collection, *this, partition_offset);
+		InsertHashesLoop<true>(entries, row_locations, hashes_v, count, insert_state, *data_collection, *this, offset_shift);
 	} else {
-		InsertHashesLoop<false>(entries, row_locations, hashes_v, count, insert_state, *data_collection, *this, partition_offset);
+		InsertHashesLoop<false>(entries, row_locations, hashes_v, count, insert_state, *data_collection, *this, offset_shift);
 	}
 }
 
@@ -697,7 +707,12 @@ void JoinHashTable::AllocatePointerTable() {
 	}
 	D_ASSERT(hash_map.GetSize() == capacity * sizeof(ht_entry_t));
 
-	bitmask = capacity - 1;
+	uint64_t exponent = 0;
+
+	while ((capacity >> exponent) > 1) {
+		exponent++;
+	}
+	offset_shift = sizeof(uint64_t) * 8 - exponent;
 }
 
 void JoinHashTable::InitializePointerTable(idx_t entry_idx_from, idx_t entry_idx_to) {
@@ -724,7 +739,7 @@ void JoinHashTable::Finalize(idx_t chunk_idx_from, idx_t chunk_idx_to, bool para
 		}
 		TupleDataChunkState &chunk_state = iterator.GetChunkState();
 
-		InsertHashes(hashes, count, chunk_state, insert_state, parallel, 0);
+		InsertHashes(hashes, count, chunk_state, insert_state, parallel);
 	} while (iterator.Next());
 }
 
@@ -736,17 +751,19 @@ void JoinHashTable::FinalizePartitioned(idx_t partition_idx) {
 	auto &partitions = sink_collection->GetPartitions();
 	auto &partition = partitions[partition_idx];
 
-	const auto partitions_size = capacity / n_partitions;
-	partition_bitmask = partitions_size - 1;
 	D_ASSERT(partition_idx < n_partitions);
 
 	Vector hashes(LogicalType::HASH);
 	auto hash_data = FlatVector::GetData<hash_t>(hashes);
 
+	if (partition->ChunkCount() == 0) {
+		return;
+	}
+
 	constexpr auto chunk_idx_from = 0;
 	const auto chunk_idx_to = partition->ChunkCount();
 
-	const auto partition_offset = partitions_size * partition_idx;
+
 	TupleDataChunkIterator iterator(*partition, TupleDataPinProperties::KEEP_EVERYTHING_PINNED, chunk_idx_from,
 									chunk_idx_to, false);
 
@@ -760,7 +777,7 @@ void JoinHashTable::FinalizePartitioned(idx_t partition_idx) {
 		}
 		TupleDataChunkState &chunk_state = iterator.GetChunkState();
 
-		InsertHashes(hashes, count, chunk_state, insert_state, false, partition_offset);
+		InsertHashes(hashes, count, chunk_state, insert_state, false);
 	} while (iterator.Next());
 }
 

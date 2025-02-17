@@ -215,6 +215,18 @@ public:
 		return *sink_collection;
 	}
 
+	uint64_t GetChunkCount() const {
+		if (populate_hash_map_partitioned) {
+			uint64_t count = 0;
+			for (auto &partition : sink_collection->GetPartitions()) {
+				count += partition->ChunkCount();
+			}
+			return count;
+		} else {
+			return data_collection->ChunkCount();
+		}
+	}
+
 	TupleDataCollection &GetDataCollection() {
 		return *data_collection;
 	}
@@ -278,8 +290,7 @@ public:
 	//! Whether we will populate the hash_map array partitioned or not
 	bool populate_hash_map_partitioned = false;
 	//! Bitmask for getting relevant bits from the hashes to determine the position
-	uint64_t bitmask = DConstants::INVALID_INDEX;
-	uint64_t partition_bitmask = DConstants::INVALID_INDEX;
+	uint64_t offset_shift = DConstants::INVALID_INDEX;
 	//! Whether or not we error on multiple rows found per match in a SINGLE join
 	bool single_join_error_on_multiple_rows = true;
 
@@ -316,7 +327,7 @@ private:
 private:
 	//! Insert the given set of locations into the HT with the given set of hashes_v
 	void InsertHashes(Vector &hashes_v, idx_t count, TupleDataChunkState &chunk_state, InsertState &insert_statebool,
-	                  bool parallel, const idx_t partition_offset);
+	                  bool parallel);
 	//! Prepares keys by filtering NULLs
 	idx_t PrepareKeys(DataChunk &keys, vector<TupleDataVectorFormat> &vector_data, const SelectionVector *&current_sel,
 	                  SelectionVector &sel, bool build_side);
