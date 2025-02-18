@@ -505,7 +505,6 @@ private:
 	bool parallel;
 
 	bool populate_partitioned;
-
 	idx_t partition_idx;
 };
 
@@ -523,7 +522,7 @@ public:
 
 		vector<shared_ptr<Task>> finalize_tasks;
 		auto &ht = *sink.hash_table;
-		const auto chunk_count = ht.GetDataCollection().ChunkCount();
+		const auto chunk_count = ht.GetChunkCount();
 		const auto num_threads = NumericCast<idx_t>(sink.num_threads);
 
 		// If the data is very skewed (many of the exact same key), our finalize will become slow,
@@ -533,7 +532,7 @@ public:
 		    sink.max_partition_size + JoinHashTable::PointerTableSize(sink.max_partition_count);
 		const auto skew = static_cast<double>(max_partition_ht_size) / static_cast<double>(sink.total_size);
 
-		if (num_threads == 1 || ((ht.Count() < PARALLEL_CONSTRUCT_THRESHOLD || skew > SKEW_SINGLE_THREADED_THRESHOLD) &&
+		if (num_threads == -1 && ((ht.Count() < PARALLEL_CONSTRUCT_THRESHOLD || skew > SKEW_SINGLE_THREADED_THRESHOLD) &&
 		                         !context.config.verify_parallelism)) {
 			// Single-threaded finalize
 			finalize_tasks.push_back(
@@ -698,6 +697,8 @@ void JoinFilterPushdownInfo::PushInFilter(const JoinFilterPushdownFilter &info, 
 	// generate a "OR" filter (i.e. x=1 OR x=535 OR x=997)
 	// first scan the entire vector at the probe side
 	// FIXME: this code is duplicated from PerfectHashJoinExecutor::FullScanHashTable
+	return;
+	// todo: enable this code, but GetDataCollection is problematic in partitioned hash join
 	auto build_idx = join_condition[filter_idx];
 	auto &data_collection = ht.GetDataCollection();
 
@@ -1168,14 +1169,14 @@ void HashJoinGlobalSourceState::PrepareBuild(HashJoinGlobalSinkState &sink) {
 		return;
 	}
 
-	auto &data_collection = ht.GetDataCollection();
-	if (data_collection.Count() == 0 && op.EmptyResultIfRHSIsEmpty()) {
+	auto count = ht.Count();
+	if (count == 0 && op.EmptyResultIfRHSIsEmpty()) {
 		PrepareBuild(sink);
 		return;
 	}
 
 	build_chunk_idx = 0;
-	build_chunk_count = data_collection.ChunkCount();
+	build_chunk_count = ht.GetChunkCount();
 	build_chunk_done = 0;
 
 	if (sink.context.config.verify_parallelism) {
@@ -1217,9 +1218,8 @@ void HashJoinGlobalSourceState::PrepareScanHT(HashJoinGlobalSinkState &sink) {
 	D_ASSERT(global_stage != HashJoinSourceStage::SCAN_HT);
 	auto &ht = *sink.hash_table;
 
-	auto &data_collection = ht.GetDataCollection();
 	full_outer_chunk_idx = 0;
-	full_outer_chunk_count = data_collection.ChunkCount();
+	full_outer_chunk_count = ht.GetChunkCount();
 	full_outer_chunk_done = 0;
 
 	full_outer_chunks_per_thread =

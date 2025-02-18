@@ -14,13 +14,15 @@ public:
 	//! Bitmask of the upper bits starting at the 5th byte
 	static constexpr idx_t NUM_PARTITIONS = RadixPartitioning::NumberOfPartitions(radix_bits);
 	static constexpr idx_t SHIFT = RadixPartitioning::Shift(radix_bits);
-	static constexpr hash_t MASK = RadixPartitioning::Mask(radix_bits);
 
 public:
 	//! Apply bitmask and right shift to get a number between 0 and NUM_PARTITIONS
 	static hash_t ApplyMask(const hash_t hash) {
-		D_ASSERT((hash & MASK) >> SHIFT < NUM_PARTITIONS);
-		return (hash & MASK) >> SHIFT;
+		if (radix_bits == 0) {
+			return 0;
+		}
+		D_ASSERT(hash >> SHIFT < NUM_PARTITIONS);
+		return hash >> SHIFT;
 	}
 };
 

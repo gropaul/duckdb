@@ -43,7 +43,9 @@ public:
 	}
 
 	ht_entry_t(const hash_t &salt, const data_ptr_t &pointer)
-	    : value(cast_pointer_to_uint64(pointer) | (salt & SALT_MASK)) {
+	    : value(cast_pointer_to_uint64(pointer) | (salt & SALT_MASK)) { // todo: we can remove the & SALT_MASK
+		D_ASSERT((cast_pointer_to_uint64(pointer) & SALT_MASK) == 0);
+		// D_ASSERT((salt & POINTER_MASK) == 0); // then we need this dassert
 	}
 
 	inline bool IsOccupied() const {
@@ -70,13 +72,13 @@ public:
 		value &= cast_pointer_to_uint64(pointer) | SALT_MASK;
 	}
 
-	// Returns the salt, leaves upper salt bits intact, sets lower bits to all 1's
+	// Returns the salt, leaves upper salt bits intact, sets lower bits to all 0's
 	static inline hash_t ExtractSalt(const hash_t &hash) {
-		return hash | POINTER_MASK;
+		return hash << 48 | POINTER_MASK; // todo: we can remove the | POINTER_MASK if we adapt the aggregate ht
 	}
 
 	inline hash_t GetSalt() const {
-		return ExtractSalt(value);
+		return value | POINTER_MASK; // we really have to be clear wheather salt is with 0s or 1s
 	}
 
 	inline void SetSalt(const hash_t &salt) {

@@ -162,7 +162,8 @@ private:
 	idx_t hash_offset;
 	//! Bitmask for getting relevant bits from the hashes to determine the position
 	hash_t bitmask;
-
+	//!
+	uint64_t offset_shift = DConstants::INVALID_INDEX;
 	//! How many tuples went into this HT (before de-duplication)
 	idx_t sink_count;
 	//! If true, we just append, skipping HT lookups
@@ -184,7 +185,7 @@ private:
 	//! Initializes the PartitionedTupleData that only has 1 partition
 	void InitializeUnpartitionedData();
 	//! Apply bitmask to get the entry in the HT
-	inline idx_t ApplyBitMask(hash_t hash) const;
+	inline idx_t GetHTOffset(hash_t hash) const;
 	//! Reinserts tuples (triggered by Resize)
 	void ReinsertTuples(PartitionedTupleData &data);
 
