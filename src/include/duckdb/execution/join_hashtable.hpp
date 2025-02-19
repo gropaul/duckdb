@@ -17,7 +17,7 @@
 #include "duckdb/common/types/row/tuple_data_layout.hpp"
 #include "duckdb/common/types/vector.hpp"
 #include "duckdb/execution/aggregate_hashtable.hpp"
-#include "duckdb/execution/ht_entry.hpp"
+#include "duckdb/execution/ht_entry_join.hpp"
 
 namespace duckdb {
 
@@ -341,7 +341,7 @@ private:
 
 	//! The hash map of the HT, created after finalization
 	AllocatedData hash_map;
-	ht_entry_t *entries = nullptr;
+	ht_entry_join_t *entries = nullptr;
 	//! Whether or not NULL values are considered equal in each of the comparisons
 	vector<bool> null_values_are_equal;
 	//! An empty tuple that's a "dead end", can be used to stop chains early

@@ -3,7 +3,7 @@
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/radix_partitioning.hpp"
 #include "duckdb/common/vector_operations/vector_operations.hpp"
-#include "duckdb/execution/ht_entry.hpp"
+#include "duckdb/execution/ht_entry_join.hpp"
 #include "duckdb/main/client_context.hpp"
 #include "duckdb/storage/buffer_manager.hpp"
 
@@ -148,7 +148,7 @@ static void ApplyBitmaskAndGetSaltBuild(Vector &hashes_v, Vector &salt_v, const 
 		auto &hash = *ConstantVector::GetData<hash_t>(hashes_v);
 		salt_v.SetVectorType(VectorType::CONSTANT_VECTOR);
 
-		*ConstantVector::GetData<hash_t>(salt_v) = ht_entry_t::ExtractSalt(hash);
+		*ConstantVector::GetData<hash_t>(salt_v) = ht_entry_join_t::ExtractSalt(hash);
 		salt_v.Flatten(count);
 
 		hash = GetOffset(hash, offset_shift);
@@ -158,7 +158,7 @@ static void ApplyBitmaskAndGetSaltBuild(Vector &hashes_v, Vector &salt_v, const 
 		auto salts = FlatVector::GetData<hash_t>(salt_v);
 		auto hashes = FlatVector::GetData<hash_t>(hashes_v);
 		for (idx_t i = 0; i < count; i++) {
-			salts[i] = ht_entry_t::ExtractSalt(hashes[i]);
+			salts[i] = ht_entry_join_t::ExtractSalt(hashes[i]);
 			hashes[i] = GetOffset(hashes[i], offset_shift);
 		}
 	}
@@ -170,7 +170,7 @@ template <bool USE_SALTS>
 static inline void GetRowPointersInternal(DataChunk &keys, TupleDataChunkState &key_state,
                                           JoinHashTable::ProbeState &state, Vector &hashes_v,
                                           const SelectionVector &sel, idx_t &count, JoinHashTable &ht,
-                                          ht_entry_t *entries, Vector &pointers_result_v, SelectionVector &match_sel) {
+                                          ht_entry_join_t *entries, Vector &pointers_result_v, SelectionVector &match_sel) {
 	UnifiedVectorFormat hashes_v_unified;
 	hashes_v.ToUnifiedFormat(count, hashes_v_unified);
 
@@ -210,7 +210,7 @@ static inline void GetRowPointersInternal(DataChunk &keys, TupleDataChunkState &
 		if (USE_SALTS) {
 			auto uvf_index = hashes_v_unified.sel->get_index(row_index);
 			auto hash = hashes[uvf_index];
-			hash_t row_salt = ht_entry_t::ExtractSalt(hash);
+			hash_t row_salt = ht_entry_join_t::ExtractSalt(hash);
 			salts[row_index] = row_salt;
 		}
 	}
@@ -238,7 +238,7 @@ static inline void GetRowPointersInternal(DataChunk &keys, TupleDataChunkState &
 
 			idx_t &ht_offset = ht_offsets[row_index];
 			bool occupied;
-			ht_entry_t entry;
+			ht_entry_join_t entry;
 
 			if (USE_SALTS) {
 				hash_t row_salt = salts[row_index];
@@ -464,9 +464,9 @@ static data_ptr_t LoadPointer(const const_data_ptr_t &source) {
 //! happen and we need to return the pointer to the to row with which the new entry would have collided. In any other
 //! case we return a nullptr
 template <bool PARALLEL, bool EXPECT_EMPTY>
-static inline data_ptr_t InsertRowToEntry(ht_entry_t &entry, const data_ptr_t &row_ptr_to_insert,
+static inline data_ptr_t InsertRowToEntry(ht_entry_join_t &entry, const data_ptr_t &row_ptr_to_insert,
                                           const hash_t &salt, const idx_t &pointer_offset) {
-	const ht_entry_t desired_entry(salt, row_ptr_to_insert);
+	const ht_entry_join_t desired_entry(salt, row_ptr_to_insert);
 	if (PARALLEL) {
 		// if (EXPECT_EMPTY) {
 		// 	// Add nullptr to the end of the list to mark the end
@@ -526,7 +526,7 @@ static inline void PerformKeyComparison(JoinHashTable::InsertState &state, JoinH
 }
 
 template <bool PARALLEL>
-static inline void InsertMatchesAndIncrementMisses(ht_entry_t entries[], JoinHashTable::InsertState &state,
+static inline void InsertMatchesAndIncrementMisses(ht_entry_join_t entries[], JoinHashTable::InsertState &state,
                                                    JoinHashTable &ht, const data_ptr_t lhs_row_locations[],
                                                    idx_t ht_offsets[], const hash_t hash_salts[],
                                                    const idx_t capacity_mask, const idx_t key_match_count,
@@ -561,7 +561,7 @@ static inline void InsertMatchesAndIncrementMisses(ht_entry_t entries[], JoinHas
 }
 
 template <bool PARALLEL>
-static void InsertHashesLoop(ht_entry_t entries[], Vector &row_locations, Vector &hashes_v, const idx_t &count,
+static void InsertHashesLoop(ht_entry_join_t entries[], Vector &row_locations, Vector &hashes_v, const idx_t &count,
                              JoinHashTable::InsertState &state, const TupleDataCollection &data_collection,
                              JoinHashTable &ht, const idx_t offset_shift) {
 	D_ASSERT(hashes_v.GetType().id() == LogicalType::HASH);
@@ -615,7 +615,7 @@ static void InsertHashesLoop(ht_entry_t entries[], Vector &row_locations, Vector
 			auto &salt = hash_salts[row_index];
 
 			// increment the ht_offset of the entry as long as next entry is occupied and salt does not match
-			ht_entry_t entry;
+			ht_entry_join_t entry;
 			bool occupied;
 			while (true) {
 				entry = entries[ht_offset];
@@ -691,21 +691,21 @@ void JoinHashTable::AllocatePointerTable() {
 
 	if (hash_map.get()) {
 		// There is already a hash map
-		auto current_capacity = hash_map.GetSize() / sizeof(ht_entry_t);
+		auto current_capacity = hash_map.GetSize() / sizeof(ht_entry_join_t);
 		if (capacity > current_capacity) {
 			// Need more space
-			hash_map = buffer_manager.GetBufferAllocator().Allocate(capacity * sizeof(ht_entry_t));
-			entries = reinterpret_cast<ht_entry_t *>(hash_map.get());
+			hash_map = buffer_manager.GetBufferAllocator().Allocate(capacity * sizeof(ht_entry_join_t));
+			entries = reinterpret_cast<ht_entry_join_t *>(hash_map.get());
 		} else {
 			// Just use the current hash map
 			capacity = current_capacity;
 		}
 	} else {
 		// Allocate a hash map
-		hash_map = buffer_manager.GetBufferAllocator().Allocate(capacity * sizeof(ht_entry_t));
-		entries = reinterpret_cast<ht_entry_t *>(hash_map.get());
+		hash_map = buffer_manager.GetBufferAllocator().Allocate(capacity * sizeof(ht_entry_join_t));
+		entries = reinterpret_cast<ht_entry_join_t *>(hash_map.get());
 	}
-	D_ASSERT(hash_map.GetSize() == capacity * sizeof(ht_entry_t));
+	D_ASSERT(hash_map.GetSize() == capacity * sizeof(ht_entry_join_t));
 
 	uint64_t exponent = 0;
 	while ((capacity >> exponent) > 1) {
@@ -716,7 +716,7 @@ void JoinHashTable::AllocatePointerTable() {
 
 void JoinHashTable::InitializePointerTable(idx_t entry_idx_from, idx_t entry_idx_to) {
 	// initialize HT with all-zero entries
-	std::fill_n(entries + entry_idx_from, entry_idx_to - entry_idx_from, ht_entry_t());
+	std::fill_n(entries + entry_idx_from, entry_idx_to - entry_idx_from, ht_entry_join_t());
 }
 
 void JoinHashTable::Finalize(idx_t chunk_idx_from, idx_t chunk_idx_to, bool parallel) {

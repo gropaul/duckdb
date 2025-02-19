@@ -202,14 +202,8 @@ idx_t GroupedAggregateHashTable::ResizeThreshold(const idx_t capacity) {
 	return LossyNumericCast<idx_t>(static_cast<double>(capacity) / LOAD_FACTOR);
 }
 
-// idx_t GroupedAggregateHashTable::GetHTOffset(hash_t hash) const {
-// 	return hash & bitmask;
-// }
-idx_t GroupedAggregateHashTable::GetHTOffset(hash_t hash) const {
-	// if offset shift is 64, return 0
-	// offset shift may never be larger or equal to 64
-	D_ASSERT(offset_shift < sizeof(uint64_t) * 8);
-	return hash >> offset_shift;
+idx_t GroupedAggregateHashTable::ApplyBitMask(hash_t hash) const {
+	return hash & bitmask;
 }
 
 void GroupedAggregateHashTable::Verify() {
@@ -271,12 +265,6 @@ void GroupedAggregateHashTable::Resize(idx_t size) {
 		}
 	}
 
-	uint64_t exponent = 0;
-	while ((capacity >> exponent) > 1) {
-		exponent++;
-	}
-	offset_shift = sizeof(uint64_t) * 8 - exponent;
-
 	Verify();
 }
 
@@ -293,7 +281,7 @@ void GroupedAggregateHashTable::ReinsertTuples(PartitionedTupleData &data) {
 				const auto hash = Load<hash_t>(row_location + hash_offset);
 
 				// Find an empty entry
-				auto ht_offset = GetHTOffset(hash);
+				auto ht_offset = ApplyBitMask(hash);
 				D_ASSERT(ht_offset == hash % capacity);
 				while (entries[ht_offset].IsOccupied()) {
 					IncrementAndWrap(ht_offset, bitmask);
@@ -650,7 +638,7 @@ idx_t GroupedAggregateHashTable::FindOrCreateGroupsInternal(DataChunk &groups, V
 	for (idx_t r = 0; r < chunk_size; r++) {
 		const auto &hash = hashes[r];
 		auto &ht_offset = ht_offsets[r];
-		ht_offset = GetHTOffset(hash);
+		ht_offset = ApplyBitMask(hash);
 		occupied_count += entries[ht_offset].IsOccupied(); // Lookup
 		D_ASSERT(ht_offset == hash % capacity);
 		hash_salts[r] = ht_entry_t::ExtractSalt(hash);

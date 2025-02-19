@@ -24,7 +24,7 @@ namespace duckdb {
     a pointer to the data and a salt value in a single hash_t and can return or modify the pointer and salt
     individually.
 */
-struct ht_entry_t { // NOLINT
+struct ht_entry_join_t { // NOLINT
 public:
 #ifdef DISABLE_POINTER_SALT
 	//! No salt, all pointer
@@ -36,14 +36,16 @@ public:
 	static constexpr const hash_t POINTER_MASK = 0x0000FFFFFFFFFFFF;
 #endif
 
-	ht_entry_t() noexcept : value(0) {
+	ht_entry_join_t() noexcept : value(0) {
 	}
 
-	explicit ht_entry_t(hash_t value_p) noexcept : value(value_p) {
+	explicit ht_entry_join_t(hash_t value_p) noexcept : value(value_p) {
 	}
 
-	ht_entry_t(const hash_t &salt, const data_ptr_t &pointer)
-	    : value(cast_pointer_to_uint64(pointer) | (salt & SALT_MASK)) {
+	ht_entry_join_t(const hash_t &salt, const data_ptr_t &pointer)
+	    : value(cast_pointer_to_uint64(pointer) | (salt & SALT_MASK)) { // todo: we can remove the & SALT_MASK
+		D_ASSERT((cast_pointer_to_uint64(pointer) & SALT_MASK) == 0);
+		// D_ASSERT((salt & POINTER_MASK) == 0); // then we need this dassert
 	}
 
 	inline bool IsOccupied() const {
@@ -70,13 +72,13 @@ public:
 		value &= cast_pointer_to_uint64(pointer) | SALT_MASK;
 	}
 
-	// Returns the salt, leaves upper salt bits intact, sets lower bits to all 1's
+	// Returns the salt, leaves upper salt bits intact, sets lower bits to all 0's
 	static inline hash_t ExtractSalt(const hash_t &hash) {
-		return hash | POINTER_MASK;
+		return hash << 48 | POINTER_MASK; // todo: we can remove the | POINTER_MASK if we adapt the aggregate ht
 	}
 
 	inline hash_t GetSalt() const {
-		return ExtractSalt(value);
+		return value | POINTER_MASK; // we really have to be clear wheather salt is with 0s or 1s
 	}
 
 	inline void SetSalt(const hash_t &salt) {
@@ -91,10 +93,5 @@ public:
 private:
 	hash_t value;
 };
-
-// uses an AND operation to apply the modulo operation instead of an if condition that could be branch mispredicted
-inline void IncrementAndWrap(idx_t &offset, const uint64_t &capacity_mask) {
-	++offset &= capacity_mask;
-}
 
 } // namespace duckdb
