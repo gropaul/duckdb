@@ -43,7 +43,7 @@ public:
 
 	//! Radix bits begin after uint16_t because these bits are used as salt in the aggregate HT
 	static inline constexpr idx_t Shift(idx_t radix_bits) {
-		return (sizeof(hash_t)) * 8 - radix_bits;
+		return (sizeof(hash_t) - sizeof(uint16_t)) * 8 - radix_bits;
 	}
 
 	//! Mask of the radix bits of the hash

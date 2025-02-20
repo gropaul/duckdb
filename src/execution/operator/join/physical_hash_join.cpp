@@ -492,7 +492,7 @@ public:
 
 	TaskExecutionResult ExecuteTask(TaskExecutionMode mode) override {
 		if (populate_partitioned) {
-			sink.hash_table->FinalizePartitioned( partition_idx);
+			sink.hash_table->FinalizePartitioned(partition_idx);
 		} else {
 			sink.hash_table->Finalize(chunk_idx_from, chunk_idx_to, parallel);
 		}
@@ -518,14 +518,17 @@ public:
 
 	HashJoinGlobalSinkState &sink;
 
-public:
-	void Schedule() override {
-		auto &context = pipeline->GetClientContext();
+	static bool ShouldPopulateSingleThreaded(const HashJoinGlobalSinkState &sink, const ClientContext &context) {
 
-		vector<shared_ptr<Task>> finalize_tasks;
-		auto &ht = *sink.hash_table;
-		const auto chunk_count = ht.GetChunkCount();
 		const auto num_threads = NumericCast<idx_t>(sink.num_threads);
+
+		if (num_threads == 1) {
+			return true;
+		}
+
+		if (!context.config.verify_parallelism) {
+			return false;
+		}
 
 		// If the data is very skewed (many of the exact same key), our finalize will become slow,
 		// due to completely slamming the same atomic using compare-and-swaps.
@@ -533,9 +536,19 @@ public:
 		const auto max_partition_ht_size =
 		    sink.max_partition_size + JoinHashTable::PointerTableSize(sink.max_partition_count);
 		const auto skew = static_cast<double>(max_partition_ht_size) / static_cast<double>(sink.total_size);
+		const auto &ht = *sink.hash_table;
+		return ht.Count() < PARALLEL_CONSTRUCT_THRESHOLD || skew > SKEW_SINGLE_THREADED_THRESHOLD;
+	}
 
-		if (num_threads == -1 && ((ht.Count() < PARALLEL_CONSTRUCT_THRESHOLD || skew > SKEW_SINGLE_THREADED_THRESHOLD) &&
-		                         !context.config.verify_parallelism)) {
+public:
+	void Schedule() override {
+		auto &context = pipeline->GetClientContext();
+
+		vector<shared_ptr<Task>> finalize_tasks;
+		auto &ht = *sink.hash_table;
+		const auto chunk_count = ht.GetChunkCount();
+
+		if (ShouldPopulateSingleThreaded(sink, context)) {
 			// Single-threaded finalize
 			finalize_tasks.push_back(
 			    make_uniq<HashJoinFinalizeTask>(shared_from_this(), context, sink, 0U, chunk_count, false, sink.op));
@@ -552,17 +565,11 @@ public:
 			} else {
 
 				auto &sink_collection = ht.GetSinkCollection();
-				auto &partitions = sink_collection.GetPartitions();
 				const uint64_t num_partitions = sink_collection.PartitionCount();
 
 				for (idx_t partition_idx = 0; partition_idx < num_partitions; partition_idx++) {
-				}
-
-				for (idx_t partition_idx = 0; partition_idx < num_partitions; partition_idx++) {
-
-					finalize_tasks.push_back(make_uniq<HashJoinFinalizeTask>(shared_from_this(), context, sink, 0,
-					                                                         chunk_count, true, true, partition_idx,
-					                                                         sink.op));
+					finalize_tasks.push_back(make_uniq<HashJoinFinalizeTask>(
+					    shared_from_this(), context, sink, 0, chunk_count, true, true, partition_idx, sink.op));
 				}
 			}
 		}
@@ -840,7 +847,12 @@ SinkFinalizeType PhysicalHashJoin::Finalize(Pipeline &pipeline, Event &event, Cl
 		ht.Merge(*local_ht);
 	}
 	sink.local_hash_tables.clear();
-	ht.populate_hash_map_partitioned = true;
+
+	if (HashJoinFinalizeEvent::ShouldPopulateSingleThreaded(sink, context)) {
+		ht.Unpartition();
+	} else {
+		ht.populate_hash_map_partitioned = true;
+	}
 
 	Value min;
 	Value max;

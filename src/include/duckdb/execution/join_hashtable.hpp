@@ -17,7 +17,7 @@
 #include "duckdb/common/types/row/tuple_data_layout.hpp"
 #include "duckdb/common/types/vector.hpp"
 #include "duckdb/execution/aggregate_hashtable.hpp"
-#include "duckdb/execution/ht_entry_join.hpp"
+#include "duckdb/execution/ht_entry.hpp"
 
 namespace duckdb {
 
@@ -190,7 +190,7 @@ public:
 	//! Finalize must be called before any call to Probe, and after Finalize is called Build should no longer be
 	//! ever called.
 	void Finalize(idx_t chunk_idx_from, idx_t chunk_idx_to, bool parallel);
-	void FinalizePartitioned(idx_t threads_idx);
+	void FinalizePartitioned(idx_t partition_idx);
 	//! Probe the HT with the given input chunk, resulting in the given result
 	void Probe(ScanStructure &scan_structure, DataChunk &keys, TupleDataChunkState &key_state, ProbeState &probe_state,
 	           optional_ptr<Vector> precomputed_hashes = nullptr);
@@ -341,7 +341,7 @@ private:
 
 	//! The hash map of the HT, created after finalization
 	AllocatedData hash_map;
-	ht_entry_join_t *entries = nullptr;
+	ht_entry_t *entries = nullptr;
 	//! Whether or not NULL values are considered equal in each of the comparisons
 	vector<bool> null_values_are_equal;
 	//! An empty tuple that's a "dead end", can be used to stop chains early
