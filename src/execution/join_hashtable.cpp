@@ -14,11 +14,11 @@ using ProbeSpill = JoinHashTable::ProbeSpill;
 using ProbeSpillLocalState = JoinHashTable::ProbeSpillLocalAppendState;
 
 
-static uint64_t GetOffset(const uint64_t hash, const uint64_t offset_shift) {
+static uint64_t GetOffset(const uint64_t hash, const uint64_t offset_shift, const uint64_t capacity_mask) {
 	// if offset shift is 64, return 0
 	// offset shift may never be larger or equal to 64
 	D_ASSERT(offset_shift < sizeof(uint64_t) * 8);
-	return hash >> offset_shift;
+	return (hash >> offset_shift) & capacity_mask;
 }
 
 
@@ -143,7 +143,7 @@ void JoinHashTable::Merge(JoinHashTable &other) {
 	sink_collection->Combine(*other.sink_collection);
 }
 
-static void ApplyBitmaskAndGetSaltBuild(Vector &hashes_v, Vector &salt_v, const idx_t &count, const idx_t &offset_shift) {
+static void ApplyBitmaskAndGetSaltBuild(Vector &hashes_v, Vector &salt_v, const idx_t &count, const idx_t &offset_shift, const uint64_t &capacity_mask) {
 	if (hashes_v.GetVectorType() == VectorType::CONSTANT_VECTOR) {
 		auto &hash = *ConstantVector::GetData<hash_t>(hashes_v);
 		salt_v.SetVectorType(VectorType::CONSTANT_VECTOR);
@@ -151,7 +151,7 @@ static void ApplyBitmaskAndGetSaltBuild(Vector &hashes_v, Vector &salt_v, const 
 		*ConstantVector::GetData<hash_t>(salt_v) = ht_entry_t::ExtractSalt(hash);
 		salt_v.Flatten(count);
 
-		hash = GetOffset(hash, offset_shift);
+		hash = GetOffset(hash, offset_shift, capacity_mask);
 		hashes_v.Flatten(count);
 	} else {
 		hashes_v.Flatten(count);
@@ -159,7 +159,7 @@ static void ApplyBitmaskAndGetSaltBuild(Vector &hashes_v, Vector &salt_v, const 
 		auto hashes = FlatVector::GetData<hash_t>(hashes_v);
 		for (idx_t i = 0; i < count; i++) {
 			salts[i] = ht_entry_t::ExtractSalt(hashes[i]);
-			hashes[i] = GetOffset(hashes[i], offset_shift);
+			hashes[i] = GetOffset(hashes[i], offset_shift, capacity_mask);
 		}
 	}
 }
@@ -181,12 +181,13 @@ static inline void GetRowPointersInternal(DataChunk &keys, TupleDataChunkState &
 	auto ht_offsets_dense = FlatVector::GetData<idx_t>(state.ht_offsets_dense_v);
 
 	idx_t non_empty_count = 0;
+	uint64_t capacity_mask = ht.capacity - 1;
 
 	// first, filter out the empty rows and calculate the offset
 	for (idx_t i = 0; i < count; i++) {
 		const auto row_index = sel.get_index(i);
 		auto uvf_index = hashes_v_unified.sel->get_index(row_index);
-		auto ht_offset = GetOffset(hashes[uvf_index], ht.offset_shift);
+		auto ht_offset = GetOffset(hashes[uvf_index], ht.offset_shift, capacity_mask);
 		ht_offsets_dense[i] = ht_offset;
 		ht_offsets[row_index] = ht_offset;
 	}
@@ -224,7 +225,6 @@ static inline void GetRowPointersInternal(DataChunk &keys, TupleDataChunkState &
 	idx_t &match_count = count;
 	match_count = 0;
 
-	uint64_t capacity_mask = ht.capacity - 1;
 
 	while (remaining_count > 0) {
 		idx_t salt_match_count = 0;
@@ -565,7 +565,7 @@ static void InsertHashesLoop(ht_entry_t entries[], Vector &row_locations, Vector
                              JoinHashTable::InsertState &state, const TupleDataCollection &data_collection,
                              JoinHashTable &ht, const idx_t offset_shift) {
 	D_ASSERT(hashes_v.GetType().id() == LogicalType::HASH);
-	ApplyBitmaskAndGetSaltBuild(hashes_v, state.salt_v, count, offset_shift);
+	ApplyBitmaskAndGetSaltBuild(hashes_v, state.salt_v, count, offset_shift, ht.capacity - 1);
 
 	// the salts offset for each row to insert
 	const auto ht_offsets = FlatVector::GetData<idx_t>(hashes_v);
@@ -711,7 +711,7 @@ void JoinHashTable::AllocatePointerTable() {
 	while ((capacity >> exponent) > 1) {
 		exponent++;
 	}
-	offset_shift = sizeof(uint64_t) * 8 - exponent;
+	offset_shift = (sizeof(uint64_t) - sizeof(uint16_t)) * 8 - exponent;
 }
 
 void JoinHashTable::InitializePointerTable(idx_t entry_idx_from, idx_t entry_idx_to) {
@@ -747,7 +747,6 @@ void JoinHashTable::FinalizePartitioned(idx_t partition_idx) {
 	D_ASSERT(hash_map.get());
 	D_ASSERT(populate_hash_map_partitioned);
 
-	const auto n_partitions = sink_collection->PartitionCount();
 	auto &partitions = sink_collection->GetPartitions();
 	auto &partition = partitions[partition_idx];
 
