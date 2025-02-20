@@ -228,7 +228,11 @@ public:
 	}
 
 	TupleDataCollection &GetDataCollection() {
-		return *data_collection;
+		if (populate_hash_map_partitioned) {
+			return *sink_collection->GetUnpartitioned();
+		} else {
+			return *data_collection;
+		}
 	}
 	bool NullValuesAreEqual(idx_t col_idx) const {
 		return null_values_are_equal[col_idx];

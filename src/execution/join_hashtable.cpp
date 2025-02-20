@@ -750,8 +750,6 @@ void JoinHashTable::FinalizePartitioned(idx_t partition_idx) {
 	auto &partitions = sink_collection->GetPartitions();
 	auto &partition = partitions[partition_idx];
 
-	D_ASSERT(partition_idx < n_partitions);
-
 	Vector hashes(LogicalType::HASH);
 	auto hash_data = FlatVector::GetData<hash_t>(hashes);
 
