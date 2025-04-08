@@ -570,7 +570,7 @@ public:
 		sink.hash_table->finalized = true;
 	}
 
-	static constexpr idx_t CHUNKS_PER_TASK = 64;
+	static constexpr idx_t CHUNKS_PER_TASK = 2048;
 };
 
 void HashJoinGlobalSinkState::ScheduleFinalize(Pipeline &pipeline, Event &event) {
