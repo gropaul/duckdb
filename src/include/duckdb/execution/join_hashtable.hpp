@@ -201,10 +201,13 @@ public:
 	static idx_t FillWithHTOffsets(JoinHTScanState &state, Vector &addresses);
 
 	idx_t Count() const {
-		if (populate_hash_map_partitioned) {
+		if (populate_hash_map_partitioned) { // todo: this can be called before the decision to partition the hash table is made, which would change the answer
 			return sink_collection->Count();
 		} else {
-			return data_collection->Count();
+			idx_t preliminary_count = data_collection->Count();
+			if (preliminary_count == 0) {
+				return sink_collection->Count();
+			}
 		}
 	}
 	idx_t SizeInBytes() const {
@@ -215,25 +218,20 @@ public:
 		return *sink_collection;
 	}
 
-	uint64_t GetChunkCount() const {
+	TupleDataCollection &GetDataCollection() {
+		D_ASSERT(populate_hash_map_partitioned == false);
+		return *data_collection;
+	}
+
+	idx_t GetCollectionChunkCount() {
 		if (populate_hash_map_partitioned) {
-			uint64_t count = 0;
-			for (auto &partition : sink_collection->GetPartitions()) {
-				count += partition->ChunkCount();
-			}
-			return count;
+			return sink_collection->ChunkCount();
 		} else {
 			return data_collection->ChunkCount();
 		}
 	}
 
-	TupleDataCollection &GetDataCollection() {
-		if (populate_hash_map_partitioned) {
-			return *sink_collection->GetUnpartitioned();
-		} else {
-			return *data_collection;
-		}
-	}
+
 	bool NullValuesAreEqual(idx_t col_idx) const {
 		return null_values_are_equal[col_idx];
 	}

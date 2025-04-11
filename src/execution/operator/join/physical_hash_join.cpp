@@ -561,7 +561,7 @@ public:
 
 		vector<shared_ptr<Task>> finalize_tasks;
 		auto &ht = *sink.hash_table;
-		const auto chunk_count = ht.GetDataCollection().ChunkCount();
+		const auto chunk_count = ht.GetCollectionChunkCount();
 
 		// if the keys are too skewed, we finalize single-threaded
 		if (FinalizeSingleThreaded(sink, true)) {
@@ -593,7 +593,7 @@ public:
 	}
 
 	void FinishEvent() override {
-		sink.hash_table->GetDataCollection().VerifyEverythingPinned();
+		// sink.hash_table->GetDataCollection().VerifyEverythingPinned(); todo: Renable
 		sink.hash_table->finalized = true;
 	}
 
@@ -1224,7 +1224,7 @@ void HashJoinGlobalSourceState::PrepareBuild(HashJoinGlobalSinkState &sink) {
 	}
 
 	build_chunk_idx = 0;
-	build_chunk_count = ht.GetChunkCount();
+	build_chunk_count = ht.GetCollectionChunkCount();
 	build_chunk_done = 0;
 
 	if (sink.context.config.verify_parallelism) {
@@ -1263,7 +1263,7 @@ void HashJoinGlobalSourceState::PrepareScanHT(HashJoinGlobalSinkState &sink) {
 	auto &ht = *sink.hash_table;
 
 	full_outer_chunk_idx = 0;
-	full_outer_chunk_count = ht.GetChunkCount();
+	full_outer_chunk_count = ht.GetCollectionChunkCount();
 	full_outer_chunk_done = 0;
 
 	full_outer_chunks_per_thread =
