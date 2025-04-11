@@ -13,6 +13,15 @@ using ScanStructure = JoinHashTable::ScanStructure;
 using ProbeSpill = JoinHashTable::ProbeSpill;
 using ProbeSpillLocalState = JoinHashTable::ProbeSpillLocalAppendState;
 
+
+static uint64_t GetOffset(const uint64_t hash, const uint64_t offset_shift, const uint64_t capacity_mask) {
+	// if offset shift is 64, return 0
+	// offset shift may never be larger or equal to 64
+	D_ASSERT(offset_shift < sizeof(uint64_t) * 8);
+	return (hash >> offset_shift) & capacity_mask;  // todo: do we need the capacity mask here?
+}
+
+
 JoinHashTable::SharedState::SharedState()
     : rhs_row_locations(LogicalType::POINTER), salt_v(LogicalType::UBIGINT), salt_match_sel(STANDARD_VECTOR_SIZE),
       key_no_match_sel(STANDARD_VECTOR_SIZE) {
@@ -136,7 +145,7 @@ void JoinHashTable::Merge(JoinHashTable &other) {
 	sink_collection->Combine(*other.sink_collection);
 }
 
-static void ApplyBitmaskAndGetSaltBuild(Vector &hashes_v, Vector &salt_v, const idx_t &count, const idx_t &bitmask) {
+static void ApplyBitmaskAndGetSaltBuild(Vector &hashes_v, Vector &salt_v, const idx_t &count, const idx_t &offset_shift, const uint64_t &capacity_mask) {
 	if (hashes_v.GetVectorType() == VectorType::CONSTANT_VECTOR) {
 		auto &hash = *ConstantVector::GetData<hash_t>(hashes_v);
 		salt_v.SetVectorType(VectorType::CONSTANT_VECTOR);
@@ -144,7 +153,7 @@ static void ApplyBitmaskAndGetSaltBuild(Vector &hashes_v, Vector &salt_v, const 
 		*ConstantVector::GetData<hash_t>(salt_v) = ht_entry_t::ExtractSalt(hash);
 		salt_v.Flatten(count);
 
-		hash = hash & bitmask;
+		hash = GetOffset(hash, offset_shift, capacity_mask);
 		hashes_v.Flatten(count);
 	} else {
 		hashes_v.Flatten(count);
@@ -152,7 +161,7 @@ static void ApplyBitmaskAndGetSaltBuild(Vector &hashes_v, Vector &salt_v, const 
 		auto hashes = FlatVector::GetData<hash_t>(hashes_v);
 		for (idx_t i = 0; i < count; i++) {
 			salts[i] = ht_entry_t::ExtractSalt(hashes[i]);
-			hashes[i] &= bitmask;
+			hashes[i] = GetOffset(hashes[i], offset_shift, capacity_mask);
 		}
 	}
 }
@@ -174,12 +183,13 @@ static inline void GetRowPointersInternal(DataChunk &keys, TupleDataChunkState &
 	auto ht_offsets_dense = FlatVector::GetData<idx_t>(state.ht_offsets_dense_v);
 
 	idx_t non_empty_count = 0;
+	uint64_t capacity_mask = ht.capacity - 1;
 
 	// first, filter out the empty rows and calculate the offset
 	for (idx_t i = 0; i < count; i++) {
 		const auto row_index = sel.get_index(i);
 		auto uvf_index = hashes_v_unified.sel->get_index(row_index);
-		auto ht_offset = hashes[uvf_index] & ht.bitmask;
+		auto ht_offset = GetOffset(hashes[uvf_index], ht.offset_shift, capacity_mask);
 		ht_offsets_dense[i] = ht_offset;
 		ht_offsets[row_index] = ht_offset;
 	}
@@ -245,7 +255,7 @@ static inline void GetRowPointersInternal(DataChunk &keys, TupleDataChunkState &
 						break;
 					}
 
-					IncrementAndWrap(ht_offset, ht.bitmask);
+					IncrementAndWrap(ht_offset, capacity_mask);
 				}
 			} else {
 				entry = entries[ht_offset];
@@ -284,7 +294,7 @@ static inline void GetRowPointersInternal(DataChunk &keys, TupleDataChunkState &
 				const auto row_index = state.key_no_match_sel.get_index(i);
 				auto &ht_offset = ht_offsets[row_index];
 
-				IncrementAndWrap(ht_offset, ht.bitmask);
+				IncrementAndWrap(ht_offset, capacity_mask);
 			}
 		}
 
@@ -556,7 +566,7 @@ static void InsertHashesLoop(atomic<ht_entry_t> entries[], Vector &row_locations
                              JoinHashTable::InsertState &state, const TupleDataCollection &data_collection,
                              JoinHashTable &ht) {
 	D_ASSERT(hashes_v.GetType().id() == LogicalType::HASH);
-	ApplyBitmaskAndGetSaltBuild(hashes_v, state.salt_v, count, ht.bitmask);
+	ApplyBitmaskAndGetSaltBuild(hashes_v, state.salt_v, count, ht.offset_shift, ht.bitmask);
 
 	// the salts offset for each row to insert
 	const auto ht_offsets = FlatVector::GetData<idx_t>(hashes_v);
@@ -595,8 +605,8 @@ static void InsertHashesLoop(atomic<ht_entry_t> entries[], Vector &row_locations
 		}
 	}
 
-	// use the ht bitmask to make the modulo operation faster but keep the salt bits intact
-	idx_t capacity_mask = ht.bitmask | ht_entry_t::SALT_MASK;
+	// use the ht bitmask to make the modulo operation faster
+	uint64_t capacity_mask = ht.capacity - 1;
 	while (remaining_count > 0) {
 		idx_t salt_match_count = 0;
 
@@ -702,6 +712,12 @@ void JoinHashTable::AllocatePointerTable() {
 	D_ASSERT(hash_map.GetSize() == capacity * sizeof(ht_entry_t));
 
 	bitmask = capacity - 1;
+
+	uint64_t exponent = 0;
+	while ((capacity >> exponent) > 1) {
+		exponent++;
+	}
+	offset_shift = (sizeof(uint64_t) - sizeof(uint16_t)) * 8 - exponent;
 }
 
 void JoinHashTable::InitializePointerTable(idx_t entry_idx_from, idx_t entry_idx_to) {

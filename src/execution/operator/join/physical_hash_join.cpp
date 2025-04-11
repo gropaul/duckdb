@@ -555,7 +555,7 @@ public:
 			    make_uniq<HashJoinFinalizeTask>(shared_from_this(), context, sink, 0U, chunk_count, false, sink.op));
 		} else {
 			// Parallel finalize
-			const idx_t chunks_per_task = context.config.verify_parallelism ? 1 : CHUNKS_PER_TASK;
+			const idx_t chunks_per_task = context.config.verify_parallelism ? 1 : (chunk_count / sink.num_threads);
 			for (idx_t chunk_idx = 0; chunk_idx < chunk_count; chunk_idx += chunks_per_task) {
 				auto chunk_idx_to = MinValue<idx_t>(chunk_idx + chunks_per_task, chunk_count);
 				finalize_tasks.push_back(make_uniq<HashJoinFinalizeTask>(shared_from_this(), context, sink, chunk_idx,
@@ -570,7 +570,7 @@ public:
 		sink.hash_table->finalized = true;
 	}
 
-	static constexpr idx_t CHUNKS_PER_TASK = 64;
+	static constexpr idx_t CHUNKS_PER_TASK = 2048;
 };
 
 void HashJoinGlobalSinkState::ScheduleFinalize(Pipeline &pipeline, Event &event) {

@@ -268,6 +268,8 @@ public:
 	bool has_null;
 	//! Bitmask for getting relevant bits from the hashes to determine the position
 	uint64_t bitmask = DConstants::INVALID_INDEX;
+	//! Offset to get the initial offset into the HT according to the partition bits and the capacity of the HT
+	uint64_t offset_shift = DConstants::INVALID_INDEX;
 	//! Whether or not we error on multiple rows found per match in a SINGLE join
 	bool single_join_error_on_multiple_rows = true;
 
