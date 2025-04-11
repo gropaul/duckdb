@@ -882,7 +882,7 @@ SinkFinalizeType PhysicalHashJoin::Finalize(Pipeline &pipeline, Event &event, Cl
 	}
 	sink.local_hash_tables.clear();
 
-	if (HashJoinFinalizeEvent::ShouldPopulateSingleThreaded(sink, context)) {
+	if (FinalizeSingleThreaded(sink, true)) {
 		ht.Unpartition();
 	} else {
 		ht.populate_hash_map_partitioned = true;
