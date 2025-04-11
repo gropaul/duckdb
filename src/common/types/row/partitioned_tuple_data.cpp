@@ -323,6 +323,15 @@ idx_t PartitionedTupleData::Count() const {
 	return count;
 }
 
+idx_t PartitionedTupleData::ChunkCount() const {
+	idx_t total_chunk_count = 0;
+	for (auto &partition : partitions) {
+		total_chunk_count += partition->ChunkCount();
+	}
+	return total_chunk_count;
+}
+
+
 idx_t PartitionedTupleData::SizeInBytes() const {
 	idx_t total_size = 0;
 	for (auto &partition : partitions) {

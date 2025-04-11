@@ -116,6 +116,8 @@ public:
 	unique_ptr<TupleDataCollection> GetUnpartitioned();
 	//! Get the count of this PartitionedTupleData
 	idx_t Count() const;
+	//! Get the number of chunks in this PartitionedTupleData
+	idx_t ChunkCount() const;
 	//! Get the size (in bytes) of this PartitionedTupleData
 	idx_t SizeInBytes() const;
 	//! Get the number of partitions of this PartitionedTupleData

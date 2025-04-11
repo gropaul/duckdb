@@ -515,12 +515,24 @@ class HashJoinFinalizeTask : public ExecutorTask {
 public:
 	HashJoinFinalizeTask(shared_ptr<Event> event_p, ClientContext &context, HashJoinGlobalSinkState &sink_p,
 	                     idx_t chunk_idx_from_p, idx_t chunk_idx_to_p, bool parallel_p, const PhysicalOperator &op_p)
+	    : HashJoinFinalizeTask(std::move(event_p), context, sink_p, chunk_idx_from_p, chunk_idx_to_p, parallel_p, false,
+	                           0, op_p) {
+	}
+
+	HashJoinFinalizeTask(shared_ptr<Event> event_p, ClientContext &context, HashJoinGlobalSinkState &sink_p,
+	                     const idx_t chunk_idx_from_p, idx_t chunk_idx_to_p, bool parallel_p,
+	                     const bool populate_partitioned_p, const idx_t partition_idx_p, const PhysicalOperator &op_p)
 	    : ExecutorTask(context, std::move(event_p), op_p), sink(sink_p), chunk_idx_from(chunk_idx_from_p),
-	      chunk_idx_to(chunk_idx_to_p), parallel(parallel_p) {
+	      chunk_idx_to(chunk_idx_to_p), parallel(parallel_p), populate_partitioned(populate_partitioned_p),
+	      partition_idx(partition_idx_p) {
 	}
 
 	TaskExecutionResult ExecuteTask(TaskExecutionMode mode) override {
-		sink.hash_table->Finalize(chunk_idx_from, chunk_idx_to, parallel);
+		if (populate_partitioned) {
+			sink.hash_table->FinalizePartitioned(partition_idx);
+		} else {
+			sink.hash_table->Finalize(chunk_idx_from, chunk_idx_to, parallel);
+		}
 		event->FinishTask();
 		return TaskExecutionResult::TASK_FINISHED;
 	}
@@ -530,6 +542,9 @@ private:
 	idx_t chunk_idx_from;
 	idx_t chunk_idx_to;
 	bool parallel;
+
+	bool populate_partitioned;
+	idx_t partition_idx;
 };
 
 class HashJoinFinalizeEvent : public BasePipelineEvent {
@@ -546,7 +561,7 @@ public:
 
 		vector<shared_ptr<Task>> finalize_tasks;
 		auto &ht = *sink.hash_table;
-		const auto chunk_count = ht.GetDataCollection().ChunkCount();
+		const auto chunk_count = ht.GetCollectionChunkCount();
 
 		// if the keys are too skewed, we finalize single-threaded
 		if (FinalizeSingleThreaded(sink, true)) {
@@ -555,18 +570,30 @@ public:
 			    make_uniq<HashJoinFinalizeTask>(shared_from_this(), context, sink, 0U, chunk_count, false, sink.op));
 		} else {
 			// Parallel finalize
-			const idx_t chunks_per_task = context.config.verify_parallelism ? 1 : CHUNKS_PER_TASK;
-			for (idx_t chunk_idx = 0; chunk_idx < chunk_count; chunk_idx += chunks_per_task) {
-				auto chunk_idx_to = MinValue<idx_t>(chunk_idx + chunks_per_task, chunk_count);
-				finalize_tasks.push_back(make_uniq<HashJoinFinalizeTask>(shared_from_this(), context, sink, chunk_idx,
-				                                                         chunk_idx_to, true, sink.op));
+			auto build_partitioned = ht.populate_hash_map_partitioned;
+			if (!build_partitioned) {
+				const idx_t chunks_per_task = context.config.verify_parallelism ? 1 : CHUNKS_PER_TASK;
+				for (idx_t chunk_idx = 0; chunk_idx < chunk_count; chunk_idx += chunks_per_task) {
+					auto chunk_idx_to = MinValue<idx_t>(chunk_idx + chunks_per_task, chunk_count);
+					finalize_tasks.push_back(make_uniq<HashJoinFinalizeTask>(shared_from_this(), context, sink,
+					                                                         chunk_idx, chunk_idx_to, true, sink.op));
+				}
+			} else {
+
+				auto &sink_collection = ht.GetSinkCollection();
+				const uint64_t num_partitions = sink_collection.PartitionCount();
+
+				for (idx_t partition_idx = 0; partition_idx < num_partitions; partition_idx++) {
+					finalize_tasks.push_back(make_uniq<HashJoinFinalizeTask>(
+					    shared_from_this(), context, sink, 0, chunk_count, true, true, partition_idx, sink.op));
+				}
 			}
 		}
 		SetTasks(std::move(finalize_tasks));
 	}
 
 	void FinishEvent() override {
-		sink.hash_table->GetDataCollection().VerifyEverythingPinned();
+		// sink.hash_table->GetDataCollection().VerifyEverythingPinned(); todo: Renable
 		sink.hash_table->finalized = true;
 	}
 
@@ -693,6 +720,8 @@ void JoinFilterPushdownInfo::PushInFilter(const JoinFilterPushdownFilter &info, 
 	// generate a "OR" filter (i.e. x=1 OR x=535 OR x=997)
 	// first scan the entire vector at the probe side
 	// FIXME: this code is duplicated from PerfectHashJoinExecutor::FullScanHashTable
+	return;
+	// todo: enable this code, but GetDataCollection is problematic in partitioned hash join
 	auto build_idx = join_condition[filter_idx];
 	auto &data_collection = ht.GetDataCollection();
 
@@ -852,7 +881,12 @@ SinkFinalizeType PhysicalHashJoin::Finalize(Pipeline &pipeline, Event &event, Cl
 		ht.Merge(*local_ht);
 	}
 	sink.local_hash_tables.clear();
-	ht.Unpartition();
+
+	if (FinalizeSingleThreaded(sink, true)) {
+		ht.Unpartition();
+	} else {
+		ht.populate_hash_map_partitioned = true;
+	}
 
 	Value min;
 	Value max;
@@ -1183,14 +1217,14 @@ void HashJoinGlobalSourceState::PrepareBuild(HashJoinGlobalSinkState &sink) {
 		return;
 	}
 
-	auto &data_collection = ht.GetDataCollection();
-	if (data_collection.Count() == 0 && op.EmptyResultIfRHSIsEmpty()) {
+	auto count = ht.Count();
+	if (count == 0 && op.EmptyResultIfRHSIsEmpty()) {
 		PrepareBuild(sink);
 		return;
 	}
 
 	build_chunk_idx = 0;
-	build_chunk_count = data_collection.ChunkCount();
+	build_chunk_count = ht.GetCollectionChunkCount();
 	build_chunk_done = 0;
 
 	if (sink.context.config.verify_parallelism) {
@@ -1228,9 +1262,8 @@ void HashJoinGlobalSourceState::PrepareScanHT(HashJoinGlobalSinkState &sink) {
 	D_ASSERT(global_stage != HashJoinSourceStage::SCAN_HT);
 	auto &ht = *sink.hash_table;
 
-	auto &data_collection = ht.GetDataCollection();
 	full_outer_chunk_idx = 0;
-	full_outer_chunk_count = data_collection.ChunkCount();
+	full_outer_chunk_count = ht.GetCollectionChunkCount();
 	full_outer_chunk_done = 0;
 
 	full_outer_chunks_per_thread =
