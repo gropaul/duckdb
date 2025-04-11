@@ -140,6 +140,9 @@ public:
 	DUCKDB_API virtual int64_t GetFileSize(FileHandle &handle);
 	//! Returns the file last modified time of a file handle, returns timespec with zero on all attributes on error
 	DUCKDB_API virtual time_t GetLastModifiedTime(FileHandle &handle);
+	//! Returns a tag that uniquely identifies the version of the file,
+	//! used for checking cache invalidation for CachingFileSystem httpfs files
+	DUCKDB_API virtual string GetVersionTag(FileHandle &handle);
 	//! Returns the file type of the attached handle
 	DUCKDB_API virtual FileType GetFileType(FileHandle &handle);
 	//! Truncate a file to a maximum size of new_size, new_size should be smaller than or equal to the current size of
@@ -218,6 +221,10 @@ public:
 
 	//! Unregister a sub-filesystem by name
 	DUCKDB_API virtual void UnregisterSubSystem(const string &name);
+
+	// !Extract a sub-filesystem by name, with ownership transfered, return nullptr if not registered or the subsystem
+	// has been disabled.
+	DUCKDB_API virtual unique_ptr<FileSystem> ExtractSubSystem(const string &name);
 
 	//! List registered sub-filesystems, including builtin ones
 	DUCKDB_API virtual vector<string> ListSubSystems();

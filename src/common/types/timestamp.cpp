@@ -17,7 +17,7 @@ namespace duckdb {
 static_assert(sizeof(timestamp_t) == sizeof(int64_t), "timestamp_t was padded");
 
 // Temporal values need to round down when changing precision,
-// but C/C++ rounds towrds 0 when you simply divide.
+// but C/C++ rounds towards 0 when you simply divide.
 // This piece of bit banging solves that problem.
 template <typename T>
 static inline T TemporalRound(T value, T scale) {
@@ -532,6 +532,18 @@ double Timestamp::GetJulianDay(timestamp_t timestamp) {
 	double result = double(Timestamp::GetTime(timestamp).micros);
 	result /= Interval::MICROS_PER_DAY;
 	result += double(Date::ExtractJulianDay(Timestamp::GetDate(timestamp)));
+	return result;
+}
+
+TimestampComponents Timestamp::GetComponents(timestamp_t timestamp) {
+	date_t date;
+	dtime_t time;
+
+	Convert(timestamp, date, time);
+
+	TimestampComponents result;
+	Date::Convert(date, result.year, result.month, result.day);
+	Time::Convert(time, result.hour, result.minute, result.second, result.microsecond);
 	return result;
 }
 
