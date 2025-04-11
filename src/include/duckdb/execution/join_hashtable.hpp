@@ -207,6 +207,8 @@ public:
 			idx_t preliminary_count = data_collection->Count();
 			if (preliminary_count == 0) {
 				return sink_collection->Count();
+			} else {
+				return preliminary_count;
 			}
 		}
 	}
