@@ -27,6 +27,11 @@ class ColumnDataCollection;
 struct ColumnDataAppendState;
 struct ClientConfig;
 
+struct PartitionRange {
+	idx_t chunk_idx_from;
+	idx_t chunk_idx_to;
+};
+
 struct JoinHTScanState {
 public:
 	JoinHTScanState(TupleDataCollection &collection, idx_t chunk_idx_from, idx_t chunk_idx_to,
@@ -185,6 +190,7 @@ public:
 	//! Finalize must be called before any call to Probe, and after Finalize is called Build should no longer be
 	//! ever called.
 	void Finalize(idx_t chunk_idx_from, idx_t chunk_idx_to, bool parallel);
+	void FinalizePartitioned(idx_t partition_idx);
 	//! Probe the HT with the given input chunk, resulting in the given result
 	void Probe(ScanStructure &scan_structure, DataChunk &keys, TupleDataChunkState &key_state, ProbeState &probe_state,
 	           optional_ptr<Vector> precomputed_hashes = nullptr);
@@ -195,7 +201,16 @@ public:
 	static idx_t FillWithHTOffsets(JoinHTScanState &state, Vector &addresses);
 
 	idx_t Count() const {
-		return data_collection->Count();
+		if (populate_hash_map_partitioned) { // todo: this can be called before the decision to partition the hash table is made, which would change the answer
+			return sink_collection->Count();
+		} else {
+			idx_t preliminary_count = data_collection->Count();
+			if (preliminary_count == 0) {
+				return sink_collection->Count();
+			} else {
+				return preliminary_count;
+			}
+		}
 	}
 	idx_t SizeInBytes() const {
 		return data_collection->SizeInBytes();
@@ -206,8 +221,19 @@ public:
 	}
 
 	TupleDataCollection &GetDataCollection() {
+		D_ASSERT(populate_hash_map_partitioned == false);
 		return *data_collection;
 	}
+
+	idx_t GetCollectionChunkCount() {
+		if (populate_hash_map_partitioned) {
+			return sink_collection->ChunkCount();
+		} else {
+			return data_collection->ChunkCount();
+		}
+	}
+
+
 	bool NullValuesAreEqual(idx_t col_idx) const {
 		return null_values_are_equal[col_idx];
 	}
@@ -266,8 +292,10 @@ public:
 	bool finalized;
 	//! Whether or not any of the key elements contain NULL
 	bool has_null;
+	//! Whether we will populate the hash_map array partitioned or not
+	bool populate_hash_map_partitioned = false;
 	//! Bitmask for getting relevant bits from the hashes to determine the position
-	uint64_t bitmask = DConstants::INVALID_INDEX;
+	uint64_t offset_shift = DConstants::INVALID_INDEX;
 	//! Whether or not we error on multiple rows found per match in a SINGLE join
 	bool single_join_error_on_multiple_rows = true;
 

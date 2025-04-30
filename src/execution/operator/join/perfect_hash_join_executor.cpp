@@ -64,6 +64,7 @@ bool ExtractNumericValue(Value val, hugeint_t &result) {
 }
 
 bool PerfectHashJoinExecutor::CanDoPerfectHashJoin(const PhysicalHashJoin &op, const Value &min, const Value &max) {
+	return false;
 	if (perfect_join_statistics.is_build_small) {
 		return true; // Already true based on static statistics
 	}
@@ -139,6 +140,7 @@ bool PerfectHashJoinExecutor::BuildPerfectHashTable(LogicalType &key_type) {
 }
 
 bool PerfectHashJoinExecutor::FullScanHashTable(LogicalType &key_type) {
+	// todo: this is an issue for partitioned hash join
 	auto &data_collection = ht.GetDataCollection();
 
 	// TODO: In a parallel finalize: One should exclusively lock and each thread should do one part of the code below.
