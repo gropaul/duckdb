@@ -84,7 +84,7 @@ public:
 		bool has_null_value_filter = false;
 
 		// it records the RHS pointers for the result chunk
-		Vector rhs_pointers;
+		Vector rhs_compacted_pointers;
 		// it records the LHS sel vector for the result chunk
 		SelectionVector lhs_sel_vector;
 		// these two variable records the last match results
@@ -131,8 +131,9 @@ public:
 		void AdvancePointers(const SelectionVector &sel, idx_t sel_count);
 		void GatherResult(Vector &result, const SelectionVector &result_vector, const SelectionVector &sel_vector,
 		                  const idx_t count, const idx_t col_idx);
-		void GatherResult(Vector &result, const SelectionVector &sel_vector, const idx_t count, const idx_t col_idx);
-		void GatherResult(Vector &result, const idx_t count, const idx_t col_idx);
+		void GatherResult(DataChunk &result, const SelectionVector &sel_vector, const idx_t count,
+		                  const vector<column_t> &column_ids);
+		void GatherResultCompact(DataChunk &result, const vector<column_t> &column_ids, const idx_t count);
 		idx_t ResolvePredicates(DataChunk &keys, SelectionVector &match_sel, SelectionVector *no_match_sel);
 	};
 
