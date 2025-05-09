@@ -32,6 +32,28 @@ void TupleDataCollection::Initialize() {
 		scatter_functions.emplace_back(GetScatterFunction(type));
 		gather_functions.emplace_back(GetGatherFunction(type));
 	}
+	InitializeGatherValidLookupTable();
+}
+
+void TupleDataCollection::InitializeGatherValidLookupTable() {
+
+	for (uint8_t validity_byte = 0x01; validity_byte < 0xFF; validity_byte++) {
+
+		const uint16_t validity_index = validity_byte * 8;
+		uint8_t* lookup_tbl_pointer = &gather_validity_lookup[validity_index];
+		uint8_t active_bits_count = 0;
+
+		for (uint8_t bit_index = 0; bit_index < 8; bit_index++) {
+			const uint8_t bit_mask = 0x1 << bit_index;
+			bool bit_is_active = bit_mask & validity_byte;
+			if (!bit_is_active) {
+				lookup_tbl_pointer[active_bits_count + 1] = bit_index; // +1 as the first value will be th length
+				active_bits_count += 1;
+			}
+		}
+
+		lookup_tbl_pointer[0] = active_bits_count;
+	}
 }
 
 void GetAllColumnIDsInternal(vector<column_t> &column_ids, const idx_t column_count) {

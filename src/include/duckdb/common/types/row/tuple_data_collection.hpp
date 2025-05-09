@@ -193,6 +193,8 @@ public:
 private:
 	//! Initializes the TupleDataCollection (called by the constructor)
 	void Initialize();
+	//! todo
+	void InitializeGatherValidLookupTable();
 	//! Gets all column ids
 	void GetAllColumnIDs(vector<column_t> &column_ids);
 	//! Adds a segment to this TupleDataCollection
@@ -266,6 +268,8 @@ private:
 	vector<TupleDataGatherFunction> gather_functions;
 	//! Partition index (optional, if partitioned)
 	optional_idx partition_index;
+	//! Lookup table for validity bytes. Will return a sel indies for each lookup value. The values 0 and 255 are not allowed.
+	uint8_t gather_validity_lookup[0xFF * 8];
 };
 
 } // namespace duckdb
