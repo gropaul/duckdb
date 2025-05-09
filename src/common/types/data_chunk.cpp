@@ -123,6 +123,17 @@ void DataChunk::Reference(DataChunk &chunk) {
 	}
 }
 
+void DataChunk::Reference(DataChunk &chunk, const vector<column_t> &columns) {
+	D_ASSERT(columns.size() <= ColumnCount());
+	SetCapacity(chunk);
+	SetCardinality(chunk);
+	for (idx_t i = 0; i < columns.size(); i++) {
+		const auto col_idx = columns[i];
+		D_ASSERT(col_idx < chunk.ColumnCount());
+		data[i].Reference(chunk.data[col_idx]);
+	}
+}
+
 void DataChunk::Move(DataChunk &chunk) {
 	SetCardinality(chunk);
 	SetCapacity(chunk);

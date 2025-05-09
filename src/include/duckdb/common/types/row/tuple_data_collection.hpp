@@ -132,7 +132,6 @@ public:
 	//! Copy rows from input to the built Chunk state
 	void CopyRows(TupleDataChunkState &chunk_state, TupleDataChunkState &input, const SelectionVector &append_sel,
 	              const idx_t append_count) const;
-
 	//! Finalizes the Pin state, releasing or storing blocks
 	void FinalizePinState(TupleDataPinState &pin_state, TupleDataSegment &segment);
 	//! Finalizes the Pin state, releasing or storing blocks
@@ -198,6 +197,18 @@ private:
 	void GetAllColumnIDs(vector<column_t> &column_ids);
 	//! Adds a segment to this TupleDataCollection
 	void AddSegment(TupleDataSegment &&segment);
+
+	//! Sets the validity bytes for the given DataChunk, used during gather
+	void SetValidityForGather(Vector &row_locations, const SelectionVector &scan_sel, const idx_t scan_count,
+	                          const vector<column_t> &column_ids, DataChunk &result,
+	                          const SelectionVector &target_sel) const;
+	//! Sets the validity bytes for the given Vector, used during gather
+	void SetValidityForGather(Vector &row_locations, const SelectionVector &sel, const idx_t scan_count,
+	                          const column_t column_id, Vector &result, const SelectionVector &target_sel) const;
+
+	void GatherWithoutValidity(Vector &row_locations, const SelectionVector &scan_sel, const idx_t scan_count,
+	                           const column_t column_id, Vector &result, const SelectionVector &target_sel,
+	                           optional_ptr<Vector> cached_cast_vector) const;
 
 	//! Computes the heap sizes for the specific Vector that will be appended
 	static void ComputeHeapSizes(Vector &heap_sizes_v, const Vector &source_v, TupleDataVectorFormat &source,
