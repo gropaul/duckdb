@@ -1099,42 +1099,36 @@ void __attribute__((noinline)) FillMap(std::unordered_map<idx_t, vector<Tuple>> 
 	}
 }
 
+
+
 void TupleDataCollection::SetValidityForGather(Vector &row_locations_v, const SelectionVector &scan_sel,
                                                const idx_t scan_count, const vector<column_t> &column_ids,
                                                DataChunk &result, const SelectionVector &target_sel) const {
 	const auto row_locations = FlatVector::GetData<data_ptr_t>(row_locations_v);
 	const auto layout_column_count = GetLayout().ColumnCount();
 
-	// maps one entry index to a vector of tuples containing the idx_in_entry and the column index
-	idx_t max_entry = 0;
+	idx_t val_bytes = ValidityBytes::SizeInBytes(layout.ColumnCount());
 
-	for (const auto col_idx : column_ids) {
-		idx_t entry_idx;
-		idx_t idx_in_entry;
-
-		ValidityBytes::GetEntryIndex(col_idx, entry_idx, idx_in_entry);
-		max_entry = std::max(max_entry, entry_idx);
-	}
-
-	// print the max_entry
-
-	for (idx_t idx = 0; idx < scan_count; idx++) {
-		const auto sel_idx = scan_sel.get_index(idx);
-		const auto target_idx = target_sel.get_index(idx);
-
+	for (idx_t row_idx = 0; row_idx < scan_count; row_idx++) {
+		const auto sel_idx = scan_sel.get_index(row_idx);
 		const auto ptr = row_locations[sel_idx];
 		ValidityBytes row_validity_mask(ptr, layout_column_count);
+		idx_t cache_offset = row_idx * val_bytes;
+		for (idx_t entry_idx = 0; entry_idx < val_bytes; entry_idx++) {
+			validity_cache[cache_offset + entry_idx] = row_validity_mask.GetValidityEntryUnsafe(entry_idx);
+		}
+	}
 
+	for (idx_t row_idx = 0; row_idx < scan_count; row_idx++) {
+		idx_t cache_offset = row_idx * val_bytes;
+		const auto target_idx = target_sel.get_index(row_idx);
 
-			const uint8_t mask_entry = row_validity_mask.GetValidityEntryUnsafe(0);
-
+		for (idx_t entry_idx = 0; row_idx < val_bytes; row_idx++) {
+			uint8_t mask_entry = validity_cache[cache_offset + entry_idx];
 			// early out: all rows are valid
 			if (mask_entry == 0xff) {
 				continue;
 			}
-
-			Printer::Print("We actually have to do sth");
-
 			// early out: all rows are invalid
 			if (mask_entry == 0x00) {
 				throw InternalException("Not supported yet, but we have to set everything to invalid");
@@ -1147,10 +1141,11 @@ void TupleDataCollection::SetValidityForGather(Vector &row_locations_v, const Se
 
 			for (uint8_t lookup_idx = 1; lookup_idx < (lookup_count + 1); lookup_idx++) {
 				uint8_t invalid_idx = lookup_entry[lookup_idx];
-				uint64_t column_idx = 0 * 8 + invalid_idx;
+				uint64_t column_idx = entry_idx * 8 + invalid_idx;
 				auto &target_validity = FlatVector::Validity(result.data[column_idx]);
 				target_validity.SetInvalid(target_idx);
 			}
+		}
 
 	}
 }
