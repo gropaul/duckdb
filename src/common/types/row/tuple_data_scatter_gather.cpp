@@ -1142,6 +1142,12 @@ void TupleDataCollection::SetValidityForGather(Vector &row_locations_v, const Se
 			for (uint8_t lookup_idx = 1; lookup_idx < (lookup_count + 1); lookup_idx++) {
 				uint8_t invalid_idx = lookup_entry[lookup_idx];
 				uint64_t column_idx = entry_idx * 8 + invalid_idx;
+
+				if (column_idx >= result.data.size()) {
+					continue; // todo: this is only a temporary patch
+				}
+
+				D_ASSERT(column_idx < result.data.size());
 				auto &target_validity = FlatVector::Validity(result.data[column_idx]);
 				target_validity.SetInvalid(target_idx);
 			}
