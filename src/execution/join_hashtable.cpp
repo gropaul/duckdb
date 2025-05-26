@@ -934,20 +934,20 @@ void ScanStructure::AdvancePointers() {
 	AdvancePointers(this->sel_vector, this->count);
 }
 
-void ScanStructure::GatherResult(Vector &result, const SelectionVector &result_vector,
-                                 const SelectionVector &sel_vector, const idx_t count, const idx_t col_no) {
-	ht.data_collection->Gather(pointers, sel_vector, count, col_no, result, result_vector, nullptr);
+void ScanStructure::GatherResult(Vector &result, const SelectionVector &target_sel,
+                                 const SelectionVector &scan_sel, const idx_t count, const idx_t col_no) {
+	ht.data_collection->Gather(pointers, scan_sel, count, col_no, result, target_sel, nullptr);
 }
 
-void ScanStructure::GatherResult(DataChunk &result, const SelectionVector &sel_vector, const idx_t count,
+void ScanStructure::GatherResult(DataChunk &result, const SelectionVector &scan_sel, const idx_t count,
                                  const vector<column_t> &column_ids) {
 	vector<unique_ptr<Vector>> cached_cast_vectors;
 	for (auto &col : column_ids) {
 		cached_cast_vectors.emplace_back(nullptr);
 	}
 
-	ht.data_collection->Gather(pointers, *FlatVector::IncrementalSelectionVector(), count, column_ids,
-	                           result, sel_vector, cached_cast_vectors);
+	ht.data_collection->Gather(pointers, scan_sel , count, column_ids,
+	                           result, *FlatVector::IncrementalSelectionVector(), cached_cast_vectors);
 }
 
 void ScanStructure::GatherResultCompact(DataChunk &result, const vector<column_t> &column_ids, const idx_t count) {

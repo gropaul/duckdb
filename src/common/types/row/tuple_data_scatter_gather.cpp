@@ -1113,17 +1113,17 @@ void TupleDataCollection::SetValidityForGather(Vector &row_locations_v, const Se
 		const auto sel_idx = scan_sel.get_index(row_idx);
 		const auto ptr = row_locations[sel_idx];
 		ValidityBytes row_validity_mask(ptr, layout_column_count);
-		idx_t cache_offset = row_idx * val_bytes;
+		const idx_t cache_offset = row_idx * val_bytes;
 		for (idx_t entry_idx = 0; entry_idx < val_bytes; entry_idx++) {
 			validity_cache[cache_offset + entry_idx] = row_validity_mask.GetValidityEntryUnsafe(entry_idx);
 		}
 	}
 
 	for (idx_t row_idx = 0; row_idx < scan_count; row_idx++) {
-		idx_t cache_offset = row_idx * val_bytes;
+		const idx_t cache_offset = row_idx * val_bytes;
 		const auto target_idx = target_sel.get_index(row_idx);
 
-		for (idx_t entry_idx = 0; row_idx < val_bytes; row_idx++) {
+		for (idx_t entry_idx = 0; entry_idx < val_bytes; entry_idx++) {
 			uint8_t mask_entry = validity_cache[cache_offset + entry_idx];
 			// early out: all rows are valid
 			if (mask_entry == 0xff) {

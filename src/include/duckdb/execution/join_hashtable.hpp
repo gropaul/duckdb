@@ -129,9 +129,9 @@ public:
 	public:
 		void AdvancePointers();
 		void AdvancePointers(const SelectionVector &sel, idx_t sel_count);
-		void GatherResult(Vector &result, const SelectionVector &result_vector, const SelectionVector &sel_vector,
+		void GatherResult(Vector &result, const SelectionVector &target_sel, const SelectionVector &scan_sel,
 		                  const idx_t count, const idx_t col_idx);
-		void GatherResult(DataChunk &result, const SelectionVector &sel_vector, const idx_t count,
+		void GatherResult(DataChunk &result, const SelectionVector &scan_sel, const idx_t count,
 		                  const vector<column_t> &column_ids);
 		void GatherResultCompact(DataChunk &result, const vector<column_t> &column_ids, const idx_t count);
 		idx_t ResolvePredicates(DataChunk &keys, SelectionVector &match_sel, SelectionVector *no_match_sel);
