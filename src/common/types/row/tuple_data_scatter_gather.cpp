@@ -572,8 +572,6 @@ void TupleDataCollection::Scatter(TupleDataChunkState &chunk_state, const DataCh
 
 	const auto row_locations = FlatVector::GetData<data_ptr_t>(chunk_state.row_locations);
 
-	// Set the validity mask for each row before inserting data
-	InitializeValidityMask(row_locations, append_count, ValidityBytes::SizeInBytes(layout.ColumnCount()));
 
 	if (!layout.AllConstant()) {
 		// Set the heap size for each row
@@ -628,27 +626,10 @@ static void TupleDataTemplatedScatter(const Vector &, const TupleDataVectorForma
 	const auto target_locations = FlatVector::GetData<data_ptr_t>(row_locations);
 	const auto target_heap_locations = FlatVector::GetData<data_ptr_t>(heap_locations);
 
-	// Precompute mask indexes
-	idx_t entry_idx;
-	idx_t idx_in_entry;
-	ValidityBytes::GetEntryIndex(col_idx, entry_idx, idx_in_entry);
-
 	const auto offset_in_row = layout.GetOffsets()[col_idx];
-	if (validity.AllValid()) {
-		for (idx_t i = 0; i < append_count; i++) {
-			const auto source_idx = source_sel.get_index(append_sel.get_index(i));
-			TupleDataValueStore<T>(data[source_idx], target_locations[i], offset_in_row, target_heap_locations[i]);
-		}
-	} else {
-		for (idx_t i = 0; i < append_count; i++) {
-			const auto source_idx = source_sel.get_index(append_sel.get_index(i));
-			if (validity.RowIsValid(source_idx)) {
-				TupleDataValueStore<T>(data[source_idx], target_locations[i], offset_in_row, target_heap_locations[i]);
-			} else {
-				TupleDataValueStore<T>(NullValue<T>(), target_locations[i], offset_in_row, target_heap_locations[i]);
-				ValidityBytes(target_locations[i], layout.ColumnCount()).SetInvalidUnsafe(entry_idx, idx_in_entry);
-			}
-		}
+	for (idx_t i = 0; i < append_count; i++) {
+		const auto source_idx = source_sel.get_index(append_sel.get_index(i));
+		TupleDataValueStore<T>(data[source_idx], target_locations[i], offset_in_row, target_heap_locations[i]);
 	}
 }
 
@@ -1119,20 +1100,12 @@ static void TupleDataTemplatedGather(const TupleDataLayout &layout, Vector &row_
 	auto target_data = FlatVector::GetData<T>(target);
 	auto &target_validity = FlatVector::Validity(target);
 
-	// Precompute mask indexes
-	idx_t entry_idx;
-	idx_t idx_in_entry;
-	ValidityBytes::GetEntryIndex(col_idx, entry_idx, idx_in_entry);
-
 	const auto offset_in_row = layout.GetOffsets()[col_idx];
 	for (idx_t i = 0; i < scan_count; i++) {
 		const auto &source_row = source_locations[scan_sel.get_index(i)];
 		const auto target_idx = target_sel.get_index(i);
 		target_data[target_idx] = Load<T>(source_row + offset_in_row);
-		ValidityBytes row_mask(source_row, layout.ColumnCount());
-		if (!row_mask.RowIsValid(row_mask.GetValidityEntryUnsafe(entry_idx), idx_in_entry)) {
-			target_validity.SetInvalid(target_idx);
-		}
+
 #ifdef DEBUG
 		else {
 			TupleDataValueVerify<T>(target.GetType(), target_data[target_idx]);
