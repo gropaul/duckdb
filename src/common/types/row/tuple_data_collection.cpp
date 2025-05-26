@@ -19,6 +19,9 @@ TupleDataCollection::TupleDataCollection(BufferManager &buffer_manager, shared_p
 }
 
 TupleDataCollection::~TupleDataCollection() {
+	idx_t val_bytes = ValidityBytes::SizeInBytes(layout.ColumnCount());
+	idx_t cache_size = val_bytes * STANDARD_VECTOR_SIZE;
+	allocator.get()->GetAllocator().FreeData(validity_cache_allocation, cache_size);
 }
 
 void TupleDataCollection::Initialize() {
@@ -31,6 +34,33 @@ void TupleDataCollection::Initialize() {
 		auto &type = layout.GetTypes()[col_idx];
 		scatter_functions.emplace_back(GetScatterFunction(type));
 		gather_functions.emplace_back(GetGatherFunction(type));
+	}
+	InitializeGatherValidLookupTable();
+}
+
+void TupleDataCollection::InitializeGatherValidLookupTable() {
+
+	idx_t val_bytes = ValidityBytes::SizeInBytes(layout.ColumnCount());
+	idx_t cache_size = val_bytes * STANDARD_VECTOR_SIZE;
+	validity_cache_allocation = allocator.get()->GetAllocator().AllocateData(cache_size);
+	validity_cache = reinterpret_cast<uint8_t*>(validity_cache_allocation);
+
+	for (uint8_t validity_byte = 0x01; validity_byte < 0xFF; validity_byte++) {
+
+		const uint16_t validity_index = validity_byte * 8;
+		uint8_t* lookup_tbl_pointer = &gather_validity_lookup[validity_index];
+		uint8_t active_bits_count = 0;
+
+		for (uint8_t bit_index = 0; bit_index < 8; bit_index++) {
+			const uint8_t bit_mask = static_cast<uint8_t>(0x1 << bit_index);
+			bool bit_is_active = bit_mask & validity_byte;
+			if (!bit_is_active) {
+				lookup_tbl_pointer[active_bits_count + 1] = bit_index; // +1 as the first value will be th length
+				active_bits_count += 1;
+			}
+		}
+
+		lookup_tbl_pointer[0] = active_bits_count;
 	}
 }
 

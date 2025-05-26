@@ -1075,6 +1075,118 @@ TupleDataScatterFunction TupleDataCollection::GetScatterFunction(const LogicalTy
 //-------------------------------------------------------------------------------
 // Gather
 //-------------------------------------------------------------------------------
+
+struct Tuple {
+	idx_t idx_in_entry;
+	idx_t column_index;
+};
+
+void __attribute__((noinline)) FillMap(std::unordered_map<idx_t, vector<Tuple>> &validity_bytes_map,
+                                       const vector<column_t> &column_ids) {
+	for (const auto col_idx : column_ids) {
+		idx_t entry_idx;
+		idx_t idx_in_entry;
+
+		ValidityBytes::GetEntryIndex(col_idx, entry_idx, idx_in_entry);
+		column_t target_col_idx = col_idx;
+		Tuple entry_tuple {idx_in_entry, target_col_idx};
+
+		if (!validity_bytes_map.count(entry_idx)) {
+			validity_bytes_map[entry_idx] = {entry_tuple};
+		} else {
+			validity_bytes_map[entry_idx].push_back(entry_tuple);
+		}
+	}
+}
+
+
+
+void TupleDataCollection::SetValidityForGather(Vector &row_locations_v, const SelectionVector &scan_sel,
+                                               const idx_t scan_count, const vector<column_t> &column_ids,
+                                               DataChunk &result, const SelectionVector &target_sel) const {
+	const auto row_locations = FlatVector::GetData<data_ptr_t>(row_locations_v);
+	const auto layout_column_count = GetLayout().ColumnCount();
+
+	idx_t val_bytes = ValidityBytes::SizeInBytes(layout.ColumnCount());
+
+	for (idx_t row_idx = 0; row_idx < scan_count; row_idx++) {
+		const auto sel_idx = scan_sel.get_index(row_idx);
+		const auto ptr = row_locations[sel_idx];
+		ValidityBytes row_validity_mask(ptr, layout_column_count);
+		const idx_t cache_offset = row_idx * val_bytes;
+		for (idx_t entry_idx = 0; entry_idx < val_bytes; entry_idx++) {
+			validity_cache[cache_offset + entry_idx] = row_validity_mask.GetValidityEntryUnsafe(entry_idx);
+		}
+	}
+
+	for (idx_t row_idx = 0; row_idx < scan_count; row_idx++) {
+		const idx_t cache_offset = row_idx * val_bytes;
+		const auto target_idx = target_sel.get_index(row_idx);
+
+		for (idx_t entry_idx = 0; entry_idx < val_bytes; entry_idx++) {
+			uint8_t mask_entry = validity_cache[cache_offset + entry_idx];
+			// early out: all rows are valid
+			if (mask_entry == 0xff) {
+				continue;
+			}
+			// early out: all rows are invalid
+			if (mask_entry == 0x00) {
+				throw InternalException("Not supported yet, but we have to set everything to invalid");
+				continue;
+			}
+
+			const uint16_t lookup_offset = mask_entry * 8;
+			const uint8_t *lookup_entry = &gather_validity_lookup[lookup_offset];
+			const uint8_t lookup_count = lookup_entry[0];
+
+			for (uint8_t lookup_idx = 1; lookup_idx < (lookup_count + 1); lookup_idx++) {
+				uint8_t invalid_idx = lookup_entry[lookup_idx];
+				uint64_t column_idx = entry_idx * 8 + invalid_idx;
+
+				if (column_idx >= result.data.size()) {
+					continue; // todo: this is only a temporary patch
+				}
+
+				D_ASSERT(column_idx < result.data.size());
+				auto &target_validity = FlatVector::Validity(result.data[column_idx]);
+				target_validity.SetInvalid(target_idx);
+			}
+		}
+
+	}
+}
+
+void TupleDataCollection::SetValidityForGather(Vector &row_locations_v, const SelectionVector &scan_sel,
+                                               const idx_t scan_count, const column_t column_id, Vector &target,
+                                               const SelectionVector &target_sel) const {
+	const auto row_locations = FlatVector::GetData<data_ptr_t>(row_locations_v);
+	auto &target_validity = FlatVector::Validity(target);
+	// Precompute mask indexes
+	idx_t entry_idx;
+	idx_t idx_in_entry;
+	ValidityBytes::GetEntryIndex(column_id, entry_idx, idx_in_entry);
+
+	for (idx_t i = 0; i < scan_count; i++) {
+		const auto &source_row = row_locations[scan_sel.get_index(i)];
+		const auto target_idx = target_sel.get_index(i);
+		ValidityBytes row_mask(source_row, layout.ColumnCount());
+		if (!row_mask.RowIsValid(row_mask.GetValidityEntryUnsafe(entry_idx), idx_in_entry)) {
+			target_validity.SetInvalid(target_idx);
+		}
+	}
+}
+
+void TupleDataCollection::GatherWithoutValidity(Vector &row_locations, const SelectionVector &scan_sel,
+                                                const idx_t scan_count, const column_t column_id, Vector &result,
+                                                const SelectionVector &target_sel,
+                                                optional_ptr<Vector> cached_cast_vector) const {
+	D_ASSERT(!cached_cast_vector || FlatVector::Validity(*cached_cast_vector).AllValid()); // ResetCachedCastVectors
+	const auto &gather_function = gather_functions[column_id];
+	gather_function.function(layout, row_locations, column_id, scan_sel, scan_count, result, target_sel,
+	                         cached_cast_vector, gather_function.child_functions);
+	Vector::Verify(result, target_sel, scan_count);
+}
+
 void TupleDataCollection::Gather(Vector &row_locations, const SelectionVector &scan_sel, const idx_t scan_count,
                                  DataChunk &result, const SelectionVector &target_sel,
                                  vector<unique_ptr<Vector>> &cached_cast_vectors) const {
@@ -1091,20 +1203,20 @@ void TupleDataCollection::Gather(Vector &row_locations, const SelectionVector &s
                                  const vector<column_t> &column_ids, DataChunk &result,
                                  const SelectionVector &target_sel,
                                  vector<unique_ptr<Vector>> &cached_cast_vectors) const {
+
+	SetValidityForGather(row_locations, scan_sel, scan_count, column_ids, result, target_sel);
 	for (idx_t col_idx = 0; col_idx < column_ids.size(); col_idx++) {
-		Gather(row_locations, scan_sel, scan_count, column_ids[col_idx], result.data[col_idx], target_sel,
-		       cached_cast_vectors[col_idx].get());
+		GatherWithoutValidity(row_locations, scan_sel, scan_count, column_ids[col_idx], result.data[col_idx],
+		                      target_sel, cached_cast_vectors[col_idx].get());
 	}
 }
 
 void TupleDataCollection::Gather(Vector &row_locations, const SelectionVector &scan_sel, const idx_t scan_count,
                                  const column_t column_id, Vector &result, const SelectionVector &target_sel,
                                  optional_ptr<Vector> cached_cast_vector) const {
-	D_ASSERT(!cached_cast_vector || FlatVector::Validity(*cached_cast_vector).AllValid()); // ResetCachedCastVectors
-	const auto &gather_function = gather_functions[column_id];
-	gather_function.function(layout, row_locations, column_id, scan_sel, scan_count, result, target_sel,
-	                         cached_cast_vector, gather_function.child_functions);
-	Vector::Verify(result, target_sel, scan_count);
+	SetValidityForGather(row_locations, scan_sel, scan_count, column_id, result, target_sel);
+
+	GatherWithoutValidity(row_locations, scan_sel, scan_count, column_id, result, target_sel, cached_cast_vector);
 }
 
 template <class T>
@@ -1117,27 +1229,13 @@ static void TupleDataTemplatedGather(const TupleDataLayout &layout, Vector &row_
 
 	// Target
 	auto target_data = FlatVector::GetData<T>(target);
-	auto &target_validity = FlatVector::Validity(target);
-
-	// Precompute mask indexes
-	idx_t entry_idx;
-	idx_t idx_in_entry;
-	ValidityBytes::GetEntryIndex(col_idx, entry_idx, idx_in_entry);
 
 	const auto offset_in_row = layout.GetOffsets()[col_idx];
 	for (idx_t i = 0; i < scan_count; i++) {
+		// todo: Removing this sel would give another 12% gather performance
 		const auto &source_row = source_locations[scan_sel.get_index(i)];
 		const auto target_idx = target_sel.get_index(i);
 		target_data[target_idx] = Load<T>(source_row + offset_in_row);
-		ValidityBytes row_mask(source_row, layout.ColumnCount());
-		if (!row_mask.RowIsValid(row_mask.GetValidityEntryUnsafe(entry_idx), idx_in_entry)) {
-			target_validity.SetInvalid(target_idx);
-		}
-#ifdef DEBUG
-		else {
-			TupleDataValueVerify<T>(target.GetType(), target_data[target_idx]);
-		}
-#endif
 	}
 }
 

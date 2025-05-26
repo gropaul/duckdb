@@ -83,7 +83,9 @@ public:
 
 	//! Set the DataChunk to reference another data chunk
 	DUCKDB_API void Reference(DataChunk &chunk);
-	//! Set the DataChunk to own the data of data chunk, destroying the other chunk in the process
+	//! Set the DataChunk to reference another data chunk but only from the specified column offset.
+	DUCKDB_API void Reference(DataChunk &chunk, idx_t offset);
+	//! Set this DataChunk to own the data of the other data chunk, destroying the other chunk in the process
 	DUCKDB_API void Move(DataChunk &chunk);
 
 	//! Initializes a DataChunk with the given types and without any vector data allocation.

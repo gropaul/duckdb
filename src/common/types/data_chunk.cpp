@@ -123,6 +123,18 @@ void DataChunk::Reference(DataChunk &chunk) {
 	}
 }
 
+void DataChunk::Reference(DataChunk &chunk, const idx_t offset) {
+	const idx_t n_cols_to_ref = chunk.ColumnCount() - offset;
+
+	D_ASSERT(n_cols_to_ref <= ColumnCount());
+	SetCapacity(chunk);
+	SetCardinality(chunk);
+
+	for (idx_t i = 0; i < n_cols_to_ref; i++) {
+		data[i].Reference(chunk.data[i + offset]);
+	}
+}
+
 void DataChunk::Move(DataChunk &chunk) {
 	SetCardinality(chunk);
 	SetCapacity(chunk);

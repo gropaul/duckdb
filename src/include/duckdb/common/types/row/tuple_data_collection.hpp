@@ -132,7 +132,6 @@ public:
 	//! Copy rows from input to the built Chunk state
 	void CopyRows(TupleDataChunkState &chunk_state, TupleDataChunkState &input, const SelectionVector &append_sel,
 	              const idx_t append_count) const;
-
 	//! Finalizes the Pin state, releasing or storing blocks
 	void FinalizePinState(TupleDataPinState &pin_state, TupleDataSegment &segment);
 	//! Finalizes the Pin state, releasing or storing blocks
@@ -194,10 +193,24 @@ public:
 private:
 	//! Initializes the TupleDataCollection (called by the constructor)
 	void Initialize();
+	//! todo
+	void InitializeGatherValidLookupTable();
 	//! Gets all column ids
 	void GetAllColumnIDs(vector<column_t> &column_ids);
 	//! Adds a segment to this TupleDataCollection
 	void AddSegment(TupleDataSegment &&segment);
+
+	//! Sets the validity bytes for the given DataChunk, used during gather
+	void SetValidityForGather(Vector &row_locations, const SelectionVector &scan_sel, const idx_t scan_count,
+	                          const vector<column_t> &column_ids, DataChunk &result,
+	                          const SelectionVector &target_sel) const;
+	//! Sets the validity bytes for the given Vector, used during gather
+	void SetValidityForGather(Vector &row_locations, const SelectionVector &sel, const idx_t scan_count,
+	                          const column_t column_id, Vector &result, const SelectionVector &target_sel) const;
+
+	void GatherWithoutValidity(Vector &row_locations, const SelectionVector &scan_sel, const idx_t scan_count,
+	                           const column_t column_id, Vector &result, const SelectionVector &target_sel,
+	                           optional_ptr<Vector> cached_cast_vector) const;
 
 	//! Computes the heap sizes for the specific Vector that will be appended
 	static void ComputeHeapSizes(Vector &heap_sizes_v, const Vector &source_v, TupleDataVectorFormat &source,
@@ -255,6 +268,10 @@ private:
 	vector<TupleDataGatherFunction> gather_functions;
 	//! Partition index (optional, if partitioned)
 	optional_idx partition_index;
+	//! Lookup table for validity bytes. Will return a sel indies for each lookup value. The values 0 and 255 are not allowed.
+	uint8_t gather_validity_lookup[0xFF * 8];
+	data_ptr_t validity_cache_allocation; // todo: this is not thread safe!
+	uint8_t* validity_cache; // todo: this is not thread safe!
 };
 
 } // namespace duckdb
