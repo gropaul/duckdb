@@ -31,14 +31,9 @@ static idx_t TemplatedMatchLoop(const TupleDataVectorFormat &lhs_format, Selecti
 		const auto idx = sel.get_index(i);
 
 		const auto lhs_idx = lhs_sel.get_index(idx);
-		const auto lhs_null = LHS_ALL_VALID ? false : !lhs_validity.RowIsValid(lhs_idx);
 
 		const auto &rhs_location = rhs_locations[idx];
-		const ValidityBytes rhs_mask(rhs_location, rhs_layout.ColumnCount());
-		const auto rhs_null = !rhs_mask.RowIsValid(rhs_mask.GetValidityEntryUnsafe(entry_idx), idx_in_entry);
-
-		if (COMPARISON_OP::template Operation<T>(lhs_data[lhs_idx], Load<T>(rhs_location + rhs_offset_in_row), lhs_null,
-		                                         rhs_null)) {
+		if (COMPARISON_OP::template Operation<T>(lhs_data[lhs_idx], Load<T>(rhs_location + rhs_offset_in_row), false, false)) {
 			sel.set_index(match_count++, idx);
 		} else if (NO_MATCH_SEL) {
 			no_match_sel->set_index(no_match_count++, idx);
