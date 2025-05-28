@@ -217,7 +217,7 @@ static bool IsRHSAllValid(const ExpressionType &type) {
 	switch (type) {
 	case ExpressionType::COMPARE_NOT_DISTINCT_FROM:
 	case ExpressionType::COMPARE_DISTINCT_FROM:
-		return false;
+		return true;
 	default:
 		return true;
 	}
