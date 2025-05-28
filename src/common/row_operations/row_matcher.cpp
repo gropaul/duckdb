@@ -4,11 +4,13 @@
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/types/row/tuple_data_collection.hpp"
 
+#include <sys/stat.h>
+
 namespace duckdb {
 
 using ValidityBytes = TupleDataLayout::ValidityBytes;
 
-template <bool NO_MATCH_SEL, class T, class OP, bool LHS_ALL_VALID>
+template <bool NO_MATCH_SEL, bool RHS_ALL_VALID, class T, class OP, bool LHS_ALL_VALID>
 static idx_t TemplatedMatchLoop(const TupleDataVectorFormat &lhs_format, SelectionVector &sel, const idx_t count,
                                 const TupleDataLayout &rhs_layout, Vector &rhs_row_locations, const idx_t col_idx,
                                 SelectionVector *no_match_sel, idx_t &no_match_count) {
@@ -22,9 +24,12 @@ static idx_t TemplatedMatchLoop(const TupleDataVectorFormat &lhs_format, Selecti
 	// RHS
 	const auto rhs_locations = FlatVector::GetData<data_ptr_t>(rhs_row_locations);
 	const auto rhs_offset_in_row = rhs_layout.GetOffsets()[col_idx];
+
 	idx_t entry_idx;
 	idx_t idx_in_entry;
-	ValidityBytes::GetEntryIndex(col_idx, entry_idx, idx_in_entry);
+	if (!RHS_ALL_VALID) {
+		ValidityBytes::GetEntryIndex(col_idx, entry_idx, idx_in_entry);
+	}
 
 	idx_t match_count = 0;
 	for (idx_t i = 0; i < count; i++) {
@@ -34,8 +39,12 @@ static idx_t TemplatedMatchLoop(const TupleDataVectorFormat &lhs_format, Selecti
 		const auto lhs_null = LHS_ALL_VALID ? false : !lhs_validity.RowIsValid(lhs_idx);
 
 		const auto &rhs_location = rhs_locations[idx];
-		const ValidityBytes rhs_mask(rhs_location, rhs_layout.ColumnCount());
-		const auto rhs_null = !rhs_mask.RowIsValid(rhs_mask.GetValidityEntryUnsafe(entry_idx), idx_in_entry);
+
+		bool rhs_null = false;
+		if (!RHS_ALL_VALID) {
+			const ValidityBytes rhs_mask(rhs_location, rhs_layout.ColumnCount());
+			rhs_null =  !rhs_mask.RowIsValid(rhs_mask.GetValidityEntryUnsafe(entry_idx), idx_in_entry);
+		}
 
 		if (COMPARISON_OP::template Operation<T>(lhs_data[lhs_idx], Load<T>(rhs_location + rhs_offset_in_row), lhs_null,
 		                                         rhs_null)) {
@@ -47,16 +56,16 @@ static idx_t TemplatedMatchLoop(const TupleDataVectorFormat &lhs_format, Selecti
 	return match_count;
 }
 
-template <bool NO_MATCH_SEL, class T, class OP>
+template <bool NO_MATCH_SEL, bool RHS_ALL_VALID, class T, class OP>
 static idx_t TemplatedMatch(Vector &, const TupleDataVectorFormat &lhs_format, SelectionVector &sel, const idx_t count,
                             const TupleDataLayout &rhs_layout, Vector &rhs_row_locations, const idx_t col_idx,
                             const vector<MatchFunction> &, SelectionVector *no_match_sel, idx_t &no_match_count) {
 	if (lhs_format.unified.validity.AllValid()) {
-		return TemplatedMatchLoop<NO_MATCH_SEL, T, OP, true>(lhs_format, sel, count, rhs_layout, rhs_row_locations,
-		                                                     col_idx, no_match_sel, no_match_count);
+		return TemplatedMatchLoop<NO_MATCH_SEL, RHS_ALL_VALID, T, OP, true>(
+		    lhs_format, sel, count, rhs_layout, rhs_row_locations, col_idx, no_match_sel, no_match_count);
 	} else {
-		return TemplatedMatchLoop<NO_MATCH_SEL, T, OP, false>(lhs_format, sel, count, rhs_layout, rhs_row_locations,
-		                                                      col_idx, no_match_sel, no_match_count);
+		return TemplatedMatchLoop<NO_MATCH_SEL, RHS_ALL_VALID, T, OP, false>(
+		    lhs_format, sel, count, rhs_layout, rhs_row_locations, col_idx, no_match_sel, no_match_count);
 	}
 }
 
@@ -204,10 +213,21 @@ static idx_t GenericNestedMatch(Vector &lhs_vector, const TupleDataVectorFormat 
 	return SelectComparison<OP>(sliced, key, sel, count, &sel, nullptr);
 }
 
+static bool IsRHSAllValid(const ExpressionType &type) {
+	switch (type) {
+	case ExpressionType::COMPARE_NOT_DISTINCT_FROM:
+	case ExpressionType::COMPARE_DISTINCT_FROM:
+		return false;
+	default:
+		return true;
+	}
+}
+
 void RowMatcher::Initialize(const bool no_match_sel, const TupleDataLayout &layout, const Predicates &predicates) {
 	match_functions.reserve(predicates.size());
 	for (idx_t col_idx = 0; col_idx < predicates.size(); col_idx++) {
-		match_functions.push_back(GetMatchFunction(no_match_sel, layout.GetTypes()[col_idx], predicates[col_idx]));
+		match_functions.push_back(GetMatchFunction(no_match_sel, layout.GetTypes()[col_idx], predicates[col_idx],
+		                                           IsRHSAllValid(predicates[col_idx])));
 	}
 }
 
@@ -223,7 +243,8 @@ void RowMatcher::Initialize(const bool no_match_sel, const TupleDataLayout &layo
 	match_functions.reserve(predicates.size());
 	for (idx_t idx = 0; idx < predicates.size(); idx++) {
 		column_t col_idx = columns[idx];
-		match_functions.push_back(GetMatchFunction(no_match_sel, layout.GetTypes()[col_idx], predicates[idx]));
+		match_functions.push_back(GetMatchFunction(no_match_sel, layout.GetTypes()[col_idx], predicates[idx],
+		                                           IsRHSAllValid(predicates[idx])));
 	}
 }
 
@@ -265,43 +286,54 @@ idx_t RowMatcher::Match(DataChunk &lhs, const vector<TupleDataVectorFormat> &lhs
 }
 
 MatchFunction RowMatcher::GetMatchFunction(const bool no_match_sel, const LogicalType &type,
-                                           const ExpressionType predicate) {
-	return no_match_sel ? GetMatchFunction<true>(type, predicate) : GetMatchFunction<false>(type, predicate);
+                                           const ExpressionType predicate, const bool rhs_all_valid) {
+	return no_match_sel ? GetMatchFunction<true>(type, predicate, rhs_all_valid)
+	                    : GetMatchFunction<false>(type, predicate, rhs_all_valid);
 }
 
 template <bool NO_MATCH_SEL>
+MatchFunction RowMatcher::GetMatchFunction(const LogicalType &type, const ExpressionType predicate,
+                                           const bool rhs_all_valid) {
+	if (rhs_all_valid) {
+		return GetMatchFunction<NO_MATCH_SEL, true>(type, predicate);
+	} else {
+		return GetMatchFunction<NO_MATCH_SEL, false>(type, predicate);
+	}
+}
+
+template <bool NO_MATCH_SEL, bool RHS_ALL_VALID>
 MatchFunction RowMatcher::GetMatchFunction(const LogicalType &type, const ExpressionType predicate) {
 	switch (type.InternalType()) {
 	case PhysicalType::BOOL:
-		return GetMatchFunction<NO_MATCH_SEL, bool>(predicate);
+		return GetMatchFunction<NO_MATCH_SEL, RHS_ALL_VALID, bool>(predicate);
 	case PhysicalType::INT8:
-		return GetMatchFunction<NO_MATCH_SEL, int8_t>(predicate);
+		return GetMatchFunction<NO_MATCH_SEL, RHS_ALL_VALID, int8_t>(predicate);
 	case PhysicalType::INT16:
-		return GetMatchFunction<NO_MATCH_SEL, int16_t>(predicate);
+		return GetMatchFunction<NO_MATCH_SEL, RHS_ALL_VALID, int16_t>(predicate);
 	case PhysicalType::INT32:
-		return GetMatchFunction<NO_MATCH_SEL, int32_t>(predicate);
+		return GetMatchFunction<NO_MATCH_SEL, RHS_ALL_VALID, int32_t>(predicate);
 	case PhysicalType::INT64:
-		return GetMatchFunction<NO_MATCH_SEL, int64_t>(predicate);
+		return GetMatchFunction<NO_MATCH_SEL, RHS_ALL_VALID, int64_t>(predicate);
 	case PhysicalType::INT128:
-		return GetMatchFunction<NO_MATCH_SEL, hugeint_t>(predicate);
+		return GetMatchFunction<NO_MATCH_SEL, RHS_ALL_VALID, hugeint_t>(predicate);
 	case PhysicalType::UINT8:
-		return GetMatchFunction<NO_MATCH_SEL, uint8_t>(predicate);
+		return GetMatchFunction<NO_MATCH_SEL, RHS_ALL_VALID, uint8_t>(predicate);
 	case PhysicalType::UINT16:
-		return GetMatchFunction<NO_MATCH_SEL, uint16_t>(predicate);
+		return GetMatchFunction<NO_MATCH_SEL, RHS_ALL_VALID, uint16_t>(predicate);
 	case PhysicalType::UINT32:
-		return GetMatchFunction<NO_MATCH_SEL, uint32_t>(predicate);
+		return GetMatchFunction<NO_MATCH_SEL, RHS_ALL_VALID, uint32_t>(predicate);
 	case PhysicalType::UINT64:
-		return GetMatchFunction<NO_MATCH_SEL, uint64_t>(predicate);
+		return GetMatchFunction<NO_MATCH_SEL, RHS_ALL_VALID, uint64_t>(predicate);
 	case PhysicalType::UINT128:
-		return GetMatchFunction<NO_MATCH_SEL, uhugeint_t>(predicate);
+		return GetMatchFunction<NO_MATCH_SEL, RHS_ALL_VALID, uhugeint_t>(predicate);
 	case PhysicalType::FLOAT:
-		return GetMatchFunction<NO_MATCH_SEL, float>(predicate);
+		return GetMatchFunction<NO_MATCH_SEL, RHS_ALL_VALID, float>(predicate);
 	case PhysicalType::DOUBLE:
-		return GetMatchFunction<NO_MATCH_SEL, double>(predicate);
+		return GetMatchFunction<NO_MATCH_SEL, RHS_ALL_VALID, double>(predicate);
 	case PhysicalType::INTERVAL:
-		return GetMatchFunction<NO_MATCH_SEL, interval_t>(predicate);
+		return GetMatchFunction<NO_MATCH_SEL, RHS_ALL_VALID, interval_t>(predicate);
 	case PhysicalType::VARCHAR:
-		return GetMatchFunction<NO_MATCH_SEL, string_t>(predicate);
+		return GetMatchFunction<NO_MATCH_SEL, RHS_ALL_VALID, string_t>(predicate);
 	case PhysicalType::STRUCT:
 		return GetStructMatchFunction<NO_MATCH_SEL>(type, predicate);
 	case PhysicalType::LIST:
@@ -315,33 +347,33 @@ MatchFunction RowMatcher::GetMatchFunction(const LogicalType &type, const Expres
 	}
 }
 
-template <bool NO_MATCH_SEL, class T>
+template <bool NO_MATCH_SEL, bool RHS_ALL_VALID, class T>
 MatchFunction RowMatcher::GetMatchFunction(const ExpressionType predicate) {
 	MatchFunction result;
 	switch (predicate) {
 	case ExpressionType::COMPARE_EQUAL:
-		result.function = TemplatedMatch<NO_MATCH_SEL, T, Equals>;
+		result.function = TemplatedMatch<NO_MATCH_SEL, RHS_ALL_VALID, T, Equals>;
 		break;
 	case ExpressionType::COMPARE_NOTEQUAL:
-		result.function = TemplatedMatch<NO_MATCH_SEL, T, NotEquals>;
+		result.function = TemplatedMatch<NO_MATCH_SEL, RHS_ALL_VALID, T, NotEquals>;
 		break;
 	case ExpressionType::COMPARE_DISTINCT_FROM:
-		result.function = TemplatedMatch<NO_MATCH_SEL, T, DistinctFrom>;
+		result.function = TemplatedMatch<NO_MATCH_SEL, RHS_ALL_VALID, T, DistinctFrom>;
 		break;
 	case ExpressionType::COMPARE_NOT_DISTINCT_FROM:
-		result.function = TemplatedMatch<NO_MATCH_SEL, T, NotDistinctFrom>;
+		result.function = TemplatedMatch<NO_MATCH_SEL, RHS_ALL_VALID, T, NotDistinctFrom>;
 		break;
 	case ExpressionType::COMPARE_GREATERTHAN:
-		result.function = TemplatedMatch<NO_MATCH_SEL, T, GreaterThan>;
+		result.function = TemplatedMatch<NO_MATCH_SEL, RHS_ALL_VALID, T, GreaterThan>;
 		break;
 	case ExpressionType::COMPARE_GREATERTHANOREQUALTO:
-		result.function = TemplatedMatch<NO_MATCH_SEL, T, GreaterThanEquals>;
+		result.function = TemplatedMatch<NO_MATCH_SEL, RHS_ALL_VALID, T, GreaterThanEquals>;
 		break;
 	case ExpressionType::COMPARE_LESSTHAN:
-		result.function = TemplatedMatch<NO_MATCH_SEL, T, LessThan>;
+		result.function = TemplatedMatch<NO_MATCH_SEL, RHS_ALL_VALID, T, LessThan>;
 		break;
 	case ExpressionType::COMPARE_LESSTHANOREQUALTO:
-		result.function = TemplatedMatch<NO_MATCH_SEL, T, LessThanEquals>;
+		result.function = TemplatedMatch<NO_MATCH_SEL, RHS_ALL_VALID, T, LessThanEquals>;
 		break;
 	default:
 		throw InternalException("Unsupported ExpressionType for RowMatcher::GetMatchFunction: %s",
@@ -390,7 +422,7 @@ MatchFunction RowMatcher::GetStructMatchFunction(const LogicalType &type, const 
 
 	result.child_functions.reserve(StructType::GetChildCount(type));
 	for (const auto &child_type : StructType::GetChildTypes(type)) {
-		result.child_functions.push_back(GetMatchFunction<NO_MATCH_SEL>(child_type.second, child_predicate));
+		result.child_functions.push_back(GetMatchFunction<NO_MATCH_SEL, false>(child_type.second, child_predicate));
 	}
 
 	return result;

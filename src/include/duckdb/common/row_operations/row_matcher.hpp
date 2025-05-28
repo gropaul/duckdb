@@ -58,10 +58,12 @@ public:
 
 private:
 	//! Gets the templated match function for a given column
-	MatchFunction GetMatchFunction(const bool no_match_sel, const LogicalType &type, const ExpressionType predicate);
+	MatchFunction GetMatchFunction(const bool no_match_sel, const LogicalType &type, const ExpressionType predicate, const bool rhs_all_valid);
 	template <bool NO_MATCH_SEL>
+	MatchFunction GetMatchFunction(const LogicalType &type, const ExpressionType predicate, const bool rhs_all_valid);
+	template <bool NO_MATCH_SEL, bool RHS_ALL_VALID >
 	MatchFunction GetMatchFunction(const LogicalType &type, const ExpressionType predicate);
-	template <bool NO_MATCH_SEL, class T>
+	template <bool NO_MATCH_SEL, bool RHS_ALL_VALID , class T>
 	MatchFunction GetMatchFunction(const ExpressionType predicate);
 	template <bool NO_MATCH_SEL>
 	MatchFunction GetStructMatchFunction(const LogicalType &type, const ExpressionType predicate);
