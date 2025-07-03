@@ -4,12 +4,18 @@
 #include "duckdb/execution/operator/scan/physical_column_data_scan.hpp"
 #include "duckdb/execution/physical_plan_generator.hpp"
 #include "duckdb/main/client_context.hpp"
+#include "duckdb/optimizer/binding_printer.hpp"
 #include "duckdb/planner/operator/logical_explain.hpp"
 
 namespace duckdb {
 
 PhysicalOperator &PhysicalPlanGenerator::CreatePlan(LogicalExplain &op) {
 	D_ASSERT(op.children.size() == 1);
+
+
+	BindingPrinter binding_printer;
+	string json = binding_printer.Visit(op);
+
 	auto logical_plan_opt = op.children[0]->ToString(op.explain_format);
 	auto &plan = CreatePlan(*op.children[0]);
 	if (op.explain_type == ExplainType::EXPLAIN_ANALYZE) {
@@ -17,6 +23,8 @@ PhysicalOperator &PhysicalPlanGenerator::CreatePlan(LogicalExplain &op) {
 		explain.children.push_back(plan);
 		return explain;
 	}
+
+
 
 	// Format the plan and set the output of the EXPLAIN.
 	op.physical_plan = plan.ToString(op.explain_format);
@@ -31,8 +39,8 @@ PhysicalOperator &PhysicalPlanGenerator::CreatePlan(LogicalExplain &op) {
 		values = {op.physical_plan};
 		break;
 	default:
-		keys = {"logical_plan", "logical_opt", "physical_plan"};
-		values = {op.logical_plan_unopt, logical_plan_opt, op.physical_plan};
+		keys = {"logical_plan", "logical_opt", "logical_opt_detailed", "physical_plan"};
+		values = {op.logical_plan_unopt, logical_plan_opt, json , op.physical_plan};
 	}
 
 	// Create a ColumnDataCollection from the output.

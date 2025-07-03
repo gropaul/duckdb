@@ -1,7 +1,7 @@
 //===----------------------------------------------------------------------===//
 //                         DuckDB
 //
-// duckdb/optimizer/limit_pushdown.hpp
+// duckdb/optimizer/binding_printer.hpp
 //
 //
 //===----------------------------------------------------------------------===//
@@ -12,13 +12,36 @@
 #include "duckdb/planner/logical_operator_visitor.hpp"
 #include "duckdb/planner/operator/logical_dependent_join.hpp"
 #include "duckdb/planner/operator/logical_distinct.hpp"
-#include "duckdb/planner/operator/logical_expression_get.hpp"
 #include "duckdb/planner/operator/logical_insert.hpp"
 #include "duckdb/planner/operator/logical_recursive_cte.hpp"
+#include "duckdb/planner/operator/logical_order.hpp"
+#include "duckdb/planner/operator/logical_top_n.hpp"
+#include "duckdb/planner/operator/logical_limit.hpp"
+#include "duckdb/planner/operator/logical_any_join.hpp"
+#include "duckdb/planner/operator/logical_aggregate.hpp"
+#include "duckdb/planner/operator/logical_explain.hpp"
 
 namespace duckdb {
 class LogicalOperator;
 class Optimizer;
+
+static string ListToString(const vector<idx_t> &list) {
+	string result = "[";
+	for (size_t i = 0; i < list.size(); ++i) {
+		if (i > 0) {
+			result += ",";
+		}
+		result += to_string(list[i]);
+	}
+	return result + "]";
+}
+
+static string EscapeForJson(const string &value) {
+	string escaped = StringUtil::Replace(value, "\"", "\\\"");
+	escaped = StringUtil::Replace(escaped, "\n", "\\n");
+	escaped = StringUtil::Replace(escaped, "\r", "\\r");
+	return escaped;
+}
 
 struct ExpressionInfo {
 	string expression;
@@ -32,10 +55,10 @@ struct ExpressionInfo {
 	vector<ExpressionInfo> children;
 
 	string ToJson() const {
-		string json = "{\"expression\":\"" + expression + "\"";
-		json += ",\"expression_type\":\"" + expression_type + "\"";
-		json += ",\"expression_class\":\"" + expression_class + "\"";
-		json += ",\"return_type\":\"" + return_type + "\"";
+		string json = "{\"expression\":\"" + EscapeForJson(expression) + "\"";
+		json += ",\"expression_type\":\"" + EscapeForJson(expression_type) + "\"";
+		json += ",\"expression_class\":\"" + EscapeForJson(expression_class) + "\"";
+		json += ",\"return_type\":\"" + EscapeForJson(return_type) + "\"";
 		if (table_index != -1) {
 			json += ",\"table_index\":" + to_string(table_index);
 		}
@@ -72,6 +95,10 @@ public:
 			auto &bound_ref = expression->get()->Cast<BoundColumnRefExpression>();
 			this->info.table_index = static_cast<int>(bound_ref.binding.table_index);
 			this->info.column_index = static_cast<int>(bound_ref.binding.column_index);
+		} else if (expression->get()->GetExpressionType() == ExpressionType::BOUND_REF) {
+			auto &bound_ref = expression->get()->Cast<BoundReferenceExpression>();
+			this->info.table_index = static_cast<int>(-1);
+			this->info.column_index = static_cast<int>(bound_ref.index);
 		} else {
 			this->info.table_index = -1;
 			this->info.column_index = -1;
@@ -116,6 +143,7 @@ struct ExtractedInfo {
 	string operator_type;
 	vector<idx_t> table_index;
 
+	InsertionOrderPreservingMap<string> extra_info; // key-value pairs for extra information
 	vector<ExpressionInfo> expressions;
 	std::unordered_map<string, vector<ExpressionInfo>> other_expressions;
 	vector<JoinConditionInfo> join_conditions;
@@ -125,7 +153,6 @@ struct ExtractedInfo {
 		string json = "{";
 
 		json += "\"operator_type\":\"" + operator_type + "\",";
-
 		json += "\"table_index\":[";
 		for (size_t i = 0; i < table_index.size(); ++i) {
 			if (i > 0)
@@ -133,6 +160,15 @@ struct ExtractedInfo {
 			json += to_string(table_index[i]);
 		}
 		json += "],";
+
+		json += "\"extra_info\":{";
+		for (auto it = extra_info.begin(); it != extra_info.end(); ++it) {
+			if (it != extra_info.begin()) {
+				json += ",";
+			}
+			json += "\"" + it->first + "\":\"" + EscapeForJson(it->second) + "\"";
+		}
+		json += "},";
 
 		json += "\"expressions\":[";
 		for (size_t i = 0; i < expressions.size(); ++i) {
@@ -203,16 +239,31 @@ public:
 	explicit BindingExtractor(ExtractedInfo &info) : info(info) {
 	}
 
+	/*
+	if (projection_ids.empty()) {
+	    for (auto &index : column_ids) {
+	        types.push_back(GetColumnType(index));
+	    }
+	} else {
+	    for (auto &proj_index : projection_ids) {
+	        auto &index = column_ids[proj_index];
+	        types.push_back(GetColumnType(index));
+	    }
+	}
+	*/
 	void EnumerateOpExpressions(LogicalOperator &op) {
 		switch (op.type) {
 		case LogicalOperatorType::LOGICAL_GET: {
 			auto &get = op.Cast<LogicalGet>();
-			auto scan_count = get.types.size();
+			auto scan_count = get.GetColumnIds().size();
 			for (idx_t i = 0; i < scan_count; i++) {
+				const auto idx = get.projection_ids.empty() ? i : get.projection_ids[i];
+				const auto col_idx = get.GetColumnIds()[idx].GetPrimaryIndex();
+
 				info.expressions.emplace_back();
 				auto &expression_info = info.expressions.back();
-				expression_info.return_type = get.types[i].ToString();
-				expression_info.expression = get.names[i];
+				expression_info.return_type = get.types[col_idx].ToString();
+				expression_info.expression = get.names[col_idx];
 				expression_info.expression_type = ExpressionTypeToString(ExpressionType::BOUND_COLUMN_REF);
 				expression_info.expression_class = ExpressionClassToString(ExpressionClass::BOUND_COLUMN_REF);
 			}
@@ -332,6 +383,11 @@ public:
 				ExpressionExtractor extractor(order_expression);
 				extractor.VisitExpression(&expr);
 			}
+
+			// add left and right projection maps
+			this->info.extra_info["left_projection_map"] = ListToString(join.left_projection_map);
+			this->info.extra_info["right_projection_map"] = ListToString(join.right_projection_map);
+
 			info.other_expressions["duplicate_eliminated_columns"] = std::move(duplicate_eliminated_columns);
 
 			for (auto &cond : join.conditions) {
@@ -411,6 +467,7 @@ public:
 	void VisitOperator(LogicalOperator &op) override {
 		this->info.operator_type = LogicalOperatorToString(op.type);
 		this->info.table_index = op.GetTableIndex();
+		this->info.extra_info = op.ParamsToString();
 
 		VisitOperatorExpressions(op);
 
@@ -428,18 +485,34 @@ public:
 	}
 };
 
-class BindingPrinter {
+class BindingPrinter : public LogicalOperatorVisitor {
+
+	string plan;
+
+	void VisitOperator(LogicalOperator &op) override {
+		if (op.type == LogicalOperatorType::LOGICAL_EXPLAIN) {
+			LogicalExplain &explain = op.Cast<LogicalExplain>();
+			ExtractedInfo info;
+
+			BindingExtractor extractor(info);
+			extractor.VisitOperator(*op.children[0]);
+
+			string json = "[" + info.ToJson() + "]";
+			explain.logical_plan_opt_detailed = json;
+			plan = json;
+		}
+	}
 
 public:
 	//! Optimize PROJECTION + LIMIT to LIMIT + Projection
-	void Visit(unique_ptr<LogicalOperator> &op) {
-		ExtractedInfo info;
+	string Visit(unique_ptr<LogicalOperator> &op) {
+		this->VisitOperator(*op);
+		return plan;
+	}
 
-		BindingExtractor extractor(info);
-		extractor.VisitOperator(*op);
-
-		string json = info.ToJson();
-		printf("Extracted Info: %s\n", json.c_str());
+	string Visit(LogicalOperator &op) {
+		this->VisitOperator(op);
+		return plan;
 	}
 };
 

@@ -32,6 +32,7 @@ public:
 	string physical_plan;
 	string logical_plan_unopt;
 	string logical_plan_opt;
+	string logical_plan_opt_detailed;
 
 public:
 	void Serialize(Serializer &serializer) const override;

@@ -333,21 +333,9 @@ public:
 		if (data.size() != 2) {
 			return;
 		}
-		if (strcmp(data[0], "logical_plan") == 0 || strcmp(data[0], "logical_opt") == 0 ||
-		    strcmp(data[0], "physical_plan") == 0) {
-			state.Print("\n┌─────────────────────────────┐\n");
-			state.Print("│┌───────────────────────────┐│\n");
-			if (strcmp(data[0], "logical_plan") == 0) {
-				state.Print("││ Unoptimized Logical Plan  ││\n");
-			} else if (strcmp(data[0], "logical_opt") == 0) {
-				state.Print("││  Optimized Logical Plan   ││\n");
-			} else if (strcmp(data[0], "physical_plan") == 0) {
-				state.Print("││       Physical Plan       ││\n");
-			}
-			state.Print("│└───────────────────────────┘│\n");
-			state.Print("└─────────────────────────────┘\n");
-		}
-		state.Print(data[1]);
+		state.Print("\"" + string(data[0]) + "\": ");
+ 		state.Print(data[1]);
+		state.Print(",");
 	}
 };
 

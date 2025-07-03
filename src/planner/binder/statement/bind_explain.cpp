@@ -1,3 +1,4 @@
+#include "duckdb/optimizer/binding_printer.hpp"
 #include "duckdb/planner/binder.hpp"
 #include "duckdb/parser/statement/explain_statement.hpp"
 #include "duckdb/planner/operator/logical_explain.hpp"
