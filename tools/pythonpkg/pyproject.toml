@@ -6,6 +6,14 @@ requires = [
 ]
 build-backend = "setuptools.build_meta"
 
+[tool.poetry]
+name = "duckdb"
+version = "0.0.0"
+description = "DuckDB in-process database"
+authors = ["Hannes Muehleisen <hannes@cwi.nl>"]
+readme = "README.md"
+packages = [{ include = "duckdb" }]
+
 [project]
 name = "duckdb"
 dynamic = ["version"]

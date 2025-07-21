@@ -20,6 +20,8 @@
 #include "duckdb/planner/operator/logical_any_join.hpp"
 #include "duckdb/planner/operator/logical_aggregate.hpp"
 #include "duckdb/planner/operator/logical_explain.hpp"
+#include "duckdb/planner/operator/logical_column_data_get.hpp"
+#include "duckdb/planner/operator/logical_delim_get.hpp"
 
 namespace duckdb {
 class LogicalOperator;
@@ -239,35 +241,79 @@ public:
 	explicit BindingExtractor(ExtractedInfo &info) : info(info) {
 	}
 
-	/*
-	if (projection_ids.empty()) {
-	    for (auto &index : column_ids) {
-	        types.push_back(GetColumnType(index));
-	    }
-	} else {
-	    for (auto &proj_index : projection_ids) {
-	        auto &index = column_ids[proj_index];
-	        types.push_back(GetColumnType(index));
-	    }
-	}
-	*/
 	void EnumerateOpExpressions(LogicalOperator &op) {
 		switch (op.type) {
-		case LogicalOperatorType::LOGICAL_GET: {
-			auto &get = op.Cast<LogicalGet>();
-			auto scan_count = get.GetColumnIds().size();
-			for (idx_t i = 0; i < scan_count; i++) {
-				const auto idx = get.projection_ids.empty() ? i : get.projection_ids[i];
-				const auto col_idx = get.GetColumnIds()[idx].GetPrimaryIndex();
-
+		case LogicalOperatorType::LOGICAL_CHUNK_GET: {
+			auto &get = op.Cast<LogicalColumnDataGet>();
+			auto &return_types = get.chunk_types;
+			for (idx_t i = 0; i < return_types.size(); i++) {
 				info.expressions.emplace_back();
 				auto &expression_info = info.expressions.back();
-				expression_info.return_type = get.types[col_idx].ToString();
-				expression_info.expression = get.names[col_idx];
-				expression_info.expression_type = ExpressionTypeToString(ExpressionType::BOUND_COLUMN_REF);
-				expression_info.expression_class = ExpressionClassToString(ExpressionClass::BOUND_COLUMN_REF);
+				expression_info.return_type = return_types[i].ToString();
+				expression_info.expression = 'const';
+				expression_info.expression_type = ExpressionTypeToString(ExpressionType::VALUE_CONSTANT);
+				expression_info.expression_class = ExpressionClassToString(ExpressionClass::CONSTANT);
 			}
 			break;
+		}
+		case LogicalOperatorType::LOGICAL_DELIM_GET: {
+			auto &get = op.Cast<LogicalDelimGet>();
+			auto &return_types = get.chunk_types;
+			for (idx_t i = 0; i < return_types.size(); i++) {
+				info.expressions.emplace_back();
+				auto &expression_info = info.expressions.back();
+				expression_info.return_type = return_types[i].ToString();
+				expression_info.expression = 'const';
+				expression_info.expression_type = ExpressionTypeToString(ExpressionType::VALUE_CONSTANT);
+				expression_info.expression_class = ExpressionClassToString(ExpressionClass::CONSTANT);
+			}
+			break;
+		}
+		case LogicalOperatorType::LOGICAL_GET: {
+			auto &get = op.Cast<LogicalGet>();
+
+			if (get.projection_ids.empty()) {
+				for (auto &col_idx : get.GetColumnIds()) {
+					info.expressions.emplace_back();
+					auto &expression_info = info.expressions.back();
+					expression_info.return_type = get.GetColumnType(col_idx).ToString();
+					expression_info.expression = get.names[col_idx.GetPrimaryIndex()];
+					expression_info.expression_type = ExpressionTypeToString(ExpressionType::BOUND_COLUMN_REF);
+					expression_info.expression_class = ExpressionClassToString(ExpressionClass::BOUND_COLUMN_REF);
+				}
+			} else {
+				for (auto &proj_index : get.projection_ids) {
+					auto &col_idx = get.GetColumnIds()[proj_index];
+					info.expressions.emplace_back();
+					auto &expression_info = info.expressions.back();
+					expression_info.return_type = get.GetColumnType(col_idx).ToString();
+					expression_info.expression = get.names[col_idx.GetPrimaryIndex()];
+					expression_info.expression_type = ExpressionTypeToString(ExpressionType::BOUND_COLUMN_REF);
+					expression_info.expression_class = ExpressionClassToString(ExpressionClass::BOUND_COLUMN_REF);
+				}
+			}
+
+			vector<ExpressionInfo> &table_filters = info.other_expressions["table_filters"];
+			for (auto &entry : get.table_filters.filters) {
+				auto column_id = entry.first;
+				auto &type = get.returned_types[column_id];
+
+				auto name = get.names[column_id];
+				auto column = make_uniq<BoundReferenceExpression>(name, type, column_id);
+				auto expression = entry.second->ToExpression(*column);
+
+				table_filters.emplace_back();
+				auto &order_expression = table_filters.back();
+				ExpressionExtractor extractor(order_expression);
+				extractor.VisitExpression(&expression);
+			}
+
+			break;
+		}
+		case LogicalOperatorType::LOGICAL_EXCEPT:
+		case LogicalOperatorType::LOGICAL_INTERSECT:
+		case LogicalOperatorType::LOGICAL_UNION: {
+			auto &setop = op.Cast<LogicalSetOperation>();
 		}
 		case LogicalOperatorType::LOGICAL_ORDER_BY: {
 			auto &order = op.Cast<LogicalOrder>();
