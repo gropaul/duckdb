@@ -44,6 +44,9 @@ parser.add_argument("--disable-timeout", action="store_true", help="Disable time
 parser.add_argument("--max-timeout", type=int, default=3600, help="Set maximum timeout in seconds (default: 3600).")
 parser.add_argument("--root-dir", type=str, default="", help="Root directory.")
 parser.add_argument("--no-summary", type=str, default=False, help="No summary in the end.")
+parser.add_argument("--name", type=str, default="regression", help="Name of the benchmark run.")
+parser.add_argument("--gh-summary", action="store_true", help="Write results to the GitHub Actions step summary.")
+
 parser.add_argument(
     "--regression-threshold-seconds",
     type=float,
@@ -66,7 +69,6 @@ max_timeout = args.max_timeout
 root_dir = args.root_dir
 no_summary = args.no_summary
 regression_threshold_seconds = args.regression_threshold_seconds
-
 
 # how many times we will run the experiment, to be sure of the regression
 NUMBER_REPETITIONS = 5
@@ -130,7 +132,7 @@ for i in range(NUMBER_REPETITIONS):
             # benchmark failed to run - always a regression
             error_list.append(BenchmarkResult(benchmark, old_res, new_res, old_fail, new_fail))
         elif (no_regression_fail == False) and (
-            (old_res + REGRESSION_THRESHOLD_SECONDS) * multiply_percentage < new_res
+                (old_res + REGRESSION_THRESHOLD_SECONDS) * multiply_percentage < new_res
         ):
             regression_list.append(BenchmarkResult(benchmark, old_res, new_res))
         else:
@@ -185,19 +187,47 @@ time_a = geomean(old_runner.complete_timings)
 time_b = geomean(new_runner.complete_timings)
 
 
-print("")
+import os
+
+print("")  # for spacing in console output
+
 if isinstance(time_a, str) or isinstance(time_b, str):
-    print(f"Old: {time_a}")
-    print(f"New: {time_b}")
-elif time_a > time_b * 1.01:
-    print(f"Old timing geometric mean: {time_a}")
-    print(f"New timing geometric mean: {time_b}, roughly {int((time_a - time_b) * 100.0 / time_a)}% faster")
-elif time_b > time_a * 1.01:
-    print(f"Old timing geometric mean: {time_a}, roughly {int((time_b - time_a) * 100.0 / time_b)}% faster")
-    print(f"New timing geometric mean: {time_b}")
+    old_text = f"Old: {time_a}"
+    new_text = f"New: {time_b}"
 else:
-    print(f"Old timing geometric mean: {time_a}")
-    print(f"New timing geometric mean: {time_b}")
+    delta = time_b - time_a
+    percent_change = abs(delta) * 100.0 / max(time_a, time_b)
+    if percent_change < 1.0:
+        # Less than 1% difference
+        old_text = f"Old timing geometric mean: {time_a:.2f} ms"
+        new_text = f"New timing geometric mean: {time_b:.2f} ms (±1%)"
+    elif time_a > time_b:
+        old_text = f"Old timing geometric mean: {time_a:.2f} ms"
+        new_text = f"New timing geometric mean: {time_b:.2f} ms ({percent_change:.1f}% faster)"
+    else:
+        old_text = f"Old timing geometric mean: {time_a:.2f} ms ({percent_change:.1f}% faster)"
+        new_text = f"New timing geometric mean: {time_b:.2f} ms"
+
+# Print to console
+print(old_text)
+print(new_text)
+
+# Write to GitHub Actions summary
+if args.gh_summary:
+    summary_file = os.getenv("GITHUB_STEP_SUMMARY")
+    if summary_file:
+        with open(summary_file, "a") as f:
+            f.write(f"##Benchmark Summary: `{args.name}`\n\n")
+            f.write("Number of threads: ")
+            f.write(f"{threads}\n\n")
+            f.write("```\n")
+            f.write(old_text.strip() + "\n")
+            f.write(new_text.strip() + "\n")
+            f.write("```\n\n")
+    else:
+        print("Warning: GITHUB_STEP_SUMMARY not set, skipping summary output.")
+
+
 
 # nuke cached benchmark data between runs
 if os.path.isdir("duckdb_benchmark_data"):
