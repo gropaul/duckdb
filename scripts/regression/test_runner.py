@@ -194,6 +194,7 @@ print("")  # for spacing in console output
 if isinstance(time_a, str) or isinstance(time_b, str):
     old_text = f"Old: {time_a}"
     new_text = f"New: {time_b}"
+    delta = 0.0
 else:
     delta = time_b - time_a
     percent_change = abs(delta) * 100.0 / max(time_a, time_b)
@@ -203,25 +204,39 @@ else:
         new_text = f"New timing geometric mean: {time_b:.8f} ms (±1%)"
     elif time_a > time_b:
         old_text = f"Old timing geometric mean: {time_a:.8f} ms"
-        new_text = f"New timing geometric mean: {time_b:.8f} ms ({percent_change:.1f}% faster)"
+        new_text = f"New timing geometric mean: {time_b:.8f} ms (roughly {percent_change:.1f}% faster)"
     else:
-        old_text = f"Old timing geometric mean: {time_a:.8f} ms ({percent_change:.1f}% faster)"
+        old_text = f"Old timing geometric mean: {time_a:.8f} ms (roughly {percent_change:.1f}% faster)"
         new_text = f"New timing geometric mean: {time_b:.8f} ms"
+
+
+def is_first_summary_write(file_path: str) -> bool:
+    if not os.path.exists(file_path):
+        return True
+    with open(file_path, "r", encoding="utf-8") as f:
+        return not any(line.startswith("## Benchmark Summary") for line in f)
 
 # Print to console
 print(old_text)
 print(new_text)
-
 # Write to GitHub Actions summary
 if args.gh_summary:
     summary_file = os.getenv("GITHUB_STEP_SUMMARY")
     if summary_file:
         with open(summary_file, "a") as f:
-            f.write(f"## Benchmark Summary: `{args.name}`\n\n")
-            f.write("```\n")
-            f.write(old_text.strip() + "\n")
-            f.write(new_text.strip() + "\n")
-            f.write("```\n\n")
+            if is_first_summary_write(summary_file):
+                # Table header
+                f.write("## Benchmark Summary\n\n")
+                f.write("| Benchmark | Old (ms) | New (ms) | Δ (%) |\n")
+                f.write("|-----------|----------|----------|--------|\n")
+
+            if isinstance(time_a, str) or isinstance(time_b, str):
+                # Fallback row for invalid values
+                percent_diff = "N/A"
+                f.write(f"| `{args.name}` | {time_a} | {time_b} | N/A |\n")
+            else:
+                percent_change = delta * 100.0 / max(time_a, time_b)
+                f.write(f"| `{args.name}` | {time_a:.8f} | {time_b:.8f} | `{percent_change:.2f}` |\n")
     else:
         print("Warning: GITHUB_STEP_SUMMARY not set, skipping summary output.")
 
