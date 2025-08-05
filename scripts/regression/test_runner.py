@@ -211,6 +211,14 @@ else:
 
 
 def is_first_summary_write(file_path: str) -> bool:
+    print(f"Checking if first summary write for {file_path}")
+    print(f"File exists: {os.path.exists(file_path)}")
+    print(f"File is empty: {os.stat(file_path).st_size == 0 if os.path.exists(file_path) else 'N/A'}")
+    # print the contents of the file if it exists
+    if os.path.exists(file_path):
+        with open(file_path, "r") as f:
+            content = f.read()
+        print(f"File content:\n{content}")
     if not os.path.exists(file_path):
         return True
     with open(file_path, "r") as f:
@@ -225,9 +233,7 @@ if args.gh_summary:
     if summary_file:
         is_first = is_first_summary_write(summary_file)
         with open(summary_file, "a") as f:
-
             if is_first:
-
                 # Table header
                 f.write("## Benchmark Summary\n\n")
                 f.write("| Benchmark | Old (ms) | New (ms) | Δ (%) |\n")
@@ -239,7 +245,7 @@ if args.gh_summary:
                 f.write(f"| `{args.name}` | {time_a} | {time_b} | N/A |\n")
             else:
                 percent_change = delta * 100.0 / max(time_a, time_b)
-                f.write(f"| `{args.name}` | {time_a:.8f} | {time_b:.8f} | `{percent_change:.2f}` |\n")
+                f.write(f"| `{args.name}` | {time_a:.8f} | {time_b:.8f} | {percent_change:.2f} |\n")
     else:
         print("Warning: GITHUB_STEP_SUMMARY not set, skipping summary output.")
 
