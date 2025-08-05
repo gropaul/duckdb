@@ -204,11 +204,11 @@ jobs:
         if: always()
         shell: bash
         run: |
-          python scripts/regression/test_runner.py 
+          python scripts/regression/test_runner.py \
             --name "IMDB" --gh-summary \
-            --old duckdb/build/release/benchmark/benchmark_runner 
-            --new build/release/benchmark/benchmark_runner 
-            --benchmarks .github/regression/imdb.csv 
+            --old duckdb/build/release/benchmark/benchmark_runner \
+            --new build/release/benchmark/benchmark_runner \
+            --benchmarks .github/regression/imdb.csv \
             --verbose --threads 2
 
       - name: Regression Test CSV
