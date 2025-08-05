@@ -72,11 +72,17 @@ public:
 
 	// Returns the salt, leaves upper salt bits intact, sets lower bits to all 1's
 	static inline hash_t ExtractSalt(const hash_t &hash) {
+		return 0 | POINTER_MASK;
 		return hash | POINTER_MASK;
 	}
 
 	inline hash_t GetSalt() const {
 		return ExtractSalt(value);
+	}
+
+	inline hash_t GetSaltWithNulls() const {
+		return 0;
+		return value & SALT_MASK;
 	}
 
 	inline void SetSalt(const hash_t &salt) {
