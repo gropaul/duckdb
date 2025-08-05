@@ -213,8 +213,8 @@ else:
 def is_first_summary_write(file_path: str) -> bool:
     if not os.path.exists(file_path):
         return True
-    with open(file_path, "r", encoding="utf-8") as f:
-        return not any(line.startswith("## Benchmark Summary") for line in f)
+    with open(file_path, "r") as f:
+        return not any("Benchmark Summary" in line for line in f)
 
 # Print to console
 print(old_text)
@@ -223,8 +223,11 @@ print(new_text)
 if args.gh_summary:
     summary_file = os.getenv("GITHUB_STEP_SUMMARY")
     if summary_file:
+        is_first = is_first_summary_write(summary_file)
         with open(summary_file, "a") as f:
-            if is_first_summary_write(summary_file):
+
+            if is_first:
+
                 # Table header
                 f.write("## Benchmark Summary\n\n")
                 f.write("| Benchmark | Old (ms) | New (ms) | Δ (%) |\n")
