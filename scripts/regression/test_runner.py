@@ -210,19 +210,16 @@ else:
         new_text = f"New timing geometric mean: {time_b:.8f} ms"
 
 
-def is_first_summary_write(file_path: str) -> bool:
-    print(f"Checking if first summary write for {file_path}")
-    print(f"File exists: {os.path.exists(file_path)}")
-    print(f"File is empty: {os.stat(file_path).st_size == 0 if os.path.exists(file_path) else 'N/A'}")
-    # print the contents of the file if it exists
-    if os.path.exists(file_path):
-        with open(file_path, "r") as f:
-            content = f.read()
-        print(f"File content:\n{content}")
-    if not os.path.exists(file_path):
-        return True
-    with open(file_path, "r") as f:
-        return not any("Benchmark Summary" in line for line in f)
+
+def is_first_summary_write() -> bool:
+    # check if GITHUB_STEP_SUMMARY_WROTE_HEADER exists
+    var_name = 'GITHUB_STEP_SUMMARY_WROTE_HEADER'
+    if os.environ[var_name] == 'True':
+        return False
+    else:
+        os.environ[var_name] = 'True'
+        return False
+
 
 # Print to console
 print(old_text)
@@ -231,7 +228,7 @@ print(new_text)
 if args.gh_summary:
     summary_file = os.getenv("GITHUB_STEP_SUMMARY")
     if summary_file:
-        is_first = is_first_summary_write(summary_file)
+        is_first = is_first_summary_write()
         with open(summary_file, "a") as f:
             if is_first:
                 # Table header
