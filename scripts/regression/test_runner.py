@@ -210,15 +210,14 @@ else:
         new_text = f"New timing geometric mean: {time_b:.8f} ms"
 
 
-
 def is_first_summary_write() -> bool:
-    # check if GITHUB_STEP_SUMMARY_WROTE_HEADER exists
     var_name = 'GITHUB_STEP_SUMMARY_WROTE_HEADER'
-    if os.environ[var_name] == 'True':
+    if os.environ.get(var_name) == 'True':
         return False
     else:
         os.environ[var_name] = 'True'
-        return False
+        return True
+
 
 
 # Print to console
