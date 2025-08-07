@@ -22,6 +22,7 @@
 #include "duckdb/planner/operator/logical_explain.hpp"
 #include "duckdb/planner/operator/logical_column_data_get.hpp"
 #include "duckdb/planner/operator/logical_delim_get.hpp"
+#include "duckdb/planner/operator/logical_filter.hpp"
 
 namespace duckdb {
 class LogicalOperator;
@@ -250,7 +251,7 @@ public:
 				info.expressions.emplace_back();
 				auto &expression_info = info.expressions.back();
 				expression_info.return_type = return_types[i].ToString();
-				expression_info.expression = 'const';
+				expression_info.expression = "const";
 				expression_info.expression_type = ExpressionTypeToString(ExpressionType::VALUE_CONSTANT);
 				expression_info.expression_class = ExpressionClassToString(ExpressionClass::CONSTANT);
 			}
@@ -263,7 +264,7 @@ public:
 				info.expressions.emplace_back();
 				auto &expression_info = info.expressions.back();
 				expression_info.return_type = return_types[i].ToString();
-				expression_info.expression = 'const';
+				expression_info.expression = "const";
 				expression_info.expression_type = ExpressionTypeToString(ExpressionType::VALUE_CONSTANT);
 				expression_info.expression_class = ExpressionClassToString(ExpressionClass::CONSTANT);
 			}
@@ -310,6 +311,11 @@ public:
 
 			break;
 		}
+		case LogicalOperatorType::LOGICAL_FILTER: {
+			auto &filter = op.Cast<LogicalFilter>();
+			this->info.extra_info["projection_map"] = ListToString(filter.projection_map);
+			break;
+		}
 		case LogicalOperatorType::LOGICAL_EXCEPT:
 		case LogicalOperatorType::LOGICAL_INTERSECT:
 		case LogicalOperatorType::LOGICAL_UNION: {
@@ -324,7 +330,7 @@ public:
 				ExpressionExtractor extractor(order_expression);
 				extractor.VisitExpression(&node.expression);
 			}
-
+			this->info.extra_info["projection_map"] = ListToString(order.projection_map);
 			info.other_expressions["orders"] = std::move(order_expressions);
 			break;
 		}
