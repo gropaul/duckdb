@@ -45,8 +45,12 @@ parser.add_argument("--max-timeout", type=int, default=3600, help="Set maximum t
 parser.add_argument("--root-dir", type=str, default="", help="Root directory.")
 parser.add_argument("--no-summary", type=str, default=False, help="No summary in the end.")
 parser.add_argument("--name", type=str, default="regression", help="Name of the benchmark run.")
-parser.add_argument("--gh-summary", action="store_true", help="Write results to the GitHub Actions step summary.")
-
+parser.add_argument(
+    "--gh-summary",
+    choices=["disable", "enable", "enable-with-heading"],
+    default="disable",
+    help="Write results to the GitHub Actions step summary. Choose 'disable', 'enable', or 'enable-with-heading'.",
+)
 parser.add_argument(
     "--regression-threshold-seconds",
     type=float,
@@ -210,26 +214,16 @@ else:
         new_text = f"New timing geometric mean: {time_b:.8f} ms"
 
 
-def is_first_summary_write() -> bool:
-    var_name = 'GITHUB_STEP_SUMMARY_WROTE_HEADER'
-    if os.environ.get(var_name) == 'True':
-        return False
-    else:
-        os.environ[var_name] = 'True'
-        return True
-
-
-
 # Print to console
 print(old_text)
 print(new_text)
+
 # Write to GitHub Actions summary
-if args.gh_summary:
+if args.gh_summary == "enable" or args.gh_summary == "enable-with-heading":
     summary_file = os.getenv("GITHUB_STEP_SUMMARY")
     if summary_file:
-        is_first = is_first_summary_write()
         with open(summary_file, "a") as f:
-            if is_first:
+            if args.gh_summary == "enable-with-heading":
                 # Table header
                 f.write("## Benchmark Summary\n\n")
                 f.write("| Benchmark | Old (ms) | New (ms) | Δ (%) |\n")

@@ -139,7 +139,7 @@ jobs:
         shell: bash
         run: |
           python scripts/regression/test_runner.py \
-            --name "Micro Benchmark" --gh-summary \
+            --name "Micro Benchmark" --gh-summary enable\
             --old duckdb/build/release/benchmark/benchmark_runner \
             --new build/release/benchmark/benchmark_runner \
             --benchmarks .github/regression/micro.csv \
@@ -153,7 +153,7 @@ jobs:
             --old duckdb/build/release/benchmark/benchmark_runner \
             --new build/release/benchmark/benchmark_runner \
             --benchmarks .github/regression/ingestion.csv \
-            --name "Ingestion Performance" --gh-summary \
+            --name "Ingestion Performance" --gh-summary enable \
             --verbose --threads 2
 
       - name: Regression Test TPCH
@@ -161,7 +161,7 @@ jobs:
         shell: bash
         run: |
           python scripts/regression/test_runner.py \
-            --name "TPC-H" --gh-summary \
+            --name "TPC-H" --gh-summary enable \
             --old duckdb/build/release/benchmark/benchmark_runner \
             --new build/release/benchmark/benchmark_runner \
             --benchmarks .github/regression/tpch.csv \
@@ -172,7 +172,7 @@ jobs:
         shell: bash
         run: |
           python scripts/regression/test_runner.py \
-            --name "TPC-H (Parquet)" --gh-summary \
+            --name "TPC-H (Parquet)" --gh-summary enable \
             --old duckdb/build/release/benchmark/benchmark_runner \
             --new build/release/benchmark/benchmark_runner \
             --benchmarks .github/regression/tpch_parquet.csv \
@@ -183,7 +183,7 @@ jobs:
         shell: bash
         run: |
           python scripts/regression/test_runner.py \
-            --name "TPC-DS" --gh-summary \
+            --name "TPC-DS" --gh-summary enable \
             --old duckdb/build/release/benchmark/benchmark_runner \
             --new build/release/benchmark/benchmark_runner \
             --benchmarks .github/regression/tpcds.csv \
@@ -194,7 +194,7 @@ jobs:
         shell: bash
         run: |
           python scripts/regression/test_runner.py \
-            --name "H2OAI" --gh-summary \
+            --name "H2OAI" --gh-summary enable \
             --old duckdb/build/release/benchmark/benchmark_runner \
             --new build/release/benchmark/benchmark_runner \
             --benchmarks .github/regression/h2oai.csv \
@@ -205,7 +205,7 @@ jobs:
         shell: bash
         run: |
           python scripts/regression/test_runner.py \
-            --name "IMDB" --gh-summary \
+            --name "IMDB" --gh-summary enable \
             --old duckdb/build/release/benchmark/benchmark_runner \
             --new build/release/benchmark/benchmark_runner \
             --benchmarks .github/regression/imdb.csv \
@@ -216,7 +216,7 @@ jobs:
         shell: bash
         run: |
           python scripts/regression/test_runner.py \
-            --name "CSV" --gh-summary \
+            --name "CSV" --gh-summary enable-with-heading \
             --old duckdb/build/release/benchmark/benchmark_runner \
             --new build/release/benchmark/benchmark_runner \
             --benchmarks .github/regression/csv.csv \
@@ -232,7 +232,7 @@ jobs:
           wget -q https://duckdb-blobs.s3.amazonaws.com/data/realnest/realnest.duckdb --output-document=duckdb_benchmark_data/real_nest.duckdb
           cp duckdb_benchmark_data/real_nest.duckdb duckdb/duckdb_benchmark_data/real_nest.duckdb
           python scripts/regression/test_runner.py \
-            --name "RealNest" --gh-summary \
+            --name "RealNest" --gh-summary enable \
             --old duckdb/build/release/benchmark/benchmark_runner \
             --new build/release/benchmark/benchmark_runner \
             --benchmarks .github/regression/realnest.csv \
