@@ -320,6 +320,7 @@ public:
 		case LogicalOperatorType::LOGICAL_INTERSECT:
 		case LogicalOperatorType::LOGICAL_UNION: {
 			auto &setop = op.Cast<LogicalSetOperation>();
+			break;
 		}
 		case LogicalOperatorType::LOGICAL_ORDER_BY: {
 			auto &order = op.Cast<LogicalOrder>();
