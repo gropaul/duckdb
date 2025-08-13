@@ -319,7 +319,7 @@ public:
 		case LogicalOperatorType::LOGICAL_EXCEPT:
 		case LogicalOperatorType::LOGICAL_INTERSECT:
 		case LogicalOperatorType::LOGICAL_UNION: {
-			auto &setop = op.Cast<LogicalSetOperation>();
+			// auto &setop = op.Cast<LogicalSetOperation>();
 			break;
 		}
 		case LogicalOperatorType::LOGICAL_ORDER_BY: {
@@ -494,7 +494,7 @@ public:
 		}
 		case LogicalOperatorType::LOGICAL_AGGREGATE_AND_GROUP_BY: {
 			auto &aggr = op.Cast<LogicalAggregate>();
-
+			aggr.ResolveOperatorTypes();
 			vector<ExpressionInfo> groups;
 			for (auto &group : aggr.groups) {
 				groups.emplace_back();
@@ -503,6 +503,20 @@ public:
 				extractor.VisitExpression(&group);
 			}
 			info.other_expressions["groups"] = std::move(groups);
+
+			vector<ExpressionInfo> grouping_functions;
+			for (auto &group : aggr.grouping_functions) {
+
+				info.expressions.emplace_back();
+				auto &expression_info = grouping_functions.back();
+				const LogicalType type = LogicalType::BIGINT;
+				expression_info.return_type = type.ToString();
+				expression_info.expression = "const";
+				expression_info.expression_type = ExpressionTypeToString(ExpressionType::VALUE_CONSTANT);
+				expression_info.expression_class = ExpressionClassToString(ExpressionClass::CONSTANT);
+			}
+
+			info.other_expressions["grouping_functions"] = std::move(grouping_functions);
 
 			break;
 		}
