@@ -232,10 +232,11 @@ if args.gh_summary == "enable" or args.gh_summary == "enable-with-heading":
             if isinstance(time_a, str) or isinstance(time_b, str):
                 # Fallback row for invalid values
                 percent_diff = "N/A"
-                f.write(f"| `{args.name}` | {time_a} | {time_b} | N/A |\n")
+                # we can't have a \n here as github action will add a linebreak between f.write calls
+                f.write(f"| `{args.name}` | {time_a} | {time_b} | N/A |")
             else:
                 percent_change = delta * 100.0 / max(time_a, time_b)
-                f.write(f"| `{args.name}` | {time_a:.8f} | {time_b:.8f} | {percent_change:.2f} |\n")
+                f.write(f"| `{args.name}` | {time_a:.8f} | {time_b:.8f} | {percent_change:.2f} |")
     else:
         print("Warning: GITHUB_STEP_SUMMARY not set, skipping summary output.")
 
