@@ -507,7 +507,7 @@ public:
 			vector<ExpressionInfo> grouping_functions;
 			for (auto &group : aggr.grouping_functions) {
 
-				info.expressions.emplace_back();
+				grouping_functions.emplace_back();
 				auto &expression_info = grouping_functions.back();
 				const LogicalType type = LogicalType::BIGINT;
 				expression_info.return_type = type.ToString();
