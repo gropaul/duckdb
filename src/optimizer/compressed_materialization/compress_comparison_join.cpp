@@ -47,6 +47,9 @@ void CompressedMaterialization::CompressComparisonJoin(unique_ptr<LogicalOperato
 		}
 	}
 #endif
+	// fixme: if we compress a join key we can't use it anymore for bloom filter pushdown, disable for now as bf performance
+	// fixme: is higher then compression (4% faster for TPC-H)
+	return;
 
 	// Find all bindings referenced by non-colref expressions in the conditions
 	// These are excluded from compression by projection
