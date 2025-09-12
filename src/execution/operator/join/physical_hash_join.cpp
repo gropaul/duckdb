@@ -25,6 +25,7 @@
 #include "duckdb/storage/temporary_memory_manager.hpp"
 #include "duckdb/main/settings.hpp"
 #include "duckdb/logging/log_manager.hpp"
+#include "duckdb/planner/filter/bloom_filter.hpp"
 
 namespace duckdb {
 
@@ -215,7 +216,7 @@ unique_ptr<JoinFilterLocalState> JoinFilterPushdownInfo::GetLocalState(JoinFilte
 	return result;
 }
 
-class HashJoinLocalSinkState : public LocalSinkState {
+class HashJoinLocalSinkState final : public LocalSinkState {
 public:
 	HashJoinLocalSinkState(const PhysicalHashJoin &op, ClientContext &context, HashJoinGlobalSinkState &gstate)
 	    : join_key_executor(context) {
@@ -845,9 +846,10 @@ unique_ptr<DataChunk> JoinFilterPushdownInfo::Finalize(ClientContext &context, o
 						auto filters_null_values = !ht->NullValuesAreEqual(join_condition[filter_idx]);
 						const auto key_name = ht->conditions[0].right->ToString();
 						const auto key_type = ht->conditions[0].left->return_type;
+						JoinHashTable &ht_ref = *ht;
+
 						auto bf_filter =
-						    make_uniq<BloomFilter>(ht->GetBloomFilter(), filters_null_values, key_name, key_type);
-						ht->SetBuildBloomFilter(true);
+						    make_uniq<BloomFilter>(ht_ref, filters_null_values, key_name, key_type);
 						info.dynamic_filters->PushFilter(op, filter_col_idx, std::move(bf_filter));
 					}
 				}

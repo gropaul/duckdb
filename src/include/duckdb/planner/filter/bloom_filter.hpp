@@ -12,6 +12,7 @@
 #include "duckdb/common/serializer/serializer.hpp"
 #include "duckdb/planner/table_filter.hpp"
 #include "duckdb/common/types/value.hpp"
+#include "duckdb/execution/join_hashtable.hpp"
 #include "duckdb/planner/table_filter_state.hpp"
 #include "duckdb/storage/buffer_manager.hpp"
 
@@ -171,11 +172,52 @@ private:
 	AllocatedData buf_;
 };
 
+static bool EarlyProbeHash(const JoinHashTable &ht, const hash_t hash ) {
+
+	bool has_match = false;
+	bool has_empty = false;
+
+
+	const hash_t row_salt = ht_entry_t::ExtractSalt(hash);
+
+	constexpr idx_t PROBING_LENGTH = 4;
+
+	for (idx_t j = 0; j < PROBING_LENGTH; j++) {
+		const idx_t ht_offset = (hash + j) & ht.bitmask;
+		const ht_entry_t entry = ht.entries[ht_offset];
+		const bool occupied = entry.IsOccupied();
+		const bool salt_match = entry.GetSalt() == row_salt;
+		has_match = salt_match || has_match;
+		has_empty = (!occupied) || has_empty;
+	}
+	// we filter a tuple out if there is no match and there is an empty entry
+	// -> we keep it if there is a match or there is no empty entry
+	const bool keep_tuple = has_match || (!has_empty);
+	return keep_tuple;
+}
+
+static idx_t EarlyProbeHashes(Vector &hashes_dense_v, JoinHashTable &ht, SelectionVector& sel, const idx_t count){
+
+	idx_t found_count = 0;
+	const auto hashes_dense = FlatVector::GetData<hash_t>(hashes_dense_v);
+
+	for (idx_t i = 0; i < count; i++) {
+
+		const hash_t row_hash = hashes_dense[i];
+		const bool found = EarlyProbeHash(ht, row_hash);
+		sel.set_index(found_count, i);
+		found_count += found;
+	}
+
+	return found_count;
+}
+
+
 class BloomFilter : public TableFilter {
 
 private:
-	CacheSectorizedBloomFilter &filter;
 
+	JoinHashTable &hashtable;
 	bool filters_null_values;
 	string key_column_name;
 	LogicalType key_type;
@@ -184,9 +226,9 @@ public:
 	static constexpr auto TYPE = TableFilterType::BLOOM_FILTER;
 
 public:
-	explicit BloomFilter(CacheSectorizedBloomFilter &filter_p, const bool filters_null_values_p,
+	explicit BloomFilter(JoinHashTable &hashtable_p, const bool filters_null_values_p,
 	                     const string &key_column_name_p, const LogicalType &key_type_p)
-	    : TableFilter(TYPE), filter(filter_p), filters_null_values(filters_null_values_p),
+	    : TableFilter(TYPE), hashtable(hashtable_p), filters_null_values(filters_null_values_p),
 	      key_column_name(key_column_name_p), key_type(key_type_p) {
 	}
 
@@ -224,7 +266,8 @@ public:
 	             BloomFilterState &state) const {
 
 		// printf("Filter bf: bf has %llu sectors and initialized=%hd \n", filter.num_sectors, filter.IsInitialized());
-		if (!this->filter.IsInitialized() || !state.continue_filtering) {
+		bool isPerfectHT = hashtable.capacity != hashtable.bitmask + 1; // todo: this is a hacky way to check if the ht is perfect
+		if (!state.continue_filtering || isPerfectHT || approved_tuple_count == 0) {
 			return approved_tuple_count; // todo: may
 		}
 
@@ -241,24 +284,24 @@ public:
 		idx_t found_count;
 		if (state.hashes_v.GetVectorType() == VectorType::CONSTANT_VECTOR) {
 			const auto &hash = *ConstantVector::GetData<hash_t>(state.hashes_v);
-			const bool found = this->filter.LookupHash(hash);
+			const bool found = EarlyProbeHash(hashtable, hash);
 			found_count = found ? approved_tuple_count : 0;
 		} else {
 			state.hashes_v.Flatten(approved_tuple_count);
-			found_count = this->filter.LookupHashes(state.hashes_v, state.bf_sel, approved_tuple_count);
+			found_count = EarlyProbeHashes(state.hashes_v, hashtable, state.bf_sel, approved_tuple_count);
 		}
 
 		// add the runtime statistics to stop using the bf if not selective
-		if (state.vectors_processed < 40) {
+		if (state.vectors_processed < 10) {
 			state.vectors_processed += 1;
 			state.tuples_accepted += found_count;
 			state.tuples_processed += approved_tuple_count;
 
-			if (state.vectors_processed == 40) {
+			if (state.vectors_processed == 10) {
 				const double selectivity =
 				    static_cast<double>(state.tuples_accepted) / static_cast<double>(state.tuples_processed);
 				// printf("%f\n", selectivity);
-				if (selectivity > 0.8) {
+				if (selectivity > 0.25) {
 					state.continue_filtering = false;
 				}
 			}
@@ -285,7 +328,7 @@ public:
 
 	bool FilterValue(const Value &value) const {
 		const auto hash = value.Hash();
-		return filter.LookupHash(hash);
+		return EarlyProbeHash(hashtable, hash);
 	}
 
 	FilterPropagateResult CheckStatistics(BaseStatistics &stats) const override {
@@ -301,7 +344,7 @@ public:
 		return false;
 	}
 	unique_ptr<TableFilter> Copy() const override {
-		return make_uniq<BloomFilter>(this->filter, this->filters_null_values, this->key_column_name, this->key_type);
+		return make_uniq<BloomFilter>(this->hashtable, this->filters_null_values, this->key_column_name, this->key_type);
 	}
 
 	unique_ptr<Expression> ToExpression(const Expression &column) const override;
@@ -320,8 +363,8 @@ public:
 		LogicalType key_type = deserializer.ReadProperty<LogicalType>(202, "key_type");
 
 		CacheSectorizedBloomFilter filter;
-		auto result = make_uniq<BloomFilter>(filter, filters_null_values, key_column_name, key_type);
-		return std::move(result);
+		// auto result = make_uniq<BloomFilter>(, filters_null_values, key_column_name, key_type);
+		// return std::move(result);
 	}
 };
 

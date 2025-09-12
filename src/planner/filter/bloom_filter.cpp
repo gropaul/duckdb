@@ -6,11 +6,13 @@
 namespace duckdb {
 
 string BloomFilter::ToString(const string &column_name) const {
-	if (filter.IsInitialized()) {
-		return column_name +  " IN BF(" + key_column_name + ")";
-	} else {
-		return "True";
-	}
+	return column_name +  " IN BF(" + key_column_name + ")";
+	//
+	// if (filter.IsInitialized()) {
+	// 	return column_name +  " IN BF(" + key_column_name + ")";
+	// } else {
+	// 	return "True";
+	// }
 }
 
 unique_ptr<Expression> BloomFilter::ToExpression(const Expression &column) const {

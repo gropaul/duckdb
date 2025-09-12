@@ -18,7 +18,6 @@
 #include "duckdb/common/types/vector.hpp"
 #include "duckdb/execution/aggregate_hashtable.hpp"
 #include "duckdb/execution/ht_entry.hpp"
-#include "duckdb/planner/filter/bloom_filter.hpp"
 
 namespace duckdb {
 
@@ -326,20 +325,17 @@ private:
 
 	//! The hash map of the HT, created after finalization
 	AllocatedData hash_map;
-	ht_entry_t *entries = nullptr;
+
 	//! Whether or not NULL values are considered equal in each of the comparisons
 	vector<bool> null_values_are_equal;
 	//! An empty tuple that's a "dead end", can be used to stop chains early
 	unsafe_unique_array<data_t> dead_end;
 
-	//! Whether or not to use a bloom filter will be determined by the operator
-	CacheSectorizedBloomFilter bloom_filter;
-	bool should_build_bloom_filter = false;
-
 	//! Copying not allowed
 	JoinHashTable(const JoinHashTable &) = delete;
 
 public:
+	ht_entry_t *entries = nullptr;
 	//===--------------------------------------------------------------------===//
 	// External Join
 	//===--------------------------------------------------------------------===//
@@ -413,14 +409,6 @@ public:
 	//! Size of the pointer table (in bytes)
 	idx_t PointerTableSize(idx_t count) const {
 		return PointerTableCapacity(count) * sizeof(data_ptr_t);
-	}
-
-	void SetBuildBloomFilter(const bool should_build) {
-		this->should_build_bloom_filter = should_build;
-	}
-
-	CacheSectorizedBloomFilter& GetBloomFilter() {
-		return bloom_filter;
 	}
 
 	//! Get total size of HT if all partitions would be built
