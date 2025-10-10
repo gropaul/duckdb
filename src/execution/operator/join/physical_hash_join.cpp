@@ -832,7 +832,6 @@ unique_ptr<DataChunk> JoinFilterPushdownInfo::Finalize(ClientContext &context, o
 				}
 
 				const bool can_use_bf = ht && ht->conditions.size() == 1 && cmp == ExpressionType::COMPARE_EQUAL;
-
 				// bloom filter is only supported for single key equality joins so far
 				if (ht && can_use_bf) {
 
@@ -841,7 +840,7 @@ unique_ptr<DataChunk> JoinFilterPushdownInfo::Finalize(ClientContext &context, o
 					    static_cast<double>(ht->Count());
 					const bool should_use_bf = create_bloom_filter && rhs_has_filter && build_to_probe_ratio > 4;
 
-					if (should_use_bf) {
+					if (true) {
 						// If the nulls are equal, we let nulls pass. If not, we filter them
 						auto filters_null_values = !ht->NullValuesAreEqual(join_condition[filter_idx]);
 						const auto key_name = ht->conditions[0].right->ToString();

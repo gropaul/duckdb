@@ -171,12 +171,10 @@ private:
 
 	AllocatedData buf_;
 };
-
-static bool EarlyProbeHash(const JoinHashTable &ht, const hash_t hash ) {
+static bool IsHashContained(const JoinHashTable &ht, const hash_t hash) {
 
 	bool has_match = false;
 	bool has_empty = false;
-
 
 	const hash_t row_salt = ht_entry_t::ExtractSalt(hash);
 
@@ -190,13 +188,15 @@ static bool EarlyProbeHash(const JoinHashTable &ht, const hash_t hash ) {
 		has_match = salt_match || has_match;
 		has_empty = (!occupied) || has_empty;
 	}
-	// we filter a tuple out if there is no match and there is an empty entry
-	// -> we keep it if there is a match or there is no empty entry
+	// -> we keep it
+	// a) if there is a salt match -> we found our slot
+	// b) or if there is no empty entry  -> we would need to continue probing
 	const bool keep_tuple = has_match || (!has_empty);
 	return keep_tuple;
 }
 
-static idx_t EarlyProbeHashes(Vector &hashes_dense_v, JoinHashTable &ht, SelectionVector& sel, const idx_t count){
+
+static idx_t EarlyProbeHashes(Vector &hashes_dense_v, JoinHashTable &ht, SelectionVector &sel, const idx_t count) {
 
 	idx_t found_count = 0;
 	const auto hashes_dense = FlatVector::GetData<hash_t>(hashes_dense_v);
@@ -204,7 +204,7 @@ static idx_t EarlyProbeHashes(Vector &hashes_dense_v, JoinHashTable &ht, Selecti
 	for (idx_t i = 0; i < count; i++) {
 
 		const hash_t row_hash = hashes_dense[i];
-		const bool found = EarlyProbeHash(ht, row_hash);
+		const bool found = IsHashContained(ht, row_hash);
 		sel.set_index(found_count, i);
 		found_count += found;
 	}
@@ -212,11 +212,9 @@ static idx_t EarlyProbeHashes(Vector &hashes_dense_v, JoinHashTable &ht, Selecti
 	return found_count;
 }
 
-
 class BloomFilter : public TableFilter {
 
 private:
-
 	JoinHashTable &hashtable;
 	bool filters_null_values;
 	string key_column_name;
@@ -226,8 +224,8 @@ public:
 	static constexpr auto TYPE = TableFilterType::BLOOM_FILTER;
 
 public:
-	explicit BloomFilter(JoinHashTable &hashtable_p, const bool filters_null_values_p,
-	                     const string &key_column_name_p, const LogicalType &key_type_p)
+	explicit BloomFilter(JoinHashTable &hashtable_p, const bool filters_null_values_p, const string &key_column_name_p,
+	                     const LogicalType &key_type_p)
 	    : TableFilter(TYPE), hashtable(hashtable_p), filters_null_values(filters_null_values_p),
 	      key_column_name(key_column_name_p), key_type(key_type_p) {
 	}
@@ -247,7 +245,7 @@ public:
 
 	// todo: we can remove this
 	void HashInternal(Vector &keys_v, const SelectionVector &sel, idx_t &approved_count,
-	                                            BloomFilterState &state) const {
+	                  BloomFilterState &state) const {
 		if (sel.IsSet()) {
 			VectorOperations::Copy(keys_v, state.keys_flat_v, sel, approved_count, 0, 0);
 			D_ASSERT(state.keys_flat_v.GetVectorType() == VectorType::FLAT_VECTOR);
@@ -262,11 +260,12 @@ public:
 
 	// Filters the data by first hashing and then probing the bloom filter. The &sel will hold
 	// the remaining tuples, &approved_tuple_count will hold the approved count.
-	__attribute__((noinline)) idx_t Filter(Vector &keys_v, UnifiedVectorFormat &keys_uvf, SelectionVector &sel, idx_t &approved_tuple_count,
-	             BloomFilterState &state) const {
+	__attribute__((noinline)) idx_t Filter(Vector &keys_v, UnifiedVectorFormat &keys_uvf, SelectionVector &sel,
+	                                       idx_t &approved_tuple_count, BloomFilterState &state) const {
 
 		// printf("Filter bf: bf has %llu sectors and initialized=%hd \n", filter.num_sectors, filter.IsInitialized());
-		bool isPerfectHT = hashtable.capacity != hashtable.bitmask + 1; // todo: this is a hacky way to check if the ht is perfect
+		bool isPerfectHT =
+		    hashtable.capacity != hashtable.bitmask + 1; // todo: this is a hacky way to check if the ht is perfect
 		if (!state.continue_filtering || isPerfectHT || approved_tuple_count == 0) {
 			return approved_tuple_count; // todo: may
 		}
@@ -284,7 +283,7 @@ public:
 		idx_t found_count;
 		if (state.hashes_v.GetVectorType() == VectorType::CONSTANT_VECTOR) {
 			const auto &hash = *ConstantVector::GetData<hash_t>(state.hashes_v);
-			const bool found = EarlyProbeHash(hashtable, hash);
+			const bool found = IsHashContained(hashtable, hash);
 			found_count = found ? approved_tuple_count : 0;
 		} else {
 			state.hashes_v.Flatten(approved_tuple_count);
@@ -328,7 +327,7 @@ public:
 
 	bool FilterValue(const Value &value) const {
 		const auto hash = value.Hash();
-		return EarlyProbeHash(hashtable, hash);
+		return IsHashContained(hashtable, hash);
 	}
 
 	FilterPropagateResult CheckStatistics(BaseStatistics &stats) const override {
@@ -344,7 +343,8 @@ public:
 		return false;
 	}
 	unique_ptr<TableFilter> Copy() const override {
-		return make_uniq<BloomFilter>(this->hashtable, this->filters_null_values, this->key_column_name, this->key_type);
+		return make_uniq<BloomFilter>(this->hashtable, this->filters_null_values, this->key_column_name,
+		                              this->key_type);
 	}
 
 	unique_ptr<Expression> ToExpression(const Expression &column) const override;
