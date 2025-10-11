@@ -22,7 +22,7 @@ JoinHashTable::SharedState::SharedState()
 
 JoinHashTable::ProbeState::ProbeState()
     : SharedState(), ht_offsets_and_salts_v(LogicalType::UBIGINT), hashes_dense_v(LogicalType::HASH),
-      non_empty_sel(STANDARD_VECTOR_SIZE) {
+      non_empty_sel(STANDARD_VECTOR_SIZE), n_vectors_seen(0), tuples_found(0), tuples_seen(0) {
 }
 
 JoinHashTable::InsertState::InsertState(const JoinHashTable &ht)
@@ -335,12 +335,38 @@ void JoinHashTable::GetRowPointers(DataChunk &keys, TupleDataChunkState &key_sta
                                    const SelectionVector *sel, idx_t &count, Vector &pointers_result_v,
                                    SelectionVector &match_sel, const bool has_sel) {
 
+	const uint64_t input_count = count;
 	if (UseSalt()) {
 		GetRowPointersInternal<true>(keys, key_state, state, hashes_v, sel, count, *this, entries, pointers_result_v,
 		                             match_sel, has_sel);
 	} else {
 		GetRowPointersInternal<false>(keys, key_state, state, hashes_v, sel, count, *this, entries, pointers_result_v,
 		                              match_sel, has_sel);
+	}
+
+	if (state.n_vectors_seen < 20) {
+		state.n_vectors_seen ++;
+
+		state.tuples_seen += input_count;
+		state.tuples_found += count;
+
+		if (state.n_vectors_seen == 10) {
+			double join_selectivity = static_cast<double>(state.tuples_found) / static_cast<double>(state.tuples_seen);
+			printf("%f\n", join_selectivity);
+
+			if (join_selectivity < 0.05) {
+				// auto filters_null_values = !NullValuesAreEqual(join_condition[filter_idx]);
+				// const auto key_name = conditions[0].right->ToString();
+				// const auto key_type = conditions[0].left->return_type;
+				//
+				//
+				// auto bf_filter =
+				// 	make_uniq<BloomFilter>(this, filters_null_values, key_name, key_type);
+				// info.dynamic_filters->PushFilter(op, filter_col_idx, std::move(bf_filter));
+			}
+		}
+
+
 	}
 }
 

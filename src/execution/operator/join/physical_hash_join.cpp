@@ -774,7 +774,7 @@ unique_ptr<DataChunk> JoinFilterPushdownInfo::Finalize(ClientContext &context, o
 		const auto cmp = op.conditions[join_condition[filter_idx]].comparison;
 		for (auto &info : probe_info) {
 
-			bool create_bloom_filter = true;
+			bool filter_already_pushed_down = true;
 
 			auto filter_col_idx = info.columns[filter_idx].probe_column_index.column_index;
 			auto min_idx = filter_idx * 2;
@@ -793,7 +793,7 @@ unique_ptr<DataChunk> JoinFilterPushdownInfo::Finalize(ClientContext &context, o
 			if (ht && ht->Count() > 1 && ht->Count() <= dynamic_or_filter_threshold &&
 			    cmp == ExpressionType::COMPARE_EQUAL) {
 				PushInFilter(info, *ht, op, filter_idx, filter_col_idx);
-				create_bloom_filter = false;
+				filter_already_pushed_down = true;
 			}
 
 			if (Value::NotDistinctFrom(min_val, max_val)) {
@@ -831,14 +831,10 @@ unique_ptr<DataChunk> JoinFilterPushdownInfo::Finalize(ClientContext &context, o
 					break;
 				}
 
-				const bool can_use_bf = ht && ht->conditions.size() == 1 && cmp == ExpressionType::COMPARE_EQUAL;
-				// bloom filter is only supported for single key equality joins so far
-				if (ht && can_use_bf) {
-
-					const double build_to_probe_ratio =
-					    static_cast<double>(op.children[0].get().estimated_cardinality) /
-					    static_cast<double>(ht->Count());
-					const bool should_use_bf = create_bloom_filter && rhs_has_filter && build_to_probe_ratio > 4;
+				if (ht) {
+					// bloom filter is only supported for single key equality joins so far
+					ht->can_use_probe_pushdown = ht->conditions.size() == 1 && cmp == ExpressionType::COMPARE_EQUAL &&
+												 !filter_already_pushed_down;
 
 					if (true) {
 						// If the nulls are equal, we let nulls pass. If not, we filter them
@@ -848,10 +844,13 @@ unique_ptr<DataChunk> JoinFilterPushdownInfo::Finalize(ClientContext &context, o
 						JoinHashTable &ht_ref = *ht;
 
 						auto bf_filter =
-						    make_uniq<BloomFilter>(ht_ref, filters_null_values, key_name, key_type);
+							make_uniq<BloomFilter>(ht_ref, filters_null_values, key_name, key_type);
 						info.dynamic_filters->PushFilter(op, filter_col_idx, std::move(bf_filter));
 					}
 				}
+
+
+
 			}
 		}
 	}
