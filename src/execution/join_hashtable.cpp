@@ -365,8 +365,6 @@ void JoinHashTable::GetRowPointers(DataChunk &keys, TupleDataChunkState &key_sta
 				// info.dynamic_filters->PushFilter(op, filter_col_idx, std::move(bf_filter));
 			}
 		}
-
-
 	}
 }
 

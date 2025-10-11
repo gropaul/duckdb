@@ -833,10 +833,9 @@ unique_ptr<DataChunk> JoinFilterPushdownInfo::Finalize(ClientContext &context, o
 
 				if (ht) {
 					// bloom filter is only supported for single key equality joins so far
-					ht->can_use_probe_pushdown = ht->conditions.size() == 1 && cmp == ExpressionType::COMPARE_EQUAL &&
-												 !filter_already_pushed_down;
+					ht->can_use_probe_pushdown = ht->conditions.size() == 1 && cmp == ExpressionType::COMPARE_EQUAL;
 
-					if (true) {
+					if (ht->can_use_probe_pushdown && true) {
 						// If the nulls are equal, we let nulls pass. If not, we filter them
 						auto filters_null_values = !ht->NullValuesAreEqual(join_condition[filter_idx]);
 						const auto key_name = ht->conditions[0].right->ToString();
@@ -848,9 +847,6 @@ unique_ptr<DataChunk> JoinFilterPushdownInfo::Finalize(ClientContext &context, o
 						info.dynamic_filters->PushFilter(op, filter_col_idx, std::move(bf_filter));
 					}
 				}
-
-
-
 			}
 		}
 	}

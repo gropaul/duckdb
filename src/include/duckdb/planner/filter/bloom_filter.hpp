@@ -299,7 +299,7 @@ public:
 			if (state.vectors_processed == 10) {
 				const double selectivity =
 				    static_cast<double>(state.tuples_accepted) / static_cast<double>(state.tuples_processed);
-				// printf("%f\n", selectivity);
+				// printf("BF Sel=%f, HT Size=%lu, HT Capacity=%lu\n", selectivity, hashtable.Count(), hashtable.capacity);
 				if (selectivity > 0.25) {
 					state.continue_filtering = false;
 				}
