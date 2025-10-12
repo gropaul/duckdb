@@ -195,7 +195,6 @@ static bool IsHashContained(const JoinHashTable &ht, const hash_t hash) {
 	return keep_tuple;
 }
 
-
 static idx_t EarlyProbeHashes(Vector &hashes_dense_v, JoinHashTable &ht, SelectionVector &sel, const idx_t count) {
 
 	idx_t found_count = 0;
@@ -299,7 +298,8 @@ public:
 			if (state.vectors_processed == 10) {
 				const double selectivity =
 				    static_cast<double>(state.tuples_accepted) / static_cast<double>(state.tuples_processed);
-				// printf("BF Sel=%f, HT Size=%lu, HT Capacity=%lu\n", selectivity, hashtable.Count(), hashtable.capacity);
+				// printf("BF Sel=%f, HT Size=%lu, HT Capacity=%lu\n", selectivity, hashtable.Count(),
+				// hashtable.capacity);
 				if (selectivity > 0.25) {
 					state.continue_filtering = false;
 				}
@@ -350,6 +350,7 @@ public:
 	unique_ptr<Expression> ToExpression(const Expression &column) const override;
 
 	void Serialize(Serializer &serializer) const override {
+
 		TableFilter::Serialize(serializer);
 		serializer.WriteProperty<bool>(200, "filters_null_values", filters_null_values);
 		serializer.WriteProperty<string>(201, "key_column_name", key_column_name);
@@ -358,13 +359,14 @@ public:
 		// todo: How/Should be serialize the bloom filter?
 	}
 	static unique_ptr<TableFilter> Deserialize(Deserializer &deserializer) {
-		bool filters_null_values = deserializer.ReadProperty<bool>(200, "filters_null_values");
-		string key_column_name = deserializer.ReadProperty<string>(201, "key_column_name");
-		LogicalType key_type = deserializer.ReadProperty<LogicalType>(202, "key_type");
-
-		CacheSectorizedBloomFilter filter;
-		// auto result = make_uniq<BloomFilter>(, filters_null_values, key_column_name, key_type);
-		// return std::move(result);
+		throw NotImplementedException("Deserializing the Early Probe is not possible due to HashTable serialization");
+		// bool filters_null_values = deserializer.ReadProperty<bool>(200, "filters_null_values");
+		// string key_column_name = deserializer.ReadProperty<string>(201, "key_column_name");
+		// LogicalType key_type = deserializer.ReadProperty<LogicalType>(202, "key_type");
+		//
+		// CacheSectorizedBloomFilter filter;
+		// // auto result = make_uniq<BloomFilter>(, filters_null_values, key_column_name, key_type);
+		// // return std::move(result);
 	}
 };
 

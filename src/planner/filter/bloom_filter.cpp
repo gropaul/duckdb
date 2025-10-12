@@ -6,7 +6,7 @@
 namespace duckdb {
 
 string BloomFilter::ToString(const string &column_name) const {
-	return column_name +  " IN BF(" + key_column_name + ")";
+	return column_name + " IN BF(" + key_column_name + ")";
 	//
 	// if (filter.IsInitialized()) {
 	// 	return column_name +  " IN BF(" + key_column_name + ")";
@@ -20,7 +20,8 @@ unique_ptr<Expression> BloomFilter::ToExpression(const Expression &column) const
 	return std::move(bound_constant); // todo: I can't really have an expression for this, so this is a hack
 }
 
-idx_t __attribute__((noinline)) CacheSectorizedBloomFilter::LookupHashes(Vector &hashes, SelectionVector &res_sel, const idx_t count) const {
+idx_t __attribute__((noinline))
+CacheSectorizedBloomFilter::LookupHashes(Vector &hashes, SelectionVector &res_sel, const idx_t count) const {
 	D_ASSERT(hashes.GetVectorType() == VectorType::FLAT_VECTOR);
 	D_ASSERT(hashes.GetType() == LogicalType::HASH);
 	return BloomFilterLookup(reinterpret_cast<hash_t *>(hashes.GetData()), blocks, res_sel, count);
@@ -38,7 +39,8 @@ bool CacheSectorizedBloomFilter::LookupHash(hash_t hash) const {
 
 void CacheSectorizedBloomFilter::InsertHashes(const Vector &hashes, const idx_t count, const bool parallel) {
 	if (parallel) {
-		std::lock_guard<std::mutex> lock(insert_lock); // todo: we should think about a block based locking, this reduces bf insert to 40% on only 8 threads
+		std::lock_guard<std::mutex> lock(insert_lock); // todo: we should think about a block based locking, this
+		                                               // reduces bf insert to 40% on only 8 threads
 		BloomFilterInsert(count, reinterpret_cast<uint64_t *>(hashes.GetData()), blocks);
 	} else {
 		BloomFilterInsert(count, reinterpret_cast<uint64_t *>(hashes.GetData()), blocks);

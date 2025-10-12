@@ -345,14 +345,14 @@ void JoinHashTable::GetRowPointers(DataChunk &keys, TupleDataChunkState &key_sta
 	}
 
 	if (state.n_vectors_seen < 20) {
-		state.n_vectors_seen ++;
+		state.n_vectors_seen++;
 
 		state.tuples_seen += input_count;
 		state.tuples_found += count;
 
 		if (state.n_vectors_seen == 10) {
 			double join_selectivity = static_cast<double>(state.tuples_found) / static_cast<double>(state.tuples_seen);
-			printf("%f\n", join_selectivity);
+			// printf("%f\n", join_selectivity);
 
 			if (join_selectivity < 0.05) {
 				// auto filters_null_values = !NullValuesAreEqual(join_condition[filter_idx]);

@@ -835,15 +835,14 @@ unique_ptr<DataChunk> JoinFilterPushdownInfo::Finalize(ClientContext &context, o
 					// bloom filter is only supported for single key equality joins so far
 					ht->can_use_probe_pushdown = ht->conditions.size() == 1 && cmp == ExpressionType::COMPARE_EQUAL;
 
-					if (ht->can_use_probe_pushdown && true) {
+					if (ht->can_use_probe_pushdown && false) {
 						// If the nulls are equal, we let nulls pass. If not, we filter them
 						auto filters_null_values = !ht->NullValuesAreEqual(join_condition[filter_idx]);
 						const auto key_name = ht->conditions[0].right->ToString();
 						const auto key_type = ht->conditions[0].left->return_type;
 						JoinHashTable &ht_ref = *ht;
 
-						auto bf_filter =
-							make_uniq<BloomFilter>(ht_ref, filters_null_values, key_name, key_type);
+						auto bf_filter = make_uniq<BloomFilter>(ht_ref, filters_null_values, key_name, key_type);
 						info.dynamic_filters->PushFilter(op, filter_col_idx, std::move(bf_filter));
 					}
 				}

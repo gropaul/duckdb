@@ -65,8 +65,9 @@ struct BloomFilterState final : public TableFilterState {
 
 	bool continue_filtering = true;
 
-	explicit BloomFilterState(const LogicalType &key_logical_type): current_capacity(STANDARD_VECTOR_SIZE), hashes_v(LogicalType::HASH), keys_flat_v(key_logical_type, STANDARD_VECTOR_SIZE), bf_sel(STANDARD_VECTOR_SIZE) {
-
+	explicit BloomFilterState(const LogicalType &key_logical_type)
+	    : current_capacity(STANDARD_VECTOR_SIZE), hashes_v(LogicalType::HASH),
+	      keys_flat_v(key_logical_type, STANDARD_VECTOR_SIZE), bf_sel(STANDARD_VECTOR_SIZE) {
 	}
 };
 
