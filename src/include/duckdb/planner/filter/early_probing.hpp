@@ -105,8 +105,8 @@ public:
 
 	// Filters the data by first hashing and then probing the bloom filter. The &sel will hold
 	// the remaining tuples, &approved_tuple_count will hold the approved count.
-	idx_t Filter(Vector &keys_v, UnifiedVectorFormat &keys_uvf, SelectionVector &sel,
-	                                       idx_t &approved_tuple_count, EarlyProbingFilterState &state) const {
+	idx_t Filter(Vector &keys_v, UnifiedVectorFormat &keys_uvf, SelectionVector &sel, idx_t &approved_tuple_count,
+	             EarlyProbingFilterState &state) const {
 
 		// printf("Filter bf: bf has %llu sectors and initialized=%hd \n", filter.num_sectors, filter.IsInitialized());
 		const bool isPerfectHT =

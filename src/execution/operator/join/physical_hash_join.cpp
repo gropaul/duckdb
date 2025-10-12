@@ -770,8 +770,6 @@ unique_ptr<DataChunk> JoinFilterPushdownInfo::Finalize(ClientContext &context, o
 		const auto cmp = op.conditions[join_condition[filter_idx]].comparison;
 		for (auto &info : probe_info) {
 
-			bool filter_already_pushed_down = true;
-
 			auto filter_col_idx = info.columns[filter_idx].probe_column_index.column_index;
 			auto min_idx = filter_idx * 2;
 			auto max_idx = min_idx + 1;
@@ -786,10 +784,11 @@ unique_ptr<DataChunk> JoinFilterPushdownInfo::Finalize(ClientContext &context, o
 			}
 			// if the HT is small we can generate a complete "OR" filter
 			// but only if the join condition is equality.
+			bool has_in_filter = false;
 			if (ht && ht->Count() > 1 && ht->Count() <= dynamic_or_filter_threshold &&
 			    cmp == ExpressionType::COMPARE_EQUAL) {
 				PushInFilter(info, *ht, op, filter_idx, filter_col_idx);
-				filter_already_pushed_down = true;
+				has_in_filter = true;
 			}
 
 			if (Value::NotDistinctFrom(min_val, max_val)) {
@@ -798,6 +797,7 @@ unique_ptr<DataChunk> JoinFilterPushdownInfo::Finalize(ClientContext &context, o
 				// Note that this also works for equalities.
 				auto constant_filter = make_uniq<ConstantFilter>(cmp, std::move(min_val));
 				info.dynamic_filters->PushFilter(op, filter_col_idx, std::move(constant_filter));
+
 			} else {
 				// min != max - generate a range filter
 				// for non-equalities, the range must be half-open
@@ -829,10 +829,10 @@ unique_ptr<DataChunk> JoinFilterPushdownInfo::Finalize(ClientContext &context, o
 
 				if (ht) {
 					// bloom filter is only supported for single key equality joins so far
-					const bool can_use_probe_pushdown =
-					    ht->conditions.size() == 1 && cmp == ExpressionType::COMPARE_EQUAL;
+					const bool use_probe_pushdown =
+					    ht->conditions.size() == 1 && cmp == ExpressionType::COMPARE_EQUAL && !has_in_filter;
 
-					if (can_use_probe_pushdown && true) {
+					if (use_probe_pushdown) {
 						// If the nulls are equal, we let nulls pass. If not, we filter them
 						auto filters_null_values = !ht->NullValuesAreEqual(join_condition[filter_idx]);
 						const auto key_name = ht->conditions[0].right->ToString();
@@ -840,9 +840,8 @@ unique_ptr<DataChunk> JoinFilterPushdownInfo::Finalize(ClientContext &context, o
 						JoinHashTable &ht_ref = *ht;
 
 						auto bf_filter = make_uniq<EarlyProbingFilter>(ht_ref, filters_null_values, key_name, key_type);
-						auto bf_filter_optional = make_uniq<OptionalFilter>(std::move(bf_filter));
 
-						info.dynamic_filters->PushFilter(op, filter_col_idx, std::move(bf_filter_optional));
+						info.dynamic_filters->PushFilter(op, filter_col_idx, std::move(bf_filter));
 					}
 				}
 			}
