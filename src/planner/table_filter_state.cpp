@@ -1,5 +1,6 @@
 #include "duckdb/planner/table_filter_state.hpp"
 #include "duckdb/planner/filter/conjunction_filter.hpp"
+#include "duckdb/planner/filter/early_probing.hpp"
 #include "duckdb/planner/filter/expression_filter.hpp"
 #include "duckdb/planner/filter/struct_filter.hpp"
 
@@ -37,6 +38,10 @@ unique_ptr<TableFilterState> TableFilterState::Initialize(ClientContext &context
 	case TableFilterType::EXPRESSION_FILTER: {
 		auto &expr_filter = filter.Cast<ExpressionFilter>();
 		return make_uniq<ExpressionFilterState>(context, *expr_filter.expr);
+	}
+	case TableFilterType::EARLY_PROBING: {
+		auto &bf = filter.Cast<EarlyProbingFilter>();
+		return make_uniq<EarlyProbingFilterState>(bf.GetKeyType());
 	}
 	case TableFilterType::CONSTANT_COMPARISON:
 	case TableFilterType::IS_NULL:
