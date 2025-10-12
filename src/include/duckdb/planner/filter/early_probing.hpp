@@ -105,14 +105,14 @@ public:
 
 	// Filters the data by first hashing and then probing the bloom filter. The &sel will hold
 	// the remaining tuples, &approved_tuple_count will hold the approved count.
-	__attribute__((noinline)) idx_t Filter(Vector &keys_v, UnifiedVectorFormat &keys_uvf, SelectionVector &sel,
+	idx_t Filter(Vector &keys_v, UnifiedVectorFormat &keys_uvf, SelectionVector &sel,
 	                                       idx_t &approved_tuple_count, EarlyProbingFilterState &state) const {
 
 		// printf("Filter bf: bf has %llu sectors and initialized=%hd \n", filter.num_sectors, filter.IsInitialized());
-		bool isPerfectHT =
+		const bool isPerfectHT =
 		    hashtable.capacity != hashtable.bitmask + 1; // todo: this is a hacky way to check if the ht is perfect
 		if (!state.continue_filtering || isPerfectHT || approved_tuple_count == 0) {
-			return approved_tuple_count; // todo: may
+			return approved_tuple_count;
 		}
 
 		if (state.current_capacity < approved_tuple_count) {
@@ -211,8 +211,8 @@ public:
 		// LogicalType key_type = deserializer.ReadProperty<LogicalType>(202, "key_type");
 		//
 		// CacheSectorizedBloomFilter filter;
-		// // auto result = make_uniq<BloomFilter>(, filters_null_values, key_column_name, key_type);
-		// // return std::move(result);
+		// auto result = make_uniq<BloomFilter>(, filters_null_values, key_column_name, key_type);
+		// return std::move(result);
 	}
 };
 

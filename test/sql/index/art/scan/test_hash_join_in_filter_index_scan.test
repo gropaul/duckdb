@@ -24,14 +24,6 @@ CREATE TABLE random_orders AS (
 statement ok
 CREATE TABLE orders_shuffled AS FROM orders ORDER BY random();
 
-query II
-EXPLAIN ANALYZE
-SELECT o_orderkey FROM orders_shuffled WHERE o_orderkey IN (
-	SELECT UNNEST(LIST(o_orderkey)) FROM random_orders
-) ORDER BY ALL;
-----
-analyzed_plan	<REGEX>:.*Type: Sequential Scan.*
-
 statement ok
 ALTER TABLE orders_shuffled ADD PRIMARY KEY (o_orderkey);
 

@@ -5,11 +5,6 @@ namespace duckdb {
 
 string EarlyProbingFilter::ToString(const string &column_name) const {
 	return column_name + " IN Probe(" + key_column_name + ")";
-	// if (filter.IsInitialized()) {
-	// 	return column_name +  " IN BF(" + key_column_name + ")";
-	// } else {
-	// 	return "True";
-	// }
 }
 
 unique_ptr<Expression> EarlyProbingFilter::ToExpression(const Expression &column) const {

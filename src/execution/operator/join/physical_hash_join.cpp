@@ -832,7 +832,7 @@ unique_ptr<DataChunk> JoinFilterPushdownInfo::Finalize(ClientContext &context, o
 					const bool can_use_probe_pushdown =
 					    ht->conditions.size() == 1 && cmp == ExpressionType::COMPARE_EQUAL;
 
-					if (can_use_probe_pushdown) {
+					if (can_use_probe_pushdown && true) {
 						// If the nulls are equal, we let nulls pass. If not, we filter them
 						auto filters_null_values = !ht->NullValuesAreEqual(join_condition[filter_idx]);
 						const auto key_name = ht->conditions[0].right->ToString();
@@ -840,7 +840,9 @@ unique_ptr<DataChunk> JoinFilterPushdownInfo::Finalize(ClientContext &context, o
 						JoinHashTable &ht_ref = *ht;
 
 						auto bf_filter = make_uniq<EarlyProbingFilter>(ht_ref, filters_null_values, key_name, key_type);
-						info.dynamic_filters->PushFilter(op, filter_col_idx, std::move(bf_filter));
+						auto bf_filter_optional = make_uniq<OptionalFilter>(std::move(bf_filter));
+
+						info.dynamic_filters->PushFilter(op, filter_col_idx, std::move(bf_filter_optional));
 					}
 				}
 			}
