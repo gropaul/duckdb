@@ -32,17 +32,24 @@ static bool IsHashContained(const JoinHashTable &ht, const hash_t hash) {
 		const ht_entry_t entry = ht.GetPointerTable()[ht_offset];
 		const bool occupied = entry.IsOccupied();
 		const bool salt_match = entry.GetSalt() == row_salt;
-		has_match = salt_match || has_match;
-		has_empty = (!occupied) || has_empty;
+		if (!occupied) {
+			return false;
+		}
+
+		if (salt_match) {
+			return true;
+		}
 	}
+
+	return true;
 	// -> we keep it
 	// a) if there is a salt match -> we found our slot
-	// b) or if there is no empty entry  -> we would need to continue probing
+	// b) or if there is no empty entry -> we would need to continue probing
 	const bool keep_tuple = has_match || (!has_empty);
 	return keep_tuple;
 }
 
-static idx_t EarlyProbeHashes(Vector &hashes_dense_v, JoinHashTable &ht, SelectionVector &sel, const idx_t count) {
+static __attribute__((noinline)) idx_t EarlyProbeHashes(Vector &hashes_dense_v, JoinHashTable &ht, SelectionVector &sel, const idx_t count) {
 
 	idx_t found_count = 0;
 	const auto hashes_dense = FlatVector::GetData<hash_t>(hashes_dense_v);
@@ -109,6 +116,7 @@ public:
 	             EarlyProbingFilterState &state) const {
 
 		// printf("Filter bf: bf has %llu sectors and initialized=%hd \n", filter.num_sectors, filter.IsInitialized());
+		// todo: Don't do this if it is a perfect hash table, instead don't insert the Early Probing at all
 		const bool isPerfectHT =
 		    hashtable.capacity != hashtable.bitmask + 1; // todo: this is a hacky way to check if the ht is perfect
 		if (!state.continue_filtering || isPerfectHT || approved_tuple_count == 0) {
@@ -144,10 +152,12 @@ public:
 			if (state.vectors_processed == 10) {
 				const double selectivity =
 				    static_cast<double>(state.tuples_accepted) / static_cast<double>(state.tuples_processed);
-				// printf("BF Sel=%f, HT Size=%lu, HT Capacity=%lu\n", selectivity, hashtable.Count(),
-				// hashtable.capacity);
+				printf("BF Sel=%f, HT Size=%lu, HT Capacity=%lu\n", selectivity, hashtable.Count(),
+				hashtable.capacity);
 				if (selectivity > 0.25) {
 					state.continue_filtering = false;
+					printf("Stop filtering\n");
+
 				}
 			}
 		}

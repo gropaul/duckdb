@@ -616,9 +616,9 @@ idx_t ColumnSegment::FilterSelection(SelectionVector &sel, Vector &vector, Unifi
 		return approved_tuple_count;
 	}
 	case TableFilterType::EARLY_PROBING: {
-		auto &bloom_filter = filter.Cast<EarlyProbingFilter>();
+		auto &early_probing_filter = filter.Cast<EarlyProbingFilter>();
 		auto &state = filter_state.Cast<EarlyProbingFilterState>();
-		return bloom_filter.Filter(vector, vdata, sel, approved_tuple_count, state);
+		return early_probing_filter.Filter(vector, vdata, sel, approved_tuple_count, state);
 	}
 	default:
 		throw InternalException("FIXME: unsupported type for filter selection");

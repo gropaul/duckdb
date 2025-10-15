@@ -839,9 +839,9 @@ unique_ptr<DataChunk> JoinFilterPushdownInfo::Finalize(ClientContext &context, o
 						const auto key_type = ht->conditions[0].left->return_type;
 						JoinHashTable &ht_ref = *ht;
 
-						auto bf_filter = make_uniq<EarlyProbingFilter>(ht_ref, filters_null_values, key_name, key_type);
+						auto early_probing_filter = make_uniq<EarlyProbingFilter>(ht_ref, filters_null_values, key_name, key_type);
 
-						info.dynamic_filters->PushFilter(op, filter_col_idx, std::move(bf_filter));
+						info.dynamic_filters->PushFilter(op, filter_col_idx, std::move(early_probing_filter));
 					}
 				}
 			}
