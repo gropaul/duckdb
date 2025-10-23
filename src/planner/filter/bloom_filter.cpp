@@ -232,7 +232,7 @@ idx_t BloomFilter::Filter(Vector &keys_v, SelectionVector &sel, idx_t &approved_
 	return approved_tuple_count;
 }
 
-inline bool BloomFilter::FilterValue(const Value &value) const {
+bool BloomFilter::FilterValue(const Value &value) const {
 	const auto hash = value.Hash();
 	return filter.LookupHash(hash);
 }
