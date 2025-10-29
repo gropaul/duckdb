@@ -157,6 +157,10 @@ public:
 		Vector ht_offsets_and_salts_v;
 		Vector hashes_dense_v;
 		SelectionVector non_empty_sel;
+
+		uint64_t n_vectors_seen;
+		uint64_t tuples_seen;
+		uint64_t tuples_found;
 	};
 
 	struct InsertState : SharedState {
@@ -217,6 +221,8 @@ public:
 	bool NullValuesAreEqual(idx_t col_idx) const {
 		return null_values_are_equal[col_idx];
 	}
+
+	bool can_use_probe_pushdown = false;
 
 	ClientContext &context;
 	const PhysicalOperator &op;
@@ -327,7 +333,7 @@ private:
 
 	//! The hash map of the HT, created after finalization
 	AllocatedData hash_map;
-	ht_entry_t *entries = nullptr;
+
 	//! Whether or not NULL values are considered equal in each of the comparisons
 	vector<bool> null_values_are_equal;
 	//! An empty tuple that's a "dead end", can be used to stop chains early
@@ -337,6 +343,7 @@ private:
 	JoinHashTable(const JoinHashTable &) = delete;
 
 public:
+	ht_entry_t *entries = nullptr;
 	//===--------------------------------------------------------------------===//
 	// External Join
 	//===--------------------------------------------------------------------===//

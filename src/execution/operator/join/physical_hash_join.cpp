@@ -25,6 +25,7 @@
 #include "duckdb/storage/temporary_memory_manager.hpp"
 #include "duckdb/main/settings.hpp"
 #include "duckdb/logging/log_manager.hpp"
+#include "duckdb/planner/filter/bloom_filter.hpp"
 
 namespace duckdb {
 
@@ -158,6 +159,10 @@ public:
 		if (op.filter_pushdown) {
 			if (op.filter_pushdown->probe_info.empty() && use_perfect_hash) {
 				// Only computing min/max to check for perfect HJ, but we already can
+				// fixme: even with a perfect HT it might still be worth to do filter pushdown in the sense that
+				// if the slot number retrieved for the perfect hash table does not fit the range. In this sense
+				// a pushed down filter for a perfect hash table could be a simple range query that with min-max
+				// if you expect the table do be densely populated or a super fast bloom filter pushdown
 				skip_filter_pushdown = true;
 			}
 			global_filter_state = op.filter_pushdown->GetGlobalState(context, op);
@@ -211,7 +216,7 @@ unique_ptr<JoinFilterLocalState> JoinFilterPushdownInfo::GetLocalState(JoinFilte
 	return result;
 }
 
-class HashJoinLocalSinkState : public LocalSinkState {
+class HashJoinLocalSinkState final : public LocalSinkState {
 public:
 	HashJoinLocalSinkState(const PhysicalHashJoin &op, ClientContext &context, HashJoinGlobalSinkState &gstate)
 	    : join_key_executor(context) {
@@ -768,6 +773,9 @@ unique_ptr<DataChunk> JoinFilterPushdownInfo::Finalize(ClientContext &context, o
 	for (idx_t filter_idx = 0; filter_idx < join_condition.size(); filter_idx++) {
 		const auto cmp = op.conditions[join_condition[filter_idx]].comparison;
 		for (auto &info : probe_info) {
+
+			bool filter_already_pushed_down = true;
+
 			auto filter_col_idx = info.columns[filter_idx].probe_column_index.column_index;
 			auto min_idx = filter_idx * 2;
 			auto max_idx = min_idx + 1;
@@ -785,6 +793,7 @@ unique_ptr<DataChunk> JoinFilterPushdownInfo::Finalize(ClientContext &context, o
 			if (ht && ht->Count() > 1 && ht->Count() <= dynamic_or_filter_threshold &&
 			    cmp == ExpressionType::COMPARE_EQUAL) {
 				PushInFilter(info, *ht, op, filter_idx, filter_col_idx);
+				filter_already_pushed_down = true;
 			}
 
 			if (Value::NotDistinctFrom(min_val, max_val)) {
@@ -820,6 +829,22 @@ unique_ptr<DataChunk> JoinFilterPushdownInfo::Finalize(ClientContext &context, o
 				}
 				default:
 					break;
+				}
+
+				if (ht) {
+					// bloom filter is only supported for single key equality joins so far
+					ht->can_use_probe_pushdown = ht->conditions.size() == 1 && cmp == ExpressionType::COMPARE_EQUAL;
+
+					if (ht->can_use_probe_pushdown) {
+						// If the nulls are equal, we let nulls pass. If not, we filter them
+						auto filters_null_values = !ht->NullValuesAreEqual(join_condition[filter_idx]);
+						const auto key_name = ht->conditions[0].right->ToString();
+						const auto key_type = ht->conditions[0].left->return_type;
+						JoinHashTable &ht_ref = *ht;
+
+						auto bf_filter = make_uniq<BloomFilter>(ht_ref, filters_null_values, key_name, key_type);
+						info.dynamic_filters->PushFilter(op, filter_col_idx, std::move(bf_filter));
+					}
 				}
 			}
 		}
