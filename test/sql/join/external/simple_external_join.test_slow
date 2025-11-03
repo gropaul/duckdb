@@ -30,7 +30,7 @@ statement ok
 pragma memory_limit='100mb'
 
 query I
-select count(*) from t1, t2 where i = j
+select count(*) from t1, t2 where i = j and t2.j != concat('0', repeat('0', 50))
 ----
 100000
 
