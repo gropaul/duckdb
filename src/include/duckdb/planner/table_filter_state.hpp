@@ -52,4 +52,17 @@ public:
 	ExpressionExecutor executor;
 };
 
+struct BloomFilterState final : public TableFilterState {
+
+	idx_t current_capacity;
+	Vector hashes_v;
+	Vector keys_sliced_v;
+	SelectionVector bf_sel;
+
+	explicit BloomFilterState(const LogicalType &key_logical_type)
+	    : current_capacity(STANDARD_VECTOR_SIZE), hashes_v(LogicalType::HASH), keys_sliced_v(key_logical_type),
+	      bf_sel(STANDARD_VECTOR_SIZE) {
+	}
+};
+
 } // namespace duckdb
