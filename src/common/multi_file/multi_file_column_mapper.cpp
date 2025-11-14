@@ -845,6 +845,13 @@ bool MultiFileColumnMapper::EvaluateFilterAgainstConstant(TableFilter &filter, c
 		}
 		return true;
 	}
+	case TableFilterType::SELECTIVITY_OPTIONAL_FILTER: {
+		auto &selectivity_optional_filter = filter.Cast<SelectivityOptionalFilter>();
+		if (selectivity_optional_filter.child_filter) {
+			return EvaluateFilterAgainstConstant(*selectivity_optional_filter.child_filter, constant);
+		}
+		return true;
+	}
 	case TableFilterType::DYNAMIC_FILTER: {
 		auto &dynamic_filter = filter.Cast<DynamicFilter>();
 		if (!dynamic_filter.filter_data) {
@@ -865,6 +872,10 @@ bool MultiFileColumnMapper::EvaluateFilterAgainstConstant(TableFilter &filter, c
 	case TableFilterType::EXPRESSION_FILTER: {
 		auto &expr_filter = filter.Cast<ExpressionFilter>();
 		return expr_filter.EvaluateWithConstant(context, constant);
+	}
+	case TableFilterType::BLOOM_FILTER: {
+		auto &bloom_filter = filter.Cast<BFTableFilter>();
+		return bloom_filter.FilterValue(constant);
 	}
 	default:
 		throw NotImplementedException("Can't evaluate TableFilterType (%s) against a constant",
