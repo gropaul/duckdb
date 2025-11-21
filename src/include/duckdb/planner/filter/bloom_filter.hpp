@@ -73,14 +73,14 @@ public:
 
 	// Filters by first hashing and then probing the bloom filter. The &sel will hold
 	// the remaining tuples, &approved_tuple_count will hold the approved count.
-	idx_t Filter(Vector &keys_v, SelectionVector &sel, idx_t &approved_tuple_count, BFTableFilterState &state) const;
+	idx_t Filter(Vector &keys_v, SelectionVector &input_sel, idx_t &approved_tuple_count, BFTableFilterState &state) const;
 	bool FilterValue(const Value &value) const;
 
 	FilterPropagateResult CheckStatistics(BaseStatistics &stats) const override;
 
 private:
-	static void HashInternal(Vector &keys_v, const SelectionVector &sel, const idx_t approved_count,
-	                         BFTableFilterState &state);
+	static void HashInternal(Vector &keys_v, const SelectionVector &sel, idx_t approved_count, Vector &hashes_v);
+
 
 	bool Equals(const TableFilter &other) const override;
 	unique_ptr<TableFilter> Copy() const override;

@@ -847,7 +847,17 @@ ScanStructure::ScanStructure(JoinHashTable &ht_p, TupleDataChunkState &key_state
 }
 
 void ScanStructure::Next(DataChunk &keys, DataChunk &left, DataChunk &result) {
+	if (keys.size() != left.size()) {
+		keys.Print();
+		left.Print();
+		result.Print();
+		this->ht.op.Print();
+		printf("Missmatch!\n");
+		D_ASSERT(keys.size() == left.size());
+		exit(1);
+	}
 	D_ASSERT(keys.size() == left.size());
+
 	if (finished) {
 		return;
 	}

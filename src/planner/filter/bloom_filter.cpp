@@ -80,34 +80,40 @@ string BFTableFilter::ToString(const string &column_name) const {
 	return column_name + " IN BF(" + key_column_name + ")";
 }
 
-void BFTableFilter::HashInternal(Vector &keys_v, const SelectionVector &sel, const idx_t approved_count,
-                                 BFTableFilterState &state) {
+void BFTableFilter::HashInternal(Vector &keys_v, const SelectionVector &sel, idx_t approved_count, Vector &hashes_v) {
 	if (sel.IsSet()) {
-		state.keys_sliced_v.Slice(keys_v, sel, approved_count);
-		VectorOperations::Hash(state.keys_sliced_v, state.hashes_v, approved_count);
+		Vector keys_sliced_v(keys_v.GetType(), approved_count);
+		VectorOperations::Copy(keys_v, keys_sliced_v, sel, approved_count,0 , 0);
+		VectorOperations::Hash(keys_sliced_v, hashes_v, approved_count);
 	} else {
-		VectorOperations::Hash(keys_v, state.hashes_v, approved_count);
+		VectorOperations::Hash(keys_v, hashes_v, approved_count);
 	}
 }
 
-idx_t BFTableFilter::Filter(Vector &keys_v, SelectionVector &sel, idx_t &approved_tuple_count,
-                            BFTableFilterState &state) const {
-	if (state.current_capacity < approved_tuple_count) {
-		state.hashes_v.Initialize(false, approved_tuple_count);
-		state.bf_sel.Initialize(approved_tuple_count);
-		state.current_capacity = approved_tuple_count;
+
+idx_t BFTableFilter::Filter(Vector &keys_v, SelectionVector &input_sel, idx_t &approved_tuple_count,
+                            BFTableFilterState &_state) const {
+
+	// copy the sel vector
+	SelectionVector copy_sel(approved_tuple_count);
+	for (idx_t i = 0; i < approved_tuple_count; i++) {
+		copy_sel.set_index(i, input_sel.get_index(i));
 	}
 
-	HashInternal(keys_v, sel, approved_tuple_count, state);
+	Vector hashes_v(LogicalType::HASH, approved_tuple_count);
+	SelectionVector bf_sel(approved_tuple_count);
+
+
+	HashInternal(keys_v, copy_sel, approved_tuple_count, hashes_v);
 
 	idx_t found_count;
-	if (state.hashes_v.GetVectorType() == VectorType::CONSTANT_VECTOR) {
-		const auto constant_hash = *ConstantVector::GetData<hash_t>(state.hashes_v);
+	if (hashes_v.GetVectorType() == VectorType::CONSTANT_VECTOR && false) {
+		const auto constant_hash = *ConstantVector::GetData<hash_t>(hashes_v);
 		const bool found = this->filter.LookupOne(constant_hash);
 		found_count = found ? approved_tuple_count : 0;
 	} else {
-		state.hashes_v.Flatten(approved_tuple_count);
-		found_count = this->filter.LookupHashes(state.hashes_v, state.bf_sel, approved_tuple_count);
+		hashes_v.Flatten(approved_tuple_count);
+		found_count = this->filter.LookupHashes(hashes_v, bf_sel, approved_tuple_count);
 	}
 
 	// all the elements have been found, we don't need to translate anything
@@ -115,16 +121,19 @@ idx_t BFTableFilter::Filter(Vector &keys_v, SelectionVector &sel, idx_t &approve
 		return approved_tuple_count;
 	}
 
-	if (sel.IsSet()) {
-		for (idx_t idx = 0; idx < found_count; idx++) {
-			const idx_t flat_sel_idx = state.bf_sel.get_index(idx);
-			const idx_t original_sel_idx = sel.get_index(flat_sel_idx);
-			sel.set_index(idx, original_sel_idx);
-		}
-	} else {
-		sel.Initialize(state.bf_sel);
+	if (!input_sel.IsSet()) {
+		input_sel.Initialize(approved_tuple_count);
 	}
 
+	for (idx_t idx = 0; idx < found_count; idx++) {
+		const idx_t flat_sel_idx = bf_sel.get_index(idx);
+		const idx_t original_sel_idx = copy_sel.get_index(flat_sel_idx);
+		input_sel.set_index(idx, original_sel_idx);
+	}
+
+	// printf("BFTableFilter::Filter: column: %s, approved_tuple_count: %llu, found_count: %llu, sel_is_set: %d\n",
+	//        key_column_name.c_str(),
+	//        approved_tuple_count, found_count, input_sel.IsSet());
 	approved_tuple_count = found_count;
 	return approved_tuple_count;
 }

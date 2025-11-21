@@ -62,6 +62,7 @@ public:
 	FilterPropagateResult CheckStatistics(BaseStatistics &stats) const override;
 	void Serialize(Serializer &serializer) const override;
 	static unique_ptr<TableFilter> Deserialize(Deserializer &deserializer);
+	string ToString(const string &column_name) const override;
 	void FiltersNullValues(const LogicalType &type, bool &filters_nulls, bool &filters_valid_values,
 	                       TableFilterState &filter_state) const override;
 	unique_ptr<TableFilterState> InitializeState(ClientContext &context) const override;

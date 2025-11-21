@@ -45,6 +45,7 @@ void SelectivityOptionalFilterState::SelectivityStats::Update(idx_t accepted, id
 bool SelectivityOptionalFilterState::SelectivityStats::IsActive() const {
 	return status == FilterStatus::ACTIVE;
 }
+
 double SelectivityOptionalFilterState::SelectivityStats::GetSelectivity() const {
 	if (tuples_processed == 0) {
 		return 1.0;
@@ -88,6 +89,10 @@ unique_ptr<TableFilterState> SelectivityOptionalFilter::InitializeState(ClientCo
 	auto child_filter_state = TableFilterState::Initialize(context, *child_filter);
 	return make_uniq<SelectivityOptionalFilterState>(std::move(child_filter_state), this->n_vectors_to_check,
 	                                                 this->selectivity_threshold);
+}
+
+string SelectivityOptionalFilter::ToString(const string &column_name) const {
+	return string("s_optional: ") + child_filter->ToString(column_name);
 }
 
 idx_t SelectivityOptionalFilter::FilterSelection(SelectionVector &sel, Vector &vector, UnifiedVectorFormat &vdata,
