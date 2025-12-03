@@ -175,6 +175,25 @@ public:
 				return true;
 			}
 			if (!a.IsInlined()) {
+
+				constexpr uint64_t BLOCK_SIZE = 16;
+
+				if (a.GetSize() >= BLOCK_SIZE) {
+					for (uint64_t offset = 0; offset < a.GetSize() - BLOCK_SIZE; offset += BLOCK_SIZE) {
+						if (memcmp(a.value.pointer.ptr + offset, b.value.pointer.ptr + offset, BLOCK_SIZE) != 0) {
+							return false;
+						}
+					}
+					// do the last block
+					uint64_t last_offset = a.GetSize() - BLOCK_SIZE;
+					if (last_offset > 0) {
+						if (memcmp(a.value.pointer.ptr + last_offset, b.value.pointer.ptr + last_offset, BLOCK_SIZE) != 0) {
+							return false;
+						}
+					}
+					return true;
+				}
+
 				// 'long' strings of the same length -> compare pointed value
 				if (memcmp(a.value.pointer.ptr, b.value.pointer.ptr, a.GetSize()) == 0) {
 					return true;
