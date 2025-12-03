@@ -24,6 +24,7 @@
 #include "duckdb/main/client_data.hpp"
 #include "duckdb/common/algorithm.hpp"
 #include "duckdb/planner/filter/optional_filter.hpp"
+#include "duckdb/planner/filter/selectivity_optional_filter.hpp"
 #include "duckdb/planner/filter/in_filter.hpp"
 #include "duckdb/planner/expression/bound_constant_expression.hpp"
 #include "duckdb/planner/expression/bound_comparison_expression.hpp"
@@ -462,9 +463,19 @@ bool ExtractComparisonsAndInFilters(TableFilter &filter, vector<reference<Consta
 		}
 		return ExtractComparisonsAndInFilters(*optional_filter.child_filter, comparisons, in_filters);
 	}
+	case TableFilterType::SELECTIVITY_OPTIONAL_FILTER: {
+		auto &optional_filter = filter.Cast<SelectivityOptionalFilter>();
+		if (!optional_filter.child_filter) {
+			return true; // No child filters, always OK
+		}
+		return ExtractComparisonsAndInFilters(*optional_filter.child_filter, comparisons, in_filters);
+	}
 	case TableFilterType::IN_FILTER: {
 		in_filters.push_back(filter.Cast<InFilter>());
 		return true;
+	}
+	case TableFilterType::BLOOM_FILTER: {
+		return true; // We can't use it for finding cmp/in filters, but we can just ignore it
 	}
 	case TableFilterType::CONJUNCTION_AND: {
 		auto &conjunction_and = filter.Cast<ConjunctionAndFilter>();
