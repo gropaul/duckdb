@@ -20,6 +20,7 @@
 #include "duckdb/planner/filter/constant_filter.hpp"
 #include "duckdb/planner/filter/in_filter.hpp"
 #include "duckdb/planner/filter/optional_filter.hpp"
+#include "duckdb/planner/filter/early_probing.hpp"
 #include "duckdb/planner/table_filter.hpp"
 #include "duckdb/storage/buffer_manager.hpp"
 #include "duckdb/storage/temporary_memory_manager.hpp"
@@ -762,6 +763,7 @@ unique_ptr<DataChunk> JoinFilterPushdownInfo::Finalize(ClientContext &context, o
 	for (idx_t filter_idx = 0; filter_idx < join_condition.size(); filter_idx++) {
 		const auto cmp = op.conditions[join_condition[filter_idx]].comparison;
 		for (auto &info : probe_info) {
+
 			auto filter_col_idx = info.columns[filter_idx].probe_column_index.column_index;
 			auto min_idx = filter_idx * 2;
 			auto max_idx = min_idx + 1;
@@ -776,9 +778,11 @@ unique_ptr<DataChunk> JoinFilterPushdownInfo::Finalize(ClientContext &context, o
 			}
 			// if the HT is small we can generate a complete "OR" filter
 			// but only if the join condition is equality.
+			bool has_in_filter = false;
 			if (ht && ht->Count() > 1 && ht->Count() <= dynamic_or_filter_threshold &&
 			    cmp == ExpressionType::COMPARE_EQUAL) {
 				PushInFilter(info, *ht, op, filter_idx, filter_col_idx);
+				has_in_filter = true;
 			}
 
 			if (Value::NotDistinctFrom(min_val, max_val)) {
@@ -787,6 +791,7 @@ unique_ptr<DataChunk> JoinFilterPushdownInfo::Finalize(ClientContext &context, o
 				// Note that this also works for equalities.
 				auto constant_filter = make_uniq<ConstantFilter>(cmp, std::move(min_val));
 				info.dynamic_filters->PushFilter(op, filter_col_idx, std::move(constant_filter));
+
 			} else {
 				// min != max - generate a range filter
 				// for non-equalities, the range must be half-open
@@ -814,6 +819,24 @@ unique_ptr<DataChunk> JoinFilterPushdownInfo::Finalize(ClientContext &context, o
 				}
 				default:
 					break;
+				}
+
+				if (ht) {
+					// bloom filter is only supported for single key equality joins so far
+					const bool use_probe_pushdown =
+					    ht->conditions.size() == 1 && cmp == ExpressionType::COMPARE_EQUAL && !has_in_filter;
+
+					if (use_probe_pushdown) {
+						// If the nulls are equal, we let nulls pass. If not, we filter them
+						auto filters_null_values = !ht->NullValuesAreEqual(join_condition[filter_idx]);
+						const auto key_name = ht->conditions[0].right->ToString();
+						const auto key_type = ht->conditions[0].left->return_type;
+						JoinHashTable &ht_ref = *ht;
+
+						auto early_probing_filter = make_uniq<EarlyProbingFilter>(ht_ref, filters_null_values, key_name, key_type);
+
+						info.dynamic_filters->PushFilter(op, filter_col_idx, std::move(early_probing_filter));
+					}
 				}
 			}
 		}

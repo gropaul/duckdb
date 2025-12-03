@@ -14,6 +14,7 @@
 #include "duckdb/storage/table/scan_state.hpp"
 #include "duckdb/storage/table/update_segment.hpp"
 #include "duckdb/planner/table_filter_state.hpp"
+#include "duckdb/planner/filter/early_probing.hpp"
 #include "duckdb/planner/filter/expression_filter.hpp"
 
 #include <cstring>
@@ -612,6 +613,11 @@ idx_t ColumnSegment::FilterSelection(SelectionVector &sel, Vector &vector, Unifi
 		}
 		sel.Initialize(result_sel);
 		return approved_tuple_count;
+	}
+	case TableFilterType::EARLY_PROBING: {
+		auto &early_probing_filter = filter.Cast<EarlyProbingFilter>();
+		auto &state = filter_state.Cast<EarlyProbingFilterState>();
+		return early_probing_filter.Filter(vector, vdata, sel, approved_tuple_count, state);
 	}
 	default:
 		throw InternalException("FIXME: unsupported type for filter selection");

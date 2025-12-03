@@ -418,6 +418,11 @@ public:
 		return PointerTableCapacity(count) * sizeof(data_ptr_t);
 	}
 
+	//! Returns a pointer to the head of the pointer table
+	ht_entry_t *GetPointerTable() const {
+		return entries;
+	}
+
 	//! Get total size of HT if all partitions would be built
 	idx_t GetTotalSize(const vector<unique_ptr<JoinHashTable>> &local_hts, idx_t &max_partition_size,
 	                   idx_t &max_partition_count) const;

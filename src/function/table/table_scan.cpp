@@ -462,6 +462,9 @@ bool ExtractComparisonsAndInFilters(TableFilter &filter, vector<reference<Consta
 		}
 		return ExtractComparisonsAndInFilters(*optional_filter.child_filter, comparisons, in_filters);
 	}
+	case TableFilterType::EARLY_PROBING: {
+		return true; // We can't use it for finding cmp/in filters, but we can just ignore it
+	}
 	case TableFilterType::IN_FILTER: {
 		in_filters.push_back(filter.Cast<InFilter>());
 		return true;
