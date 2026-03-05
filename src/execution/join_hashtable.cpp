@@ -102,7 +102,7 @@ JoinHashTable::JoinHashTable(ClientContext &context_p, const PhysicalOperator &o
 		needs_chain_matcher = false;
 	}
 
-	chains_longer_than_one = false;
+	key_collision_count = 0;
 	row_matcher_build.Initialize(true, *layout_ptr, equality_predicates);
 
 	const auto &offsets = layout_ptr->GetOffsets();
@@ -565,7 +565,7 @@ static inline void InsertMatchesAndIncrementMisses(atomic<ht_entry_t> entries[],
                                                    const idx_t capacity_mask, const idx_t key_match_count,
                                                    const idx_t key_no_match_count) {
 	if (key_match_count != 0) {
-		ht.chains_longer_than_one = true;
+		ht.key_collision_count += key_match_count;
 	}
 
 	// Insert the rows that match
@@ -811,6 +811,8 @@ void JoinHashTable::InitializeScanStructure(ScanStructure &scan_structure, DataC
 	// set up the scan structure
 	scan_structure.is_null = false;
 	scan_structure.finished = false;
+	scan_structure.need_more_input_counter = 0;
+
 	if (join_type != JoinType::INNER) {
 		memset(scan_structure.found_match.get(), 0, sizeof(bool) * STANDARD_VECTOR_SIZE);
 	}
@@ -1041,7 +1043,7 @@ idx_t ScanStructure::ScanInnerJoin(DataChunk &keys, DataChunk &probe_data, Selec
 }
 
 void ScanStructure::AdvancePointers(const SelectionVector &sel, const idx_t sel_count) {
-	if (!ht.chains_longer_than_one) {
+	if (!ht.HasDuplicateKeys()) {
 		this->count = 0;
 		return;
 	}
@@ -1129,7 +1131,7 @@ void ScanStructure::NextInnerJoin(DataChunk &keys, DataChunk &probe_data, DataCh
 
 			if (ht.join_type != JoinType::RIGHT_SEMI && ht.join_type != JoinType::RIGHT_ANTI) {
 				// fast path: no chains longer than one
-				if (!ht.chains_longer_than_one) {
+				if (!ht.HasDuplicateKeys()) {
 					// extract only OUTPUT columns from probe_data
 					for (idx_t i = 0; i < ht.lhs_output_in_probe.size(); i++) {
 						idx_t probe_col_idx = ht.lhs_output_in_probe[i];
@@ -1158,10 +1160,21 @@ void ScanStructure::NextInnerJoin(DataChunk &keys, DataChunk &probe_data, DataCh
 	}
 
 	if (base_count > 0) {
+
+		const bool produce_dictionaries = ht.GetAverageDuplicatesPerKey() > DUPLICATE_RATIO_FOR_DICTIONARIES;
+
 		// extract only OUTPUT columns from probe_data using compaction buffer
 		for (idx_t i = 0; i < ht.lhs_output_in_probe.size(); i++) {
 			idx_t probe_col_idx = ht.lhs_output_in_probe[i];
 			result.data[i].Slice(probe_data.data[probe_col_idx], lhs_sel_vector, base_count);
+			if (produce_dictionaries && result.data[i].GetVectorType() == VectorType::DICTIONARY_VECTOR) {
+				auto &dictionary_id = DictionaryVector::DictionaryId(result.data[i]);
+				// only set the new dictionary id if it is not already set
+				if (dictionary_id.empty()) {
+					string current_dict_id = to_string(need_more_input_counter);
+					DictionaryVector::SetDictionaryId(result.data[i], current_dict_id, STANDARD_VECTOR_SIZE);
+				}
+			}
 		}
 		result.SetCardinality(base_count);
 

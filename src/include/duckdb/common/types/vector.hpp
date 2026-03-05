@@ -438,6 +438,16 @@ struct DictionaryVector {
 		}
 		return vector.buffer->Cast<DictionaryBuffer>().GetDictionaryId();
 	}
+
+	static inline void SetDictionaryId(const Vector &vector, const string& id, const idx_t dict_size) {
+		VerifyDictionary(vector);
+		auto &child_buffer = vector.auxiliary->Cast<VectorChildBuffer>();
+		child_buffer.id = id;
+		vector.buffer->Cast<DictionaryBuffer>().SetDictionaryId(id);
+		vector.buffer->Cast<DictionaryBuffer>().SetDictionarySize(dict_size);
+	}
+
+
 	static inline bool CanCacheHashes(const LogicalType &type) {
 		return type.InternalType() == PhysicalType::VARCHAR;
 	}

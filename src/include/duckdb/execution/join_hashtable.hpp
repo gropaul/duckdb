@@ -98,6 +98,11 @@ public:
 		SelectionVector chain_match_sel_vector;
 		SelectionVector chain_no_match_sel_vector;
 
+		//! How often the scan structure has returned NEED_MORE_INPUT.
+		//! This is used to generate DictionaryIDs if we decide to produce dictionaries
+		//! for the LHS during probing as we have dups on the RHS.
+		idx_t need_more_input_counter = 0;
+
 		// whether or not the given tuple has found a match
 		unsafe_unique_array<bool> found_match;
 		JoinHashTable &ht;
@@ -279,8 +284,10 @@ public:
 	//! Is true if there are predicates that are not equality predicates and we need to use the matchers during probing
 	bool needs_chain_matcher;
 
-	//! If there is more than one element in the chain, we need to scan the next elements of the chain
-	bool chains_longer_than_one;
+	//! Number of elements that have a key collision and come after the first element in the HT.
+	//! ht.Count() - key_collision_count gives you the number of
+	//! distinct keys in the HT, which is also the number of entries in the hash map.
+	idx_t key_collision_count = 0;
 
 	//! The capacity of the HT. Is the same as hash_map.GetSize() / sizeof(ht_entry_t)
 	idx_t capacity = DConstants::INVALID_INDEX;
@@ -436,6 +443,8 @@ public:
 	static constexpr double EXTERNAL_LOAD_FACTOR = 1.5;
 	//! Minimum capacity of the pointer table
 	static constexpr idx_t MINIMUM_CAPACITY = 16384;
+	//! The duplicates ratio from which we start creating LHS dictionaries during probing.
+	static constexpr idx_t DUPLICATE_RATIO_FOR_DICTIONARIES = 5;
 
 	double load_factor = DEFAULT_LOAD_FACTOR;
 
@@ -447,6 +456,21 @@ public:
 	//! Size of the pointer table (in bytes)
 	idx_t PointerTableSize(idx_t count) const {
 		return PointerTableCapacity(count) * sizeof(data_ptr_t);
+	}
+
+	bool HasDuplicateKeys() const {
+		return key_collision_count > 0;
+	}
+
+	//! Returns the average number of duplicates per distinct key in the HT. E.g., if we
+	//! have 100 total values and 10 distinct keys, this factor will be 10.
+	float GetAverageDuplicatesPerKey() const {
+		const idx_t total_keys = Count();
+		const idx_t distinct_keys = total_keys - key_collision_count;
+		if (distinct_keys == 0) {
+			return 0.0f;
+		}
+		return static_cast<float>(total_keys) / static_cast<float>(distinct_keys);
 	}
 
 	void SetBuildBloomFilter(const bool should_build) {

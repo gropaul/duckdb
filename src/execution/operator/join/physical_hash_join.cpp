@@ -1295,6 +1295,7 @@ OperatorResultType PhysicalHashJoin::ExecuteInternal(ExecutionContext &context, 
 
 	if (state.scan_structure.PointersExhausted() && chunk.size() == 0) {
 		state.scan_structure.is_null = true;
+		state.scan_structure.need_more_input_counter += 1;
 		return OperatorResultType::NEED_MORE_INPUT;
 	}
 	return OperatorResultType::HAVE_MORE_OUTPUT;
