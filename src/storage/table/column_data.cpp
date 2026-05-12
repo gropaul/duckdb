@@ -3,8 +3,12 @@
 #include "duckdb/common/exception/transaction_exception.hpp"
 #include "duckdb/common/serializer/binary_deserializer.hpp"
 #include "duckdb/common/serializer/serializer.hpp"
+#include "duckdb/common/vector/fsst_vector.hpp"
+#include "duckdb/common/fsst.hpp"
+#include "duckdb/common/operator/cast_operators.hpp"
 #include "duckdb/function/compression_function.hpp"
 #include "duckdb/function/variant/variant_shredding.hpp"
+#include "duckdb/planner/expression/bound_function_expression.hpp"
 #include "duckdb/planner/expression/bound_operator_expression.hpp"
 #include "duckdb/planner/filter/expression_filter.hpp"
 #include "duckdb/planner/table_filter.hpp"
@@ -22,8 +26,52 @@
 #include "duckdb/storage/table/data_table_info.hpp"
 #include "duckdb/storage/table/append_state.hpp"
 #include "duckdb/storage/table/scan_state.hpp"
+#include "FsstWrapper.hpp"
+#include "StateMachine.hpp"
 
 namespace duckdb {
+
+//! Compress a string using the decoder's symbol table via greedy longest-match.
+//! This is O(input_len * 255) — fine for compressing a single filter constant, not for bulk data.
+static idx_t FSSTCompressWithDecoder(const duckdb_fsst_decoder_t *decoder, const unsigned char *input,
+                                     idx_t input_len, unsigned char *output) {
+
+	idx_t pos_in = 0, pos_out = 0;
+	while (pos_in < input_len) {
+		int best_code = -1;
+		idx_t best_len = 0;
+		for (int code = 0; code < 255; code++) {
+			idx_t sym_len = decoder->len[code];
+			if (sym_len > best_len && pos_in + sym_len <= input_len) {
+				if (memcmp(input + pos_in, &decoder->symbol[code], sym_len) == 0) {
+					best_code = code;
+					best_len = sym_len;
+				}
+			}
+		}
+		if (best_code >= 0) {
+			output[pos_out++] = static_cast<unsigned char>(best_code);
+			pos_in += best_len;
+		} else {
+			output[pos_out++] = FSST_ESC;
+			output[pos_out++] = input[pos_in++];
+		}
+	}
+	return pos_out;
+}
+
+
+//! Compress a Value using the decoder's symbol table. Returns a string_t owning the compressed byte.
+static Value __attribute__((noinline)) FSSTCompressValue(const duckdb_fsst_decoder_t *decoder, const Value &val) {
+	auto str = StringValue::Get(val);
+	// Worst case: every byte is escaped (2 bytes per input byte)
+	auto buf = data_ptr_t(new unsigned char[str.size() * 2]);
+	auto len = FSSTCompressWithDecoder(decoder, reinterpret_cast<const unsigned char *>(str.data()),
+	                                   str.size(), buf);
+	auto result = Value::BLOB(const_data_ptr_t(buf), len);
+	delete[] buf;
+	return result;
+}
 
 static bool IsDirectNullCheckFilter(const TableFilter &filter) {
 	switch (filter.filter_type) {
@@ -372,6 +420,108 @@ void ColumnData::Filter(TransactionData transaction, idx_t vector_index, ColumnS
                         SelectionVector &sel, idx_t &s_count, const TableFilter &filter,
                         TableFilterState &filter_state) {
 	idx_t scan_count = Scan(transaction, vector_index, state, result);
+
+	// hacky implementation of the fsst eq filter
+	if (result.GetVectorType() == VectorType::FSST_VECTOR && filter.filter_type == TableFilterType::EXPRESSION_FILTER) {
+		auto &expr = filter.Cast<ExpressionFilter>().expr;
+		auto &expression_filter_state = filter_state.Cast<ExpressionFilterState>();
+		auto *decoder    = FSSTVector::GetDecoder(result);
+
+		if (expr->GetExpressionClass() == ExpressionClass::BOUND_FUNCTION) {
+			auto &bound_function = expr->Cast<BoundFunctionExpression>();
+			if (bound_function.function.name == "contains") {
+				Value contains_const;
+				if (bound_function.children[0]->type == ExpressionType::VALUE_CONSTANT) {
+					contains_const = bound_function.children[0]->Cast<BoundConstantExpression>().value;
+				} else if (bound_function.children[1]->type == ExpressionType::VALUE_CONSTANT) {
+					contains_const = bound_function.children[1]->Cast<BoundConstantExpression>().value;
+				}
+
+				auto pattern = StringValue::Get(contains_const);
+				auto fsst_decoder = static_cast<duckdb_fsst_decoder_t *>(decoder);
+
+				// Derive symbol table size: unused slots are filled with FSST_CORRUPT.
+				uint32_t symbol_table_size = 0;
+				for (uint32_t i = 0; i < 255; i++) {
+					if (fsst_decoder->symbol[i] == FSST_CORRUPT) {
+						break;
+					}
+					symbol_table_size++;
+				}
+
+				FsstDecoder fsst_like_decoder(fsst_decoder, symbol_table_size);
+				StateMachine machine(pattern);
+				machine.init(fsst_like_decoder);
+				machine.precompute();
+
+				const auto *compressed_data = FSSTVector::GetCompressedData(result);
+				SelectionVector result_sel(s_count);
+				idx_t result_count = 0;
+				for (idx_t idx = 0; idx < s_count; idx++) {
+					auto sel_idx = sel.get_index(idx);
+					auto &str = compressed_data[sel_idx];
+					auto str_data = reinterpret_cast<const unsigned char *>(str.GetData());
+					auto len = str.GetSize();
+					bool match = machine.fsst_lookup_kmp_match(
+					    fsst_like_decoder, len, str_data,
+					    fsst_like_decoder.GetIdealBufferSize(static_cast<uint32_t>(len)));
+					result_sel.set_index(result_count, idx);
+					result_count += match;
+				}
+				sel.Initialize(result_sel);
+				s_count = result_count;
+				return;
+			}
+		}
+		if (expr->GetExpressionClass() == ExpressionClass::BOUND_COMPARISON) {
+			auto &comp = expr->Cast<BoundComparisonExpression>();
+			Value val;
+			bool left_is_ref = comp.left->GetExpressionClass() == ExpressionClass::BOUND_REF;
+			bool right_is_ref = comp.right->GetExpressionClass() == ExpressionClass::BOUND_REF;
+			auto fsst_decoder = static_cast<duckdb_fsst_decoder_t *>(decoder);
+			Value compressed_val;
+			if (comp.right->type == ExpressionType::VALUE_CONSTANT && left_is_ref) {
+				val = comp.right->Cast<BoundConstantExpression>().value;
+				compressed_val = FSSTCompressValue(fsst_decoder, val);
+				// comp.right->Cast<BoundConstantExpression>().value = compressed_val;
+				// comp.right->return_type = LogicalType::BLOB;
+			} else if (comp.left->type == ExpressionType::VALUE_CONSTANT && right_is_ref) {
+				val = comp.left->Cast<BoundConstantExpression>().value;
+				compressed_val = FSSTCompressValue(fsst_decoder, val);
+				// comp.left->Cast<BoundConstantExpression>().value = compressed_val;
+				// comp.left->return_type = LogicalType::BLOB;
+
+			}
+
+			// idx_t result_count = 0;
+
+			// DataChunk chunk;
+			// chunk.data.emplace_back(result, 0, s_count);
+			// chunk.SetCardinality(s_count);
+
+			// idx_t new_matches = expression_filter_state.executor->SelectExpression(chunk, result_sel, sel, s_count);
+			// increment all matches by the offset
+			// for (idx_t i = 0; i < new_matches; i++) {
+			// 	current_result_data[i] += offset;
+			// }
+
+			SelectionVector result_sel(s_count);
+			idx_t result_count = 0;
+			auto target = StringValue::Get(compressed_val);
+			string_t target_str(target);
+
+			const auto *compressed_data = FSSTVector::GetCompressedData(result);
+			for (idx_t idx = 0; idx < s_count; idx++) {
+				auto sel_idx = sel.get_index(idx);
+				const bool eq = compressed_data[sel_idx] == target_str;
+				result_sel.set_index(result_count, idx);
+				result_count += eq;
+			}
+			sel.Initialize(result_sel);
+			s_count = result_count;
+			return;
+		}
+	}
 
 	UnifiedVectorFormat vdata;
 	result.ToUnifiedFormat(scan_count, vdata);

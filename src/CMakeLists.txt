@@ -73,6 +73,7 @@ add_subdirectory(verification)
 
 set(DUCKDB_LINK_LIBS
     duckdb_fsst
+    duckdb_fsst_like
     duckdb_fmt
     duckdb_pg_query
     duckdb_re2
