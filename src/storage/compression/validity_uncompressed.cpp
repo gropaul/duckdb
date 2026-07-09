@@ -467,6 +467,9 @@ void ValidityScanPartial(ColumnSegment &segment, ColumnScanState &state, idx_t s
 }
 
 void ValidityScan(ColumnSegment &segment, ColumnScanState &state, idx_t scan_count, Vector &result) {
+	if (result.GetVectorType() == VectorType::DICTIONARY_VECTOR) {
+		return;
+	}
 	result.Flatten();
 
 	auto start = state.GetPositionInSegment();
