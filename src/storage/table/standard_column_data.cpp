@@ -58,12 +58,18 @@ void StandardColumnData::InitializeScanWithOffset(ColumnScanState &state, idx_t 
 
 idx_t StandardColumnData::Scan(TransactionData transaction, idx_t vector_index, ColumnScanState &state, Vector &result,
                                idx_t target_count) {
-	D_ASSERT(state.offset_in_column == state.child_states[0].offset_in_column);
 	auto scan_type = GetVectorScanType(state, target_count, result);
 	auto scan_count =
 	    ScanVector(transaction, vector_index, state, result, target_count, scan_type, state.update_scan_type);
-	validity->ScanVector(transaction, vector_index, state.child_states[0], result, target_count, scan_type,
-	                     state.update_scan_type);
+
+	const bool has_compression_function = this->GetCompressionFunction() != nullptr;
+	const bool compression_needs_validity = has_compression_function && this->GetCompressionFunction()->validity_read ==
+	                                                                        CompressionValidity::REQUIRES_VALIDITY;
+	if (!has_compression_function || compression_needs_validity) {
+		validity->ScanVector(transaction, vector_index, state.child_states[0], result, target_count, scan_type,
+		                     state.update_scan_type);
+		D_ASSERT(state.offset_in_column == state.child_states[0].offset_in_column);
+	}
 	return scan_count;
 }
 

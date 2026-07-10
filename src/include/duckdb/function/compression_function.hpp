@@ -308,8 +308,13 @@ public:
 	compression_get_segment_info_t get_segment_info = nullptr;
 
 	//! Whether the validity mask should be separately compressed
-	//! or this compression function can also be used to decompress the validity
-	CompressionValidity validity = CompressionValidity::REQUIRES_VALIDITY;
+	//! or this compression function can also be used to decompress the validity when writing
+	CompressionValidity validity_write = CompressionValidity::REQUIRES_VALIDITY;
+
+	//! Whether we need to read the validity mask when scanning the data.
+	//! This can be distinct e.g. for DICTIONARY_COMPRESSION as we want to still write validity data
+	//! but don't need to read it to be backward compatible.
+	CompressionValidity validity_read = CompressionValidity::REQUIRES_VALIDITY;
 };
 
 //! The set of compression functions

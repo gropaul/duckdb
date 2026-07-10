@@ -311,7 +311,7 @@ bool ColumnDataCheckpointer::ValidityCoveredByBasedata(vector<CheckpointAnalyzeR
 	}
 	auto &base = result[0];
 	D_ASSERT(base.function);
-	return base.function->validity == CompressionValidity::NO_VALIDITY_REQUIRED;
+	return base.function->validity_write == CompressionValidity::NO_VALIDITY_REQUIRED;
 }
 
 void ColumnDataCheckpointer::WriteToDisk() { // Analyze the candidate functions to select one of them to use for
