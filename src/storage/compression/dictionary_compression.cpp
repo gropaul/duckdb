@@ -164,7 +164,7 @@ void DictionaryCompressionStorage::StringFetchRow(ColumnSegment &segment, Column
 // Get Function
 //===--------------------------------------------------------------------===//
 CompressionFunction DictionaryCompressionFun::GetFunction(PhysicalType data_type) {
-	return CompressionFunction(
+	auto res = CompressionFunction(
 	    CompressionType::COMPRESSION_DICTIONARY, data_type, DictionaryCompressionStorage ::StringInitAnalyze,
 	    DictionaryCompressionStorage::StringAnalyze, DictionaryCompressionStorage::StringFinalAnalyze,
 	    DictionaryCompressionStorage::InitCompression, DictionaryCompressionStorage::Compress,
@@ -172,6 +172,12 @@ CompressionFunction DictionaryCompressionFun::GetFunction(PhysicalType data_type
 	    DictionaryCompressionStorage::StringScan, DictionaryCompressionStorage::StringScanPartial<false>,
 	    DictionaryCompressionStorage::StringFetchRow, UncompressedFunctions::EmptySkip,
 	    UncompressedStringStorage::StringInitSegment);
+	// for dictionary, we still want to write the validity segments to be backwards compatible with older versions,
+	// but we don't need to read it as for dictionary compression index 0 is already reserved for null, and there the
+	// dictionary compression can represent validity.
+	res.validity_write = CompressionValidity::REQUIRES_VALIDITY;
+	res.validity_scan = CompressionValidity::NO_VALIDITY_REQUIRED;
+	return res;
 }
 
 bool DictionaryCompressionFun::TypeIsSupported(const PhysicalType physical_type) {

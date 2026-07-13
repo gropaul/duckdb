@@ -240,7 +240,8 @@ CompressionFunction DictFSSTCompressionFun::GetFunction(PhysicalType data_type) 
 	    dict_fsst::DictFSSTCompressionStorage::StringScanPartial<false>,
 	    dict_fsst::DictFSSTCompressionStorage::StringFetchRow, UncompressedFunctions::EmptySkip,
 	    UncompressedStringStorage::StringInitSegment);
-	res.validity = CompressionValidity::NO_VALIDITY_REQUIRED;
+	res.validity_write = CompressionValidity::NO_VALIDITY_REQUIRED;
+	res.validity_scan = CompressionValidity::NO_VALIDITY_REQUIRED;
 	res.select = dict_fsst::DictFSSTSelect;
 	res.filter = dict_fsst::DictFSSTFilter;
 	return res;
