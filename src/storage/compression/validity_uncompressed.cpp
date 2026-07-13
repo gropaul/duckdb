@@ -1,4 +1,5 @@
 #include "duckdb/common/types/vector.hpp"
+#include "duckdb/common/vector/fsst_vector.hpp"
 #include "duckdb/function/compression_function.hpp"
 #include "duckdb/storage/buffer_manager.hpp"
 #include "duckdb/storage/segment/uncompressed.hpp"
@@ -462,20 +463,18 @@ void ValidityScanPartial(ColumnSegment &segment, ColumnScanState &state, idx_t s
 
 	auto buffer_ptr = scan_state.handle.GetDataMutable() + segment.GetBlockOffset();
 	D_ASSERT(scan_state.block_id == segment.GetBlockHandle()->BlockId());
-	auto &result_mask = FlatVector::ValidityMutable(result);
+	auto &result_mask = result.ValidityMutable();
 	ValidityUncompressed::UnalignedScan(buffer_ptr, segment.count, start, result_mask, result_offset, scan_count);
 }
 
 void ValidityScan(ColumnSegment &segment, ColumnScanState &state, idx_t scan_count, Vector &result) {
-	result.Flatten();
-
-	auto start = state.GetPositionInSegment();
+	const auto start = state.GetPositionInSegment();
 	if (start % ValidityMask::BITS_PER_VALUE == 0) {
 		auto &scan_state = state.scan_state->Cast<ValidityScanState>();
-
 		auto buffer_ptr = scan_state.handle.GetDataMutable() + segment.GetBlockOffset();
 		D_ASSERT(scan_state.block_id == segment.GetBlockHandle()->BlockId());
-		auto &result_mask = FlatVector::ValidityMutable(result);
+
+		auto &result_mask = result.ValidityMutable();
 		ValidityUncompressed::AlignedScan(buffer_ptr, start, result_mask, scan_count);
 	} else {
 		// unaligned scan: fall back to scan_partial which does bitshift tricks
