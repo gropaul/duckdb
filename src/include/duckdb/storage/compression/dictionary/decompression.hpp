@@ -11,9 +11,11 @@ namespace duckdb {
 struct CompressedStringScanState : public StringScanState {
 public:
 	explicit CompressedStringScanState(BufferHandle &&handle_p)
-	    : StringScanState(), owned_handle(std::move(handle_p)), handle(owned_handle), invalid_value_sel(STANDARD_VECTOR_SIZE) {
+	    : StringScanState(), owned_handle(std::move(handle_p)), handle(owned_handle),
+	      invalid_value_sel(STANDARD_VECTOR_SIZE) {
 	}
-	explicit CompressedStringScanState(BufferHandle &handle_p) : StringScanState(), owned_handle(), handle(handle_p), invalid_value_sel(STANDARD_VECTOR_SIZE) {
+	explicit CompressedStringScanState(BufferHandle &handle_p)
+	    : StringScanState(), owned_handle(), handle(handle_p), invalid_value_sel(STANDARD_VECTOR_SIZE) {
 	}
 
 public:
