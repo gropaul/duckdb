@@ -10,6 +10,16 @@ VectorFSSTStringBuffer::VectorFSSTStringBuffer(capacity_t capacity) : VectorStri
 	vector_type = VectorType::FSST_VECTOR;
 }
 
+VectorFSSTStringBuffer::~VectorFSSTStringBuffer() {
+}
+
+FSSTEncoder &VectorFSSTStringBuffer::GetEncoder() const {
+	if (!fsst_encoder) {
+		throw InternalException("FSST vector has no encoder");
+	}
+	return *fsst_encoder;
+}
+
 void VectorFSSTStringBuffer::SetVectorType(VectorType new_vector_type) {
 	throw InternalException("SetVectorType not supported for FSST vector");
 }
@@ -103,11 +113,16 @@ vector<unsigned char> &FSSTVector::GetDecompressBuffer(const Vector &vector) {
 	return fsst_string_buffer.GetDecompressBuffer();
 }
 
-void FSSTVector::Create(Vector &vector, buffer_ptr<void> &duckdb_fsst_decoder, const idx_t string_block_limit,
-                        idx_t capacity) {
+string FSSTVector::CompressValue(const Vector &vector, const char *input, idx_t input_len) {
+	auto &fsst_string_buffer = GetFSSTBuffer(vector);
+	return fsst_string_buffer.GetEncoder().Compress(input, input_len);
+}
+
+void FSSTVector::Create(Vector &vector, buffer_ptr<void> &duckdb_fsst_decoder, shared_ptr<FSSTEncoder> encoder,
+                        const idx_t string_block_limit, idx_t capacity) {
 	vector.SetBuffer(make_buffer<VectorFSSTStringBuffer>(capacity_t(capacity)));
 	auto &fsst_string_buffer = vector.BufferMutable().Cast<VectorFSSTStringBuffer>();
-	fsst_string_buffer.AddDecoder(duckdb_fsst_decoder, string_block_limit);
+	fsst_string_buffer.AddDecoder(duckdb_fsst_decoder, std::move(encoder), string_block_limit);
 }
 
 void FSSTVector::SetCount(Vector &vector, idx_t count) {

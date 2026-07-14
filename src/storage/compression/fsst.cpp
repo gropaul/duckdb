@@ -512,6 +512,8 @@ struct FSSTScanState : public StringScanState {
 
 	buffer_ptr<void> duckdb_fsst_decoder;
 	void *duckdb_fsst_decoder_ptr = nullptr;
+	//! Encoder derived from the decoder, shared with all FSST vectors created by this scan.
+	shared_ptr<FSSTEncoder> fsst_encoder;
 
 	vector<unsigned char> decompress_buffer;
 	bitpacking_width_t current_width;
@@ -567,6 +569,9 @@ unique_ptr<SegmentScanState> FSSTStorage::StringInitScan(const QueryContext &con
 	auto retval = ParseFSSTSegmentHeader(base_ptr, decoder, &state->current_width, block_size);
 	if (!retval) {
 		state->duckdb_fsst_decoder = nullptr;
+	} else {
+		// build the encoder once, to be shared with all FSST vectors created by this scan
+		state->fsst_encoder = make_shared_ptr<FSSTEncoder>(*decoder);
 	}
 	state->duckdb_fsst_decoder_ptr = state->duckdb_fsst_decoder.get();
 
@@ -650,7 +655,8 @@ void FSSTStorage::StringScanPartial(ColumnSegment &segment, ColumnScanState &sta
 		if (scan_state.duckdb_fsst_decoder) {
 			D_ASSERT(result_offset == 0 || result.GetVectorType() == VectorType::FSST_VECTOR);
 			auto string_block_limit = StringUncompressed::GetStringBlockLimit(segment.GetBlockSize());
-			FSSTVector::Create(result, scan_state.duckdb_fsst_decoder, string_block_limit, scan_count);
+			FSSTVector::Create(result, scan_state.duckdb_fsst_decoder, scan_state.fsst_encoder, string_block_limit,
+			                   scan_count);
 			result_data = FSSTVector::GetCompressedData(result);
 		} else {
 			D_ASSERT(result.GetVectorType() == VectorType::FLAT_VECTOR);
@@ -794,10 +800,6 @@ StringDictionaryContainer FSSTStorage::GetDictionary(ColumnSegment &segment, Buf
 }
 
 char *FSSTStorage::FetchStringPointer(StringDictionaryContainer dict, data_ptr_t baseptr, int32_t dict_offset) {
-	if (dict_offset == 0) {
-		return nullptr;
-	}
-
 	auto dict_end = baseptr + dict.end;
 	auto dict_pos = dict_end - dict_offset;
 	return char_ptr_cast(dict_pos);

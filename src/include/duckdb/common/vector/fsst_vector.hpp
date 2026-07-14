@@ -12,18 +12,25 @@
 
 namespace duckdb {
 
+class FSSTEncoder;
+
 class VectorFSSTStringBuffer : public VectorStringBuffer {
 public:
 	explicit VectorFSSTStringBuffer(capacity_t capacity);
+	~VectorFSSTStringBuffer() override;
 
 public:
-	void AddDecoder(buffer_ptr<void> &duckdb_fsst_decoder_p, const idx_t string_block_limit) {
+	void AddDecoder(buffer_ptr<void> &duckdb_fsst_decoder_p, shared_ptr<FSSTEncoder> encoder,
+	                const idx_t string_block_limit) {
 		duckdb_fsst_decoder = duckdb_fsst_decoder_p;
+		fsst_encoder = std::move(encoder);
 		decompress_buffer.resize(string_block_limit + 1);
 	}
 	void *GetDecoder() const {
 		return duckdb_fsst_decoder.get();
 	}
+	//! The encoder shared with all vectors created from the same decoder.
+	FSSTEncoder &GetEncoder() const;
 	vector<unsigned char> &GetDecompressBuffer() const {
 		return decompress_buffer;
 	}
@@ -43,6 +50,7 @@ protected:
 private:
 	buffer_ptr<void> duckdb_fsst_decoder;
 	mutable vector<unsigned char> decompress_buffer;
+	shared_ptr<FSSTEncoder> fsst_encoder;
 };
 
 struct FSSTVector {
@@ -70,10 +78,12 @@ struct FSSTVector {
 
 	DUCKDB_API static string_t AddCompressedString(Vector &vector, string_t data);
 	DUCKDB_API static string_t AddCompressedString(Vector &vector, const char *data, idx_t len);
-	DUCKDB_API static void Create(Vector &vector, buffer_ptr<void> &duckdb_fsst_decoder, const idx_t string_block_limit,
-	                              idx_t capacity);
+	DUCKDB_API static void Create(Vector &vector, buffer_ptr<void> &duckdb_fsst_decoder,
+	                              shared_ptr<FSSTEncoder> encoder, const idx_t string_block_limit, idx_t capacity);
 	DUCKDB_API static void *GetDecoder(const Vector &vector);
 	DUCKDB_API static vector<unsigned char> &GetDecompressBuffer(const Vector &vector);
+	//! Compress a string using the vector's symbol table, returning the compressed bytes.
+	DUCKDB_API static string CompressValue(const Vector &vector, const char *input, idx_t input_len);
 	//! Setting the string count is required to be able to correctly flatten the vector
 	DUCKDB_API static void SetCount(Vector &vector, idx_t count);
 
