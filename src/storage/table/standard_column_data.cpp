@@ -65,7 +65,8 @@ idx_t StandardColumnData::Scan(TransactionData transaction, idx_t vector_index, 
 	const bool has_compression_function = this->GetCompressionFunction() != nullptr;
 	const bool compression_needs_validity =
 	    has_compression_function && this->GetCompressionFunction()->RequiredValidityScan();
-	if (!has_compression_function || compression_needs_validity) {
+	const bool validity_has_updates = validity->HasUpdates();
+	if (!has_compression_function || compression_needs_validity || validity_has_updates) {
 		validity->ScanVector(transaction, vector_index, state.child_states[0], result, target_count, scan_type,
 		                     state.update_scan_type);
 		D_ASSERT(state.offset_in_column == state.child_states[0].offset_in_column);
