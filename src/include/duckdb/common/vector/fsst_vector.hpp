@@ -9,14 +9,15 @@
 #pragma once
 
 #include "duckdb/common/vector/string_vector.hpp"
+#include "duckdb/common/vector/variable_binary_buffer.hpp"
 
 namespace duckdb {
 
 class FSSTEncoder;
 
-class VectorFSSTStringBuffer : public VectorStringBuffer {
+class VectorFSSTStringBuffer : public VariableBinaryBuffer {
 public:
-	explicit VectorFSSTStringBuffer(capacity_t capacity);
+	VectorFSSTStringBuffer(capacity_t capacity, idx_t auxiliary_size);
 	~VectorFSSTStringBuffer() override;
 
 public:
@@ -33,9 +34,6 @@ public:
 	FSSTEncoder &GetEncoder() const;
 	vector<unsigned char> &GetDecompressBuffer() const {
 		return decompress_buffer;
-	}
-	void SetCount(idx_t count) {
-		v_size = count;
 	}
 	void SetVectorType(VectorType vector_type) override;
 
@@ -76,20 +74,22 @@ struct FSSTVector {
 		return reinterpret_cast<string_t *>(vector.BufferMutable().GetData());
 	}
 
-	DUCKDB_API static string_t AddCompressedString(Vector &vector, string_t data);
-	DUCKDB_API static string_t AddCompressedString(Vector &vector, const char *data, idx_t len);
 	DUCKDB_API static void Create(Vector &vector, buffer_ptr<void> &duckdb_fsst_decoder,
-	                              shared_ptr<FSSTEncoder> encoder, const idx_t string_block_limit, idx_t capacity);
+	                              shared_ptr<FSSTEncoder> encoder, const idx_t string_block_limit, idx_t capacity,
+	                              idx_t auxiliary_size);
 	DUCKDB_API static void *GetDecoder(const Vector &vector);
 	DUCKDB_API static vector<unsigned char> &GetDecompressBuffer(const Vector &vector);
+	//! Raw compressed bytes + length of value index (points into the byte buffer; no copy)
+	DUCKDB_API static var_binary_t GetCompressedString(const Vector &vector, idx_t index);
+	//! The precomputed compressed-string views, one per value; fetch once and index directly to avoid per-lookup overhead
+	DUCKDB_API static const var_binary_t *GetCompressedStrings(const Vector &vector);
 	//! Compress a string using the vector's symbol table, returning the compressed bytes.
 	DUCKDB_API static string CompressValue(const Vector &vector, const char *input, idx_t input_len);
-	//! Setting the string count is required to be able to correctly flatten the vector
-	DUCKDB_API static void SetCount(Vector &vector, idx_t count);
 
 private:
+	//! FSSTStorage fills the buffer with compressed bytes + offsets during scan
+	friend struct FSSTStorage;
 	static VectorFSSTStringBuffer &GetFSSTBuffer(const Vector &vector);
-	static StringHeap &GetStringHeap(const Vector &vector);
 };
 
 } // namespace duckdb

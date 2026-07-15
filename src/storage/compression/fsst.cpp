@@ -644,43 +644,55 @@ void FSSTStorage::StringScanPartial(ColumnSegment &segment, ColumnScanState &sta
 	auto baseptr = scan_state.handle.GetDataMutable() + segment.GetBlockOffset();
 	auto dict = GetDictionary(segment, scan_state.handle);
 	auto base_data = data_ptr_cast(baseptr + sizeof(fsst_compression_header_t));
-	string_t *result_data;
 
 	if (scan_count == 0) {
 		return;
-	}
-
-	if (enable_fsst_vectors) {
-		D_ASSERT(result_offset == 0);
-		if (scan_state.duckdb_fsst_decoder) {
-			D_ASSERT(result_offset == 0 || result.GetVectorType() == VectorType::FSST_VECTOR);
-			auto string_block_limit = StringUncompressed::GetStringBlockLimit(segment.GetBlockSize());
-			FSSTVector::Create(result, scan_state.duckdb_fsst_decoder, scan_state.fsst_encoder, string_block_limit,
-			                   scan_count);
-			result_data = FSSTVector::GetCompressedData(result);
-		} else {
-			D_ASSERT(result.GetVectorType() == VectorType::FLAT_VECTOR);
-			result_data = FlatVector::GetDataMutable<string_t>(result);
-		}
-	} else {
-		D_ASSERT(result.GetVectorType() == VectorType::FLAT_VECTOR);
-		result_data = FlatVector::GetDataMutable<string_t>(result);
 	}
 
 	auto offsets = StartScan(scan_state, base_data, start, scan_count);
 	auto &bitunpack_buffer = scan_state.bitunpack_buffer;
 	auto &delta_decode_buffer = scan_state.delta_decode_buffer;
 	if (enable_fsst_vectors) {
-		// Lookup decompressed offsets in dict
+
+		D_ASSERT(scan_state.duckdb_fsst_decoder);
+
+		const idx_t unused_values_offset = offsets.unused_delta_decoded_values;
+		// delta_decode_buffer[udv + i] is the distance from the dict end to the START of scanned row i (strings are
+		// stored in reverse row order). The scanned block runs from the END of the first row (highest address) down
+		// to the START of the last row (lowest address).
+		const uint32_t first_row_start = delta_decode_buffer[unused_values_offset];
+		const uint32_t first_row_length = bitunpack_buffer[offsets.scan_offset];
+		const uint32_t last_row_start = delta_decode_buffer[unused_values_offset + scan_count - 1];
+
+		// block_top = end of the first row = its start minus its own length (this is why we subtract first_row_length)
+		const uint32_t block_top = first_row_start - first_row_length;
+		const uint32_t block_bottom = last_row_start;
+		const idx_t block_size = block_bottom - block_top;
+		const auto string_block_limit = StringUncompressed::GetStringBlockLimit(segment.GetBlockSize());
+
+		FSSTVector::Create(result, scan_state.duckdb_fsst_decoder, scan_state.fsst_encoder, string_block_limit,
+		                   scan_count, block_size);
+
+		// The scanned rows' compressed strings are one contiguous block in the dictionary. Copy the whole block at
+		// once, then precompute each row's {ptr, length} view from the cumulative lengths (relative to block_top).
+		// Values are stored reversed, so row i sits at block_bytes + (block_size - cumulative_end_i).
+		auto &fsst_buffer = FSSTVector::GetFSSTBuffer(result);
+		auto src = FetchStringPointer(dict, baseptr, UnsafeNumericCast<int32_t>(block_bottom));
+		auto block_bytes = const_char_ptr_cast(fsst_buffer.GetBytes());
+		memcpy(fsst_buffer.GetBytes(), src, block_size);
+
+		auto var_binaries = fsst_buffer.GetVarBinaries();
+		uint32_t prev_offset = 0;
 		for (idx_t i = 0; i < scan_count; i++) {
-			uint32_t string_length = bitunpack_buffer[i + offsets.scan_offset];
-			result_data[i] = UncompressedStringStorage::FetchStringFromDict(
-			    segment, dict.end, result, baseptr,
-			    UnsafeNumericCast<int32_t>(delta_decode_buffer[i + offsets.unused_delta_decoded_values]),
-			    string_length);
+			const uint32_t cur_offset = delta_decode_buffer[unused_values_offset + i] - block_top;
+			const uint32_t len = cur_offset - prev_offset;
+			var_binaries[i] = {block_bytes + (block_size - cur_offset), len};
+			prev_offset = cur_offset;
 		}
-		FSSTVector::SetCount(result, scan_count);
 	} else {
+
+		D_ASSERT(result.GetVectorType() == VectorType::FLAT_VECTOR);
+		string_t *result_data = FlatVector::GetDataMutable<string_t>(result);
 		// Just decompress
 		auto &str_allocator = StringVector::GetStringAllocator(result);
 		for (idx_t i = 0; i < scan_count; i++) {

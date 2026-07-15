@@ -557,13 +557,16 @@ idx_t ColumnSegment::FilterSelection(SelectionVector &sel, Vector &vector, Table
 			auto uncompressed = StringValue::Get(val);
 			auto compressed = FSSTVector::CompressValue(vector, uncompressed.data(), uncompressed.size());
 			string_t target_str(compressed);
+			auto binary_target = var_binary_t::FromString(target_str);
+
+
 
 			SelectionVector result_sel(approved_tuple_count);
 			idx_t result_count = 0;
-			const auto *compressed_data = FSSTVector::GetCompressedData(vector);
+			auto var_binaries = FSSTVector::GetCompressedStrings(vector);
 			for (idx_t idx = 0; idx < approved_tuple_count; idx++) {
 				auto sel_idx = sel.get_index(idx);
-				const bool eq = compressed_data[sel_idx] == target_str;
+				const bool eq = var_binaries[sel_idx] == binary_target;
 				result_sel.set_index(result_count, sel_idx);
 				result_count += eq;
 			}
