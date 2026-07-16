@@ -113,13 +113,14 @@ void ColumnSegment::InitializeScan(ColumnScanState &state) {
 
 void ColumnSegment::Scan(ColumnScanState &state, idx_t scan_count, Vector &result, idx_t result_offset,
                          ScanVectorType scan_type) {
+	// printf("ColumnSegment::Scan: scan_count=%llu, result_offset=%llu, scan_type=%d, compression_type=%d\n", scan_count, result_offset, static_cast<int>(scan_type), static_cast<int>(this->GetCompressionFunction().type));
 	if (scan_type == ScanVectorType::SCAN_ENTIRE_VECTOR) {
 		D_ASSERT(result_offset == 0);
 		Scan(state, scan_count, result);
 	} else {
-		D_ASSERT(result.GetVectorType() == VectorType::FLAT_VECTOR);
+		D_ASSERT(result.GetVectorType() == VectorType::FLAT_VECTOR || result.GetVectorType() == VectorType::FSST_VECTOR);
 		ScanPartial(state, scan_count, result, result_offset);
-		D_ASSERT(result.GetVectorType() == VectorType::FLAT_VECTOR);
+		D_ASSERT(result.GetVectorType() == VectorType::FLAT_VECTOR || result.GetVectorType() == VectorType::FSST_VECTOR);
 	}
 }
 
@@ -480,98 +481,56 @@ idx_t ColumnSegment::FilterSelection(SelectionVector &sel, Vector &vector, Unifi
 	return FilterSelection(sel, vector, filter_state, scan_count, approved_tuple_count);
 }
 
+// Isolated (noinline) so the FSST equality fast path shows up as its own frame in a flamegraph.
+// Returns true if it handled the filter (equality on an FSST-compressed column).
+static bool __attribute__((noinline))
+FSSTEqualityFilter(SelectionVector &sel, Vector &vector, const Expression &expr, idx_t &approved_tuple_count) {
+	if (!BoundComparisonExpression::IsComparison(expr) || expr.GetExpressionType() != ExpressionType::COMPARE_EQUAL) {
+		return false;
+	}
+	auto &comp = expr.Cast<BoundFunctionExpression>();
+	auto &comp_left = BoundComparisonExpression::Left(comp);
+	auto &comp_right = BoundComparisonExpression::Right(comp);
+	Value val;
+	bool left_is_ref = comp_left.GetExpressionClass() == ExpressionClass::BOUND_REF;
+	bool right_is_ref = comp_right.GetExpressionClass() == ExpressionClass::BOUND_REF;
+	if (comp_right.GetExpressionType() == ExpressionType::VALUE_CONSTANT && left_is_ref) {
+		val = comp_right.Cast<BoundConstantExpression>().GetValue();
+	} else if (comp_left.GetExpressionType() == ExpressionType::VALUE_CONSTANT && right_is_ref) {
+		val = comp_left.Cast<BoundConstantExpression>().GetValue();
+	}
+
+	auto uncompressed = StringValue::Get(val);
+	auto compressed = FSSTVector::CompressValue(vector, uncompressed.data(), uncompressed.size());
+	string_t target_str(compressed);
+	auto binary_target = var_binary_t::FromString(target_str);
+
+	SelectionVector result_sel(approved_tuple_count);
+	idx_t result_count = 0;
+	const auto *base = FSSTVector::GetBasePointer(vector);
+	const auto *offsets = FSSTVector::GetOffsets(vector);
+	for (idx_t idx = 0; idx < approved_tuple_count; idx++) {
+		auto sel_idx = sel.get_index(idx);
+		const int32_t start = offsets[sel_idx + 1];
+		const int32_t end = offsets[sel_idx];
+		const var_binary_t row {base + start, idx_t(end - start)};
+		const bool eq = row == binary_target;
+		result_sel.set_index(result_count, sel_idx);
+		result_count += eq;
+	}
+	sel.Initialize(result_sel);
+	approved_tuple_count = result_count;
+	return true;
+}
+
 idx_t ColumnSegment::FilterSelection(SelectionVector &sel, Vector &vector, TableFilterState &filter_state,
                                      idx_t scan_count, idx_t &approved_tuple_count) {
 	auto &state = filter_state.Cast<ExpressionFilterState>();
 
-
 	// hacky implementation of the fsst eq filter
 	if (vector.GetVectorType() == VectorType::FSST_VECTOR) {
 		auto &expr = state.executor->expressions[0];
-		auto *decoder    = FSSTVector::GetDecoder(vector);
-
-		if (expr->GetExpressionClass() == ExpressionClass::BOUND_FUNCTION) {
-			auto &bound_function = expr->Cast<BoundFunctionExpression>();
-			// if (bound_function.GetName() == "contains") {
-			// 	Value contains_const;
-			//
-			// 	const auto &child_1 = bound_function.GetChildren()[0];
-			// 	const auto &child_2 = bound_function.GetChildren()[1];
-			// 	if (child_1->GetExpressionType() == ExpressionType::VALUE_CONSTANT) {
-			// 		contains_const = child_1->Cast<BoundConstantExpression>().GetValue();
-			// 	} else if (child_2->GetExpressionType() == ExpressionType::VALUE_CONSTANT) {
-			// 		contains_const = child_2->Cast<BoundConstantExpression>().GetValue();
-			// 	}
-			//
-			// 	auto pattern = StringValue::Get(contains_const);
-			// 	auto fsst_decoder = static_cast<duckdb_fsst_decoder_t *>(decoder);
-
-				// Derive symbol table size: unused slots are filled with FSST_CORRUPT.
-				// uint32_t symbol_table_size = 0;
-				// for (uint32_t i = 0; i < 255; i++) {
-				// 	if (fsst_decoder->symbol[i] == FSST_CORRUPT) {
-				// 		break;
-				// 	}
-				// 	symbol_table_size++;
-				// }
-				//
-				// FsstDecoder fsst_like_decoder(fsst_decoder, symbol_table_size);
-				// StateMachine machine(pattern);
-				// machine.init(fsst_like_decoder);
-				// machine.precompute();
-				//
-				// const auto *compressed_data = FSSTVector::GetCompressedData(result);
-				// SelectionVector result_sel(s_count);
-				// idx_t result_count = 0;
-				// for (idx_t idx = 0; idx < s_count; idx++) {
-				// 	auto sel_idx = sel.get_index(idx);
-				// 	auto &str = compressed_data[sel_idx];
-				// 	auto str_data = reinterpret_cast<const unsigned char *>(str.GetData());
-				// 	auto len = str.GetSize();
-				// 	bool match = machine.fsst_lookup_kmp_match(
-				// 	    fsst_like_decoder, len, str_data,
-				// 	    fsst_like_decoder.GetIdealBufferSize(static_cast<uint32_t>(len)));
-				// 	result_sel.set_index(result_count, idx);
-				// 	result_count += match;
-				// }
-				// sel.Initialize(result_sel);
-				// s_count = result_count;
-				// return;
-			// }
-		}
-
-		if (BoundComparisonExpression::IsComparison(*expr) &&
-		    expr->GetExpressionType() == ExpressionType::COMPARE_EQUAL) {
-			auto &comp = expr->Cast<BoundFunctionExpression>();
-			auto &comp_left = BoundComparisonExpression::Left(comp);
-			auto &comp_right = BoundComparisonExpression::Right(comp);
-			Value val;
-			bool left_is_ref = comp_left.GetExpressionClass() == ExpressionClass::BOUND_REF;
-			bool right_is_ref = comp_right.GetExpressionClass() == ExpressionClass::BOUND_REF;
-			if (comp_right.GetExpressionType() == ExpressionType::VALUE_CONSTANT && left_is_ref) {
-				val = comp_right.Cast<BoundConstantExpression>().GetValue();
-			} else if (comp_left.GetExpressionType() == ExpressionType::VALUE_CONSTANT && right_is_ref) {
-				val = comp_left.Cast<BoundConstantExpression>().GetValue();
-			}
-
-			auto uncompressed = StringValue::Get(val);
-			auto compressed = FSSTVector::CompressValue(vector, uncompressed.data(), uncompressed.size());
-			string_t target_str(compressed);
-			auto binary_target = var_binary_t::FromString(target_str);
-
-
-
-			SelectionVector result_sel(approved_tuple_count);
-			idx_t result_count = 0;
-			auto var_binaries = FSSTVector::GetCompressedStrings(vector);
-			for (idx_t idx = 0; idx < approved_tuple_count; idx++) {
-				auto sel_idx = sel.get_index(idx);
-				const bool eq = var_binaries[sel_idx] == binary_target;
-				result_sel.set_index(result_count, sel_idx);
-				result_count += eq;
-			}
-			sel.Initialize(result_sel);
-			approved_tuple_count = result_count;
+		if (FSSTEqualityFilter(sel, vector, *expr, approved_tuple_count)) {
 			return approved_tuple_count;
 		}
 	}

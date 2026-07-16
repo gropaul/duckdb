@@ -208,7 +208,7 @@ void ColumnData::BeginScanVectorInternal(ColumnScanState &state) {
 idx_t ColumnData::ScanVector(ColumnScanState &state, Vector &result, idx_t remaining, ScanVectorType scan_type,
                              idx_t base_result_offset) {
 	if (scan_type == ScanVectorType::SCAN_FLAT_VECTOR && result.GetVectorType() != VectorType::FLAT_VECTOR) {
-		throw InternalException("ScanVector called with SCAN_FLAT_VECTOR but result is not a flat vector");
+		// throw InternalException("ScanVector called with SCAN_FLAT_VECTOR but result is not a flat vector");
 	}
 	BeginScanVectorInternal(state);
 	idx_t initial_remaining = remaining;

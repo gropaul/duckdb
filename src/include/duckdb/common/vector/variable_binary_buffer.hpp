@@ -28,10 +28,11 @@ struct var_binary_t {
 	}
 };
 
-//! Stores variable-length binary values as a contiguous byte buffer plus a precomputed var_binary_t array.
-//! var_binaries[i] is the {ptr, length} view of value i, pointing directly into the byte buffer, so reads are a
-//! single array load with no per-lookup arithmetic. Values are stored REVERSED in the byte buffer (value 0 at the
-//! end, the last value at the front) because that is how they arrive from the dictionary block. Pre-sized at construction.
+//! Stores variable-length binary values as a contiguous byte buffer plus a descending int32 offsets array.
+//! offsets holds physical byte positions (capacity + 1 entries): offsets[0] == total, offsets[capacity] == 0, and
+//! value i occupies byte_data[offsets[i + 1] : offsets[i]] (start = offsets[i+1], length = offsets[i] - offsets[i+1]).
+//! Values are stored REVERSED in the byte buffer (value 0 at the end, the last value at the front) because that is
+//! how they arrive from the dictionary block. Pre-sized at construction.
 class VariableBinaryBuffer : public VectorBuffer {
 public:
 	//! element_count: number of values this buffer will hold (also the vector size - pre-sized, fully filled)
@@ -39,9 +40,9 @@ public:
 	VariableBinaryBuffer(idx_t element_count, idx_t auxiliary_size,
 	                     Allocator &allocator = Allocator::DefaultAllocator())
 	    : VectorBuffer(VectorType::FLAT_VECTOR, VectorBufferType::VARIABLE_BINARY_BUFFER, count_t(element_count)),
-	      var_binary_data(allocator.Allocate(sizeof(var_binary_t) * (element_count == 0 ? 1 : element_count))),
+	      offset_data(allocator.Allocate(sizeof(int32_t) * (element_count + 1))),
 	      byte_data(allocator.Allocate(auxiliary_size == 0 ? 1 : auxiliary_size)), capacity(element_count) {
-		var_binaries = reinterpret_cast<var_binary_t *>(var_binary_data.get());
+		offsets = reinterpret_cast<int32_t *>(offset_data.get());
 		byte_data_ptr = byte_data.get();
 		validity.Resize(element_count);
 	}
@@ -63,28 +64,65 @@ public:
 	const_data_ptr_t GetBytes() const {
 		return byte_data_ptr;
 	}
-	//! The precomputed views; populators fill this array, callers can grab it once and index directly
-	var_binary_t *GetVarBinaries() {
-		return var_binaries;
+	//! Descending physical offsets; populators fill this, callers can grab it once and index directly
+	int32_t *GetOffsets() {
+		return offsets;
 	}
-	const var_binary_t *GetVarBinaries() const {
-		return var_binaries;
+	const int32_t *GetOffsets() const {
+		return offsets;
 	}
 	//! Raw bytes + length of value index (points into the byte buffer; safe for any length)
 	var_binary_t GetVarBinary(idx_t index) const {
-		return var_binaries[index];
+		const int32_t start = offsets[index + 1];
+		const int32_t end = offsets[index];
+		return {const_char_ptr_cast(byte_data_ptr) + start, idx_t(end - start)};
 	}
 	//! View of value index as a string_t into the byte buffer (no copy)
 	string_t GetString(idx_t index) const {
-		auto &view = var_binaries[index];
+		auto view = GetVarBinary(index);
 		return string_t(view.ptr, UnsafeNumericCast<uint32_t>(view.length));
+	}
+
+	//! Total payload bytes currently held (reverse layout: offsets[0] is the top of the byte buffer)
+	idx_t ByteSize() const {
+		return capacity == 0 ? 0 : idx_t(offsets[0]);
+	}
+
+	//! Grow to hold added_count more values / added_bytes more payload, preserving existing contents.
+	//! The new (later-scanned) block goes at the FRONT of the byte buffer, so existing bytes shift UP by added_bytes
+	//! and existing offsets shift up by the same amount. This keeps the whole buffer one contiguous reverse-packed
+	//! region, so the shared boundary stays valid across blocks. Leaves offset slots [old capacity + 1 ..] and byte
+	//! region [0 .. added_bytes) for the caller to fill.
+	void Grow(idx_t added_count, idx_t added_bytes) {
+		auto &alloc = *byte_data.GetAllocator();
+		const idx_t old_capacity = capacity;
+		const idx_t old_bytes = ByteSize();
+		const idx_t new_capacity = old_capacity + added_count;
+		const idx_t new_bytes = old_bytes + added_bytes;
+
+		AllocatedData new_offset_data = alloc.Allocate(sizeof(int32_t) * (new_capacity + 1));
+		auto new_offsets = reinterpret_cast<int32_t *>(new_offset_data.get());
+		for (idx_t i = 0; i <= old_capacity; i++) {
+			new_offsets[i] = offsets[i] + UnsafeNumericCast<int32_t>(added_bytes);
+		}
+
+		AllocatedData new_byte_data = alloc.Allocate(new_bytes == 0 ? 1 : new_bytes);
+		memcpy(new_byte_data.get() + added_bytes, byte_data_ptr, old_bytes);
+
+		offset_data = std::move(new_offset_data);
+		byte_data = std::move(new_byte_data);
+		offsets = new_offsets;
+		byte_data_ptr = byte_data.get();
+		capacity = new_capacity;
+		validity.Resize(new_capacity);
+		SetVectorSizeOnly(new_capacity);
 	}
 
 private:
 	ValidityMask validity;
-	//! precomputed {ptr, length} views, one per value, pointing into byte_data
-	AllocatedData var_binary_data;
-	var_binary_t *var_binaries;
+	//! descending physical byte positions, capacity + 1 entries; offsets[0] == total, offsets[capacity] == 0
+	AllocatedData offset_data;
+	int32_t *offsets;
 
 	//! contiguous payload bytes
 	AllocatedData byte_data;

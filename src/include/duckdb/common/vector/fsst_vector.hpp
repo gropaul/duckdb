@@ -77,12 +77,16 @@ struct FSSTVector {
 	DUCKDB_API static void Create(Vector &vector, buffer_ptr<void> &duckdb_fsst_decoder,
 	                              shared_ptr<FSSTEncoder> encoder, const idx_t string_block_limit, idx_t capacity,
 	                              idx_t auxiliary_size);
+	//! Grow an existing FSST vector to hold added_count more values / added_bytes more payload (append across scans)
+	DUCKDB_API static void Grow(Vector &vector, idx_t added_count, idx_t added_bytes);
 	DUCKDB_API static void *GetDecoder(const Vector &vector);
 	DUCKDB_API static vector<unsigned char> &GetDecompressBuffer(const Vector &vector);
 	//! Raw compressed bytes + length of value index (points into the byte buffer; no copy)
 	DUCKDB_API static var_binary_t GetCompressedString(const Vector &vector, idx_t index);
-	//! The precomputed compressed-string views, one per value; fetch once and index directly to avoid per-lookup overhead
-	DUCKDB_API static const var_binary_t *GetCompressedStrings(const Vector &vector);
+	//! Base of the compressed byte buffer. Fetch once, then index with GetOffsets to avoid per-value buffer lookups.
+	DUCKDB_API static const char *GetBasePointer(const Vector &vector);
+	//! Descending physical offsets (capacity + 1 entries); value i = base[offsets[i + 1] : offsets[i]]
+	DUCKDB_API static const int32_t *GetOffsets(const Vector &vector);
 	//! Compress a string using the vector's symbol table, returning the compressed bytes.
 	DUCKDB_API static string CompressValue(const Vector &vector, const char *input, idx_t input_len);
 
