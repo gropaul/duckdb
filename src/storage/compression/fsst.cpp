@@ -574,6 +574,8 @@ unique_ptr<SegmentScanState> FSSTStorage::StringInitScan(const QueryContext &con
 		state->fsst_encoder = make_shared_ptr<FSSTEncoder>(*decoder);
 	}
 	state->duckdb_fsst_decoder_ptr = state->duckdb_fsst_decoder.get();
+	// FSSTPrimitives::PrintDecoder(state->duckdb_fsst_decoder_ptr);
+
 
 	const auto &stats = segment.GetStats();
 	if (stats.GetStatsType() == StatisticsType::STRING_STATS && StringStats::HasMaxStringLength(stats)) {

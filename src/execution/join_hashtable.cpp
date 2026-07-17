@@ -1149,6 +1149,8 @@ bool JoinHashTable::TryProbeDictionary(ScanStructure &scan_structure, DataChunk 
 	D_ASSERT(Count() > 0);
 	D_ASSERT(finalized);
 
+	return false;
+
 	auto &dict_col = keys.data[0];
 	if (dict_col.GetVectorType() != VectorType::DICTIONARY_VECTOR) {
 		return false;

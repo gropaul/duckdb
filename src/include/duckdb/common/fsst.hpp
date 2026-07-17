@@ -76,6 +76,10 @@ public:
 	}
 	static string DecompressValue(void *duckdb_fsst_decoder, const char *compressed_string,
 	                              const idx_t compressed_string_len, vector<unsigned char> &decompress_buffer);
+	//! Format the FSST symbol table (decoder) as a human-readable string for debugging.
+	static string DecoderToString(void *duckdb_fsst_decoder);
+	//! Print the FSST symbol table (decoder) to stderr for debugging.
+	static void PrintDecoder(void *duckdb_fsst_decoder);
 };
 
 //! A self-contained FSST encoder reconstructed from a decoder's symbol table.

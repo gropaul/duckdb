@@ -81,6 +81,10 @@ struct FSSTVector {
 	DUCKDB_API static void Grow(Vector &vector, idx_t added_count, idx_t added_bytes);
 	DUCKDB_API static void *GetDecoder(const Vector &vector);
 	DUCKDB_API static vector<unsigned char> &GetDecompressBuffer(const Vector &vector);
+	//! Format the FSST symbol table (decoder) of this vector as a human-readable string
+	DUCKDB_API static string SymbolTableToString(const Vector &vector);
+	//! Print the FSST symbol table (decoder) of this vector for debugging
+	DUCKDB_API static void PrintSymbolTable(const Vector &vector);
 	//! Raw compressed bytes + length of value index (points into the byte buffer; no copy)
 	DUCKDB_API static var_binary_t GetCompressedString(const Vector &vector, idx_t index);
 	//! Base of the compressed byte buffer. Fetch once, then index with GetOffsets to avoid per-value buffer lookups.

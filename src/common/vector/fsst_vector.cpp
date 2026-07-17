@@ -2,6 +2,7 @@
 #include "duckdb/common/vector/flat_vector.hpp"
 #include "duckdb/common/vector_operations/vector_operations.hpp"
 #include "duckdb/common/fsst.hpp"
+#include "duckdb/common/printer.hpp"
 
 namespace duckdb {
 
@@ -96,6 +97,14 @@ void *FSSTVector::GetDecoder(const Vector &vector) {
 vector<unsigned char> &FSSTVector::GetDecompressBuffer(const Vector &vector) {
 	auto &fsst_string_buffer = GetFSSTBuffer(vector);
 	return fsst_string_buffer.GetDecompressBuffer();
+}
+
+string FSSTVector::SymbolTableToString(const Vector &vector) {
+	return FSSTPrimitives::DecoderToString(GetDecoder(vector));
+}
+
+void FSSTVector::PrintSymbolTable(const Vector &vector) {
+	Printer::Print(SymbolTableToString(vector));
 }
 
 var_binary_t FSSTVector::GetCompressedString(const Vector &vector, idx_t index) {
