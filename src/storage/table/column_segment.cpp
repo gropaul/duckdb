@@ -12,6 +12,9 @@
 #include "duckdb/planner/expression/bound_comparison_expression.hpp"
 #include "duckdb/planner/expression/bound_constant_expression.hpp"
 #include "duckdb/planner/expression/bound_reference_expression.hpp"
+#include "duckdb/planner/expression/bound_function_expression.hpp"
+#include "duckdb/function/scalar/string_common.hpp"
+#include "duckdb/common/simd_utils.hpp"
 #include "duckdb/planner/expression_iterator.hpp"
 #include "duckdb/planner/filter/expression_filter.hpp"
 #include "duckdb/planner/table_filter.hpp"
@@ -113,14 +116,17 @@ void ColumnSegment::InitializeScan(ColumnScanState &state) {
 
 void ColumnSegment::Scan(ColumnScanState &state, idx_t scan_count, Vector &result, idx_t result_offset,
                          ScanVectorType scan_type) {
-	// printf("ColumnSegment::Scan: scan_count=%llu, result_offset=%llu, scan_type=%d, compression_type=%d\n", scan_count, result_offset, static_cast<int>(scan_type), static_cast<int>(this->GetCompressionFunction().type));
+	// printf("ColumnSegment::Scan: scan_count=%llu, result_offset=%llu, scan_type=%d, compression_type=%d\n",
+	// scan_count, result_offset, static_cast<int>(scan_type), static_cast<int>(this->GetCompressionFunction().type));
 	if (scan_type == ScanVectorType::SCAN_ENTIRE_VECTOR) {
 		D_ASSERT(result_offset == 0);
 		Scan(state, scan_count, result);
 	} else {
-		D_ASSERT(result.GetVectorType() == VectorType::FLAT_VECTOR || result.GetVectorType() == VectorType::FSST_VECTOR);
+		D_ASSERT(result.GetVectorType() == VectorType::FLAT_VECTOR ||
+		         result.GetVectorType() == VectorType::FSST_VECTOR);
 		ScanPartial(state, scan_count, result, result_offset);
-		D_ASSERT(result.GetVectorType() == VectorType::FLAT_VECTOR || result.GetVectorType() == VectorType::FSST_VECTOR);
+		D_ASSERT(result.GetVectorType() == VectorType::FLAT_VECTOR ||
+		         result.GetVectorType() == VectorType::FSST_VECTOR);
 	}
 }
 
@@ -483,8 +489,8 @@ idx_t ColumnSegment::FilterSelection(SelectionVector &sel, Vector &vector, Unifi
 
 // Isolated (noinline) so the FSST equality fast path shows up as its own frame in a flamegraph.
 // Returns true if it handled the filter (equality on an FSST-compressed column).
-static bool __attribute__((noinline))
-FSSTEqualityFilter(SelectionVector &sel, Vector &vector, const Expression &expr, idx_t &approved_tuple_count) {
+static bool FSSTEqualityFilter(SelectionVector &sel, Vector &vector, const Expression &expr,
+                                                         idx_t &approved_tuple_count) {
 	if (!BoundComparisonExpression::IsComparison(expr) || expr.GetExpressionType() != ExpressionType::COMPARE_EQUAL) {
 		return false;
 	}
@@ -523,6 +529,84 @@ FSSTEqualityFilter(SelectionVector &sel, Vector &vector, const Expression &expr,
 	return true;
 }
 
+// Isolated (noinline) so the flat contains fast path shows up as its own frame in a flamegraph.
+// Returns true if it handled the filter: contains(col, 'constant') on a flat string column with a needle
+// of at least CODE_LEN bytes. Scans for the needle's CODE_LEN-byte prefix with the k_vert_u32 kernel, then
+// verifies longer needles with a full substring search.
+static bool ContainsFilter(SelectionVector &sel, const Vector &vector, const Expression &expr,
+                                                     idx_t &approved_tuple_count, ExpressionFilterState &state) {
+	if (expr.GetExpressionClass() != ExpressionClass::BOUND_FUNCTION) {
+		return false;
+	}
+	return false;
+	auto &func = expr.Cast<BoundFunctionExpression>();
+	if (func.Function().GetName() != "contains") {
+		return false;
+	}
+	auto &children = func.GetChildren();
+	if (children.size() != 2) {
+		return false;
+	}
+	// contains is not commutative: children[0] is the haystack column, children[1] the needle constant
+	auto &haystack = *children[0];
+	auto &needle_expr = *children[1];
+	if (haystack.GetExpressionClass() != ExpressionClass::BOUND_REF ||
+	    needle_expr.GetExpressionType() != ExpressionType::VALUE_CONSTANT) {
+		return false;
+	}
+	auto needle = StringValue::Get(needle_expr.Cast<BoundConstantExpression>().GetValue());
+	const auto needle_size = needle.size();
+	// the k_vert_u32 kernel matches CODE_LEN bytes at a time - only handle needles that are at least that long
+	if (needle_size < CODE_LEN) {
+		return false;
+	}
+	const auto needle_ptr = const_uchar_ptr_cast(needle.data());
+	char pattern[CODE_LEN];
+	memcpy(pattern, needle.data(), CODE_LEN);
+
+	const auto *strings = FlatVector::GetData<string_t>(vector);
+	auto &validity = FlatVector::Validity(vector);
+
+	// prefilter into a fresh output sel: keep selected, non-null rows that are long enough to contain the needle.
+	// the incoming sel may be unset or shared, so we cannot compact it in place - but the kernel below can rewrite
+	// this owned result_sel in place. materialize each candidate's data pointer and length into the state arrays
+	// so the kernel scans plain arrays rather than dereferencing string_t per row.
+	SelectionVector result_sel(approved_tuple_count);
+	const char **data = state.contains_data;
+	uint32_t *lengths = state.contains_lengths;
+	idx_t candidate_count = 0;
+	for (idx_t idx = 0; idx < approved_tuple_count; idx++) {
+		auto sel_idx = sel.get_index(idx);
+		const auto &str = strings[sel_idx];
+		const bool is_valid = validity.RowIsValid(sel_idx);
+		const bool is_long_enough = str.GetSize() >= needle_size;
+		result_sel.set_index(candidate_count, sel_idx);
+		data[candidate_count] = str.GetData();
+		lengths[candidate_count] = UnsafeNumericCast<uint32_t>(str.GetSize());
+		candidate_count += is_long_enough && is_valid;
+	}
+
+	// scan the candidates for the needle's CODE_LEN-byte prefix, compacting matches back into result_sel in place
+	idx_t match_count = k_vert_u32(data, lengths, result_sel, candidate_count, pattern);
+	// longer needle: a CODE_LEN-byte prefix match is only a candidate, verify the full substring in place
+	if (needle_size > CODE_LEN) {
+		idx_t verified_count = 0;
+		for (idx_t i = 0; i < match_count; i++) {
+			auto sel_idx = result_sel.get_index(i);
+			auto &str = strings[sel_idx];
+			if (FindStrInStr(const_uchar_ptr_cast(str.GetData()), str.GetSize(), needle_ptr, needle_size) !=
+			    DConstants::INVALID_INDEX) {
+				result_sel.set_index(verified_count++, sel_idx);
+			}
+		}
+		match_count = verified_count;
+	}
+
+	sel.Initialize(result_sel);
+	approved_tuple_count = match_count;
+	return true;
+}
+
 idx_t ColumnSegment::FilterSelection(SelectionVector &sel, Vector &vector, TableFilterState &filter_state,
                                      idx_t scan_count, idx_t &approved_tuple_count) {
 	auto &state = filter_state.Cast<ExpressionFilterState>();
@@ -537,6 +621,13 @@ idx_t ColumnSegment::FilterSelection(SelectionVector &sel, Vector &vector, Table
 
 	if (state.fast_executor && scan_count <= STANDARD_VECTOR_SIZE) {
 		return state.fast_executor->FilterSelection(sel, vector, scan_count, approved_tuple_count);
+	}
+
+	if (vector.GetVectorType() == VectorType::FLAT_VECTOR) {
+		auto &expr = state.executor->expressions[0];
+		if (ContainsFilter(sel, vector, *expr, approved_tuple_count, state)) {
+			return approved_tuple_count;
+		}
 	}
 	return ExecuteExpressionFilterSelection(sel, vector, state, scan_count, approved_tuple_count);
 }

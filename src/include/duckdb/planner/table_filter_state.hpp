@@ -10,6 +10,7 @@
 
 #include "duckdb/planner/table_filter.hpp"
 #include "duckdb/execution/expression_executor.hpp"
+#include "duckdb/common/vector_size.hpp"
 
 namespace duckdb {
 
@@ -56,6 +57,10 @@ public:
 
 	unique_ptr<ExpressionExecutor> executor;
 	unique_ptr<ExpressionFilterExecutor> fast_executor;
+
+	//! Scratch arrays for the contains prefilter kernel: candidate row data pointers and lengths
+	const char *contains_data[STANDARD_VECTOR_SIZE];
+	uint32_t contains_lengths[STANDARD_VECTOR_SIZE];
 };
 
 } // namespace duckdb

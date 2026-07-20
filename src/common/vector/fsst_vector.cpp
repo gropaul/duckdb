@@ -124,14 +124,14 @@ string FSSTVector::CompressValue(const Vector &vector, const char *input, idx_t 
 	return fsst_string_buffer.GetEncoder().Compress(input, input_len);
 }
 
-void __attribute__((noinline)) FSSTVector::Create(Vector &vector, buffer_ptr<void> &duckdb_fsst_decoder, shared_ptr<FSSTEncoder> encoder,
+void FSSTVector::Create(Vector &vector, buffer_ptr<void> &duckdb_fsst_decoder, shared_ptr<FSSTEncoder> encoder,
                         const idx_t string_block_limit, idx_t capacity, idx_t auxiliary_size) {
 	vector.SetBuffer(make_buffer<VectorFSSTStringBuffer>(capacity_t(capacity), auxiliary_size));
 	auto &fsst_string_buffer = vector.BufferMutable().Cast<VectorFSSTStringBuffer>();
 	fsst_string_buffer.AddDecoder(duckdb_fsst_decoder, std::move(encoder), string_block_limit);
 }
 
-void __attribute__((noinline)) FSSTVector::Grow(Vector &vector, idx_t added_count, idx_t added_bytes) {
+void FSSTVector::Grow(Vector &vector, idx_t added_count, idx_t added_bytes) {
 	GetFSSTBuffer(vector).Grow(added_count, added_bytes);
 }
 

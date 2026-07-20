@@ -585,7 +585,7 @@ unique_ptr<SegmentScanState> FSSTStorage::StringInitScan(const QueryContext &con
 	return std::move(state);
 }
 
-void __attribute__((noinline)) DeltaDecodeStringOffsets(uint32_t *string_lengths, uint32_t *string_offsets, idx_t decode_count, uint32_t last_known_value) {
+void DeltaDecodeStringOffsets(uint32_t *string_lengths, uint32_t *string_offsets, idx_t decode_count, uint32_t last_known_value) {
 	string_offsets[0] = string_lengths[0];
 	string_offsets[0] += last_known_value;
 	for (idx_t i = 1; i < decode_count; i++) {
@@ -593,18 +593,18 @@ void __attribute__((noinline)) DeltaDecodeStringOffsets(uint32_t *string_lengths
 	}
 }
 
-void __attribute__((noinline)) BitUnpackRange(data_ptr_t src_ptr, data_ptr_t dst_ptr, idx_t count, idx_t row, bitpacking_width_t width) {
+void BitUnpackRange(data_ptr_t src_ptr, data_ptr_t dst_ptr, idx_t count, idx_t row, bitpacking_width_t width) {
 	auto bitunpack_src_ptr = &src_ptr[(row * width) / 8];
 	BitpackingPrimitives::UnPackBuffer<uint32_t>(dst_ptr, bitunpack_src_ptr, count, width);
 }
 
 // Isolated (noinline) so their cost shows up separately in a profiler.
 // The new block always goes at the front of the byte buffer (Grow shifts any existing bytes up to make room).
-void __attribute__((noinline)) CopyCompressedBlock(data_ptr_t dest, const_data_ptr_t src, idx_t block_size) {
+void CopyCompressedBlock(data_ptr_t dest, const_data_ptr_t src, idx_t block_size) {
 	memcpy(dest, src, block_size);
 }
 
-void __attribute__((noinline))
+void
 PopulateOffsets(int32_t *offsets, const uint32_t *delta_decode, idx_t unused_values_offset, uint32_t block_top,
                 idx_t block_size, idx_t scan_count, idx_t index_base) {
 	// The new block sits at the front of the byte buffer ([0, block_size)), so positions are relative to 0.
@@ -863,7 +863,7 @@ bool FSSTStorage::ParseFSSTSegmentHeader(data_ptr_t base_ptr, duckdb_fsst_decode
 // The calculation of offsets and counts while scanning or fetching is a bit tricky, for two reasons:
 // - bitunpacking needs to be aligned to BITPACKING_ALGORITHM_GROUP_SIZE
 // - delta decoding needs to decode from the last known value.
-bp_delta_offsets_t __attribute__((noinline)) FSSTStorage::CalculateBpDeltaOffsets(int64_t last_known_row, idx_t start, idx_t scan_count) {
+bp_delta_offsets_t FSSTStorage::CalculateBpDeltaOffsets(int64_t last_known_row, idx_t start, idx_t scan_count) {
 	D_ASSERT((idx_t)(last_known_row + 1) <= start);
 	bp_delta_offsets_t result;
 
