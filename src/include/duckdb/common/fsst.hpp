@@ -80,6 +80,9 @@ public:
 	static string DecoderToString(void *duckdb_fsst_decoder);
 	//! Print the FSST symbol table (decoder) to stderr for debugging.
 	static void PrintDecoder(void *duckdb_fsst_decoder);
+	//! Save the FSST symbol table (decoder) to a file inside `directory`, named by a hash of its contents.
+	//! One file per distinct decoder; existing files are left untouched.
+	static void SaveDecoder(void *duckdb_fsst_decoder, const string &directory);
 };
 
 //! A self-contained FSST encoder reconstructed from a decoder's symbol table.

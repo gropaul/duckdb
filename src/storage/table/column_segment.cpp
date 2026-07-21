@@ -534,11 +534,11 @@ static bool FSSTEqualityFilter(SelectionVector &sel, Vector &vector, const Expre
 // of at least CODE_LEN bytes. Scans for the needle's CODE_LEN-byte prefix with the k_vert_u32 kernel, then
 // verifies longer needles with a full substring search.
 static bool ContainsFilter(SelectionVector &sel, const Vector &vector, const Expression &expr,
-                                                     idx_t &approved_tuple_count, ExpressionFilterState &state) {
+                                                     idx_t &approved_tuple_count) {
 	if (expr.GetExpressionClass() != ExpressionClass::BOUND_FUNCTION) {
 		return false;
 	}
-	return false;
+	// return false;
 	auto &func = expr.Cast<BoundFunctionExpression>();
 	if (func.Function().GetName() != "contains") {
 		return false;
@@ -567,27 +567,11 @@ static bool ContainsFilter(SelectionVector &sel, const Vector &vector, const Exp
 	const auto *strings = FlatVector::GetData<string_t>(vector);
 	auto &validity = FlatVector::Validity(vector);
 
-	// prefilter into a fresh output sel: keep selected, non-null rows that are long enough to contain the needle.
-	// the incoming sel may be unset or shared, so we cannot compact it in place - but the kernel below can rewrite
-	// this owned result_sel in place. materialize each candidate's data pointer and length into the state arrays
-	// so the kernel scans plain arrays rather than dereferencing string_t per row.
+	// scan the selected rows for the needle's CODE_LEN-byte prefix into a fresh output sel. the incoming sel may be
+	// unset or shared, so we cannot compact it in place. the kernel skips null and too-short rows and dereferences
+	// each string_t itself, fusing the prefilter and the prefix scan into one pass.
 	SelectionVector result_sel(approved_tuple_count);
-	const char **data = state.contains_data;
-	uint32_t *lengths = state.contains_lengths;
-	idx_t candidate_count = 0;
-	for (idx_t idx = 0; idx < approved_tuple_count; idx++) {
-		auto sel_idx = sel.get_index(idx);
-		const auto &str = strings[sel_idx];
-		const bool is_valid = validity.RowIsValid(sel_idx);
-		const bool is_long_enough = str.GetSize() >= needle_size;
-		result_sel.set_index(candidate_count, sel_idx);
-		data[candidate_count] = str.GetData();
-		lengths[candidate_count] = UnsafeNumericCast<uint32_t>(str.GetSize());
-		candidate_count += is_long_enough && is_valid;
-	}
-
-	// scan the candidates for the needle's CODE_LEN-byte prefix, compacting matches back into result_sel in place
-	idx_t match_count = k_vert_u32(data, lengths, result_sel, candidate_count, pattern);
+	idx_t match_count = k_vert_u32(strings, validity, sel, result_sel, approved_tuple_count, pattern);
 	// longer needle: a CODE_LEN-byte prefix match is only a candidate, verify the full substring in place
 	if (needle_size > CODE_LEN) {
 		idx_t verified_count = 0;
@@ -625,7 +609,7 @@ idx_t ColumnSegment::FilterSelection(SelectionVector &sel, Vector &vector, Table
 
 	if (vector.GetVectorType() == VectorType::FLAT_VECTOR) {
 		auto &expr = state.executor->expressions[0];
-		if (ContainsFilter(sel, vector, *expr, approved_tuple_count, state)) {
+		if (ContainsFilter(sel, vector, *expr, approved_tuple_count)) {
 			return approved_tuple_count;
 		}
 	}

@@ -12,18 +12,19 @@
 
 #include "duckdb/common/constants.hpp"
 #include "duckdb/common/types/selection_vector.hpp"
+#include "duckdb/common/types/string_type.hpp"
+#include "duckdb/common/types/validity_mask.hpp"
 
 namespace duckdb {
 
 //! Width in bytes of a single comparison code (the window the byte-scan kernels match at a time).
 constexpr uint32_t CODE_LEN = sizeof(uint32_t);
 
-// Prefilter driver. Scans `count` candidate rows (row i is `data[i]`, `lengths[i]` bytes) for the
-// CODE_LEN-byte `pattern`, compacting matches back into `sel` in place (write position never runs
-// ahead of the read position) and returning the match count. The caller must ensure every row is
-// >= CODE_LEN bytes.
-idx_t k_vert_u32(const char *const *data, const uint32_t *lengths, SelectionVector &sel, idx_t count,
-                 const char *pattern);
+// Prefilter driver. Scans the first `count` rows of `sel` (row i is `strings[sel[i]]`) for the
+// CODE_LEN-byte `pattern`, skipping null and sub-CODE_LEN rows, and writing matches into
+// `result_sel`. Returns the match count.
+idx_t k_vert_u32(const string_t *strings, const ValidityMask &validity, const SelectionVector &sel,
+                 SelectionVector &result_sel, idx_t count, const char *pattern);
 
 // Block-scan path of the contains kernel for rows of at least 19 bytes. External linkage is load-
 // bearing: it keeps interprocedural range propagation from destabilizing the auto-vectorized block

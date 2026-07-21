@@ -101,7 +101,7 @@ inline bool ContainsTiny(const char *__restrict p, uint32_t len, uint32_t target
 }
 
 // Does the 4-byte code occur anywhere in p[0..len)? Requires len >= CODE_LEN.
-inline bool ContainsU32(const char *__restrict p, uint32_t len, uint32_t target) {
+bool ContainsU32(const char *__restrict p, uint32_t len, uint32_t target) {
 	if (len >= MIN_BLOCK_LEN) {
 		return ContainsLong(p, len, target);
 	}
@@ -114,15 +114,29 @@ inline bool ContainsU32(const char *__restrict p, uint32_t len, uint32_t target)
 } // namespace
 
 // noinline so the byte-scan fast path shows up as its own frame in a flamegraph.
-idx_t k_vert_u32(const char *const *data, const uint32_t *lengths, SelectionVector &sel,
-                                           idx_t count, const char *pattern) {
+idx_t k_vert_u32(const string_t *strings, const ValidityMask &validity, const SelectionVector &sel,
+                 SelectionVector &result_sel, idx_t count, const char *pattern) {
 	uint32_t target;
 	std::memcpy(&target, pattern, CODE_LEN);
-	idx_t result_count = 0;
+	// pass 1: predicated prefilter - compact valid rows long enough for ContainsU32 (len >= CODE_LEN) into
+	// result_sel. branchless append: the validity/length predicate mispredicts enough at nontrivial selectivity
+	// to beat a conditional store.
+	idx_t candidate_count = 0;
 	for (idx_t i = 0; i < count; ++i) {
-		// branchless append: at nontrivial selectivity a conditional store mispredicts enough to matter
-		sel.set_index(result_count, sel.get_index(i));
-		result_count += ContainsU32(data[i], lengths[i], target);
+		const auto sel_idx = sel.get_index(i);
+		const auto len = UnsafeNumericCast<uint32_t>(strings[sel_idx].GetSize());
+		const bool keep = validity.RowIsValid(sel_idx) && len >= CODE_LEN;
+		result_sel.set_index(candidate_count, sel_idx);
+		candidate_count += keep;
+	}
+	// pass 2: scan the surviving candidates for the CODE_LEN-byte code, compacting matches back into result_sel
+	// in place (write position never runs ahead of the read position).
+	idx_t result_count = 0;
+	for (idx_t i = 0; i < candidate_count; ++i) {
+		const auto sel_idx = result_sel.get_index(i);
+		const auto &str = strings[sel_idx];
+		result_sel.set_index(result_count, sel_idx);
+		result_count += ContainsU32(str.GetData(), UnsafeNumericCast<uint32_t>(str.GetSize()), target);
 	}
 	return result_count;
 }

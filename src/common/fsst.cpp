@@ -1,6 +1,8 @@
 #include "duckdb/common/fsst.hpp"
 
+#include "duckdb/common/local_file_system.hpp"
 #include "duckdb/common/string_util.hpp"
+#include "duckdb/common/types/hash.hpp"
 
 #include <cctype>
 #include <cstdio>
@@ -51,6 +53,21 @@ void FSSTPrimitives::PrintDecoder(void *duckdb_fsst_decoder) {
 	auto str = DecoderToString(duckdb_fsst_decoder);
 	fprintf(stderr, "%s", str.c_str());
 	fflush(stderr);
+}
+
+void FSSTPrimitives::SaveDecoder(void *duckdb_fsst_decoder, const string &directory) {
+	auto str = DecoderToString(duckdb_fsst_decoder);
+	auto hash = Hash(str.c_str(), str.size());
+	auto file_name = StringUtil::Format("%016llx.txt", (unsigned long long)hash);
+
+	LocalFileSystem fs;
+	fs.CreateDirectoriesRecursive(directory);
+	auto path = fs.JoinPath(directory, file_name);
+	if (fs.FileExists(path)) {
+		return;
+	}
+	auto handle = fs.OpenFile(path, FileFlags::FILE_FLAGS_WRITE | FileFlags::FILE_FLAGS_FILE_CREATE_NEW);
+	handle->Write(const_cast<char *>(str.c_str()), str.size());
 }
 
 } // namespace duckdb

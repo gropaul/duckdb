@@ -574,7 +574,7 @@ unique_ptr<SegmentScanState> FSSTStorage::StringInitScan(const QueryContext &con
 		state->fsst_encoder = make_shared_ptr<FSSTEncoder>(*decoder);
 	}
 	state->duckdb_fsst_decoder_ptr = state->duckdb_fsst_decoder.get();
-	// FSSTPrimitives::PrintDecoder(state->duckdb_fsst_decoder_ptr);
+	// FSSTPrimitives::SaveDecoder(state->duckdb_fsst_decoder_ptr, "scripts/fsst_symbol_table/tables/hits/url");
 
 
 	const auto &stats = segment.GetStats();
