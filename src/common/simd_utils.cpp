@@ -141,4 +141,31 @@ idx_t k_vert_u32(const string_t *strings, const ValidityMask &validity, const Se
 	return result_count;
 }
 
+// noinline so the byte-scan fast path shows up as its own frame in a flamegraph.
+idx_t k_vert_u32(const char *base, const int32_t *offsets, const ValidityMask &validity, const SelectionVector &sel,
+                 SelectionVector &result_sel, idx_t count, const char *pattern) {
+	uint32_t target;
+	std::memcpy(&target, pattern, CODE_LEN);
+	// pass 1: predicated prefilter - compact valid rows long enough for ContainsU32 into result_sel.
+	idx_t candidate_count = 0;
+	for (idx_t i = 0; i < count; ++i) {
+		const auto sel_idx = sel.get_index(i);
+		const auto len = UnsafeNumericCast<uint32_t>(offsets[sel_idx] - offsets[sel_idx + 1]);
+		const bool keep = validity.RowIsValid(sel_idx) && len >= CODE_LEN;
+		result_sel.set_index(candidate_count, sel_idx);
+		candidate_count += keep;
+	}
+	// pass 2: scan the surviving candidates for the CODE_LEN-byte code, compacting matches back into result_sel
+	// in place (write position never runs ahead of the read position).
+	idx_t result_count = 0;
+	for (idx_t i = 0; i < candidate_count; ++i) {
+		const auto sel_idx = result_sel.get_index(i);
+		const auto start = offsets[sel_idx + 1];
+		const auto len = UnsafeNumericCast<uint32_t>(offsets[sel_idx] - start);
+		result_sel.set_index(result_count, sel_idx);
+		result_count += ContainsU32(base + start, len, target);
+	}
+	return result_count;
+}
+
 } // namespace duckdb

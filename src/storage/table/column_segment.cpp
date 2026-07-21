@@ -18,6 +18,7 @@
 #include "duckdb/planner/expression_iterator.hpp"
 #include "duckdb/planner/filter/expression_filter.hpp"
 #include "duckdb/planner/table_filter.hpp"
+#include "duckdb/storage/compression/fsst/fsst_mandatory_chain.hpp"
 #include "duckdb/storage/data_pointer.hpp"
 #include "duckdb/storage/table/append_state.hpp"
 #include "duckdb/storage/table/scan_state.hpp"
@@ -529,6 +530,52 @@ static bool FSSTEqualityFilter(SelectionVector &sel, Vector &vector, const Expre
 	return true;
 }
 
+// Contains filter on an FSST-compressed vector: prefilter in compressed space with the needle's
+// mandatory code chain. Every compressed string containing the needle contains the chain, so rows
+// without it are dropped from sel; the chain is only necessary, not sufficient, so this always
+// returns false and the survivors go through the regular (flatten + exact contains) path.
+static bool ContainsFilterFSST(SelectionVector &sel, SelectionVector &result_sel, const Vector &vector, const Expression &expr,
+                               idx_t &approved_tuple_count, const string &needle) {
+	auto decoder = FSSTVector::GetDecoder(vector);
+	if (!decoder) {
+		return false;
+	}
+	// todo: compute the chain once per segment / filter state instead of once per vector
+	const auto chain = FSSTMandatoryChain(decoder, needle.data(), needle.size());
+	if (chain.size() < CODE_LEN) {
+		// chain too short for the kernel: no prefilter, flatten + regular contains loop
+		return false;
+	}
+	char pattern[CODE_LEN];
+	memcpy(pattern, chain.data(), CODE_LEN);
+
+	const auto base = FSSTVector::GetBasePointer(vector);
+	const auto offsets = FSSTVector::GetOffsets(vector);
+	auto &validity = FSSTVector::Validity(vector);
+
+	// scan the compressed rows for the chain's first CODE_LEN codes
+	idx_t match_count = k_vert_u32(base, offsets, validity, sel, result_sel, approved_tuple_count, pattern);
+	// longer chain: verify the full code sequence in place
+	if (chain.size() > CODE_LEN) {
+		const auto chain_ptr = chain.data();
+		idx_t verified_count = 0;
+		for (idx_t i = 0; i < match_count; i++) {
+			auto sel_idx = result_sel.get_index(i);
+			const auto start = offsets[sel_idx + 1];
+			const auto len = UnsafeNumericCast<uint32_t>(offsets[sel_idx] - start);
+			if (FindStrInStr(const_uchar_ptr_cast(base + start), len, chain_ptr, chain.size()) !=
+			    DConstants::INVALID_INDEX) {
+				result_sel.set_index(verified_count++, sel_idx);
+			}
+		}
+		match_count = verified_count;
+	}
+
+	sel.Initialize(result_sel);
+	approved_tuple_count = match_count;
+	return false;
+}
+
 // Isolated (noinline) so the flat contains fast path shows up as its own frame in a flamegraph.
 // Returns true if it handled the filter: contains(col, 'constant') on a flat string column with a needle
 // of at least CODE_LEN bytes. Scans for the needle's CODE_LEN-byte prefix with the k_vert_u32 kernel, then
@@ -560,6 +607,18 @@ static bool ContainsFilter(SelectionVector &sel, const Vector &vector, const Exp
 	if (needle_size < CODE_LEN) {
 		return false;
 	}
+
+	bool prefiltered = false;
+	// scan the selected rows for the needle's CODE_LEN-byte prefix into a fresh output sel. the incoming sel may be
+	// unset or shared, so we cannot compact it in place. the kernel skips null and too-short rows and dereferences
+	// each string_t itself, fusing the prefilter and the prefix scan into one pass.
+	SelectionVector result_sel(approved_tuple_count);
+
+	if (vector.GetVectorType() == VectorType::FSST_VECTOR) {
+		approved_tuple_count = ContainsFilterFSST(sel, result_sel, vector, expr, approved_tuple_count, needle);
+		vector.Flatten(result_sel, approved_tuple_count);
+		prefiltered = true;
+	}
 	const auto needle_ptr = const_uchar_ptr_cast(needle.data());
 	char pattern[CODE_LEN];
 	memcpy(pattern, needle.data(), CODE_LEN);
@@ -567,15 +626,14 @@ static bool ContainsFilter(SelectionVector &sel, const Vector &vector, const Exp
 	const auto *strings = FlatVector::GetData<string_t>(vector);
 	auto &validity = FlatVector::Validity(vector);
 
-	// scan the selected rows for the needle's CODE_LEN-byte prefix into a fresh output sel. the incoming sel may be
-	// unset or shared, so we cannot compact it in place. the kernel skips null and too-short rows and dereferences
-	// each string_t itself, fusing the prefilter and the prefix scan into one pass.
-	SelectionVector result_sel(approved_tuple_count);
-	idx_t match_count = k_vert_u32(strings, validity, sel, result_sel, approved_tuple_count, pattern);
+
+	if (!prefiltered) {
+		approved_tuple_count = k_vert_u32(strings, validity, sel, result_sel, approved_tuple_count, pattern);
+	}
 	// longer needle: a CODE_LEN-byte prefix match is only a candidate, verify the full substring in place
 	if (needle_size > CODE_LEN) {
 		idx_t verified_count = 0;
-		for (idx_t i = 0; i < match_count; i++) {
+		for (idx_t i = 0; i < approved_tuple_count; i++) {
 			auto sel_idx = result_sel.get_index(i);
 			auto &str = strings[sel_idx];
 			if (FindStrInStr(const_uchar_ptr_cast(str.GetData()), str.GetSize(), needle_ptr, needle_size) !=
@@ -583,11 +641,10 @@ static bool ContainsFilter(SelectionVector &sel, const Vector &vector, const Exp
 				result_sel.set_index(verified_count++, sel_idx);
 			}
 		}
-		match_count = verified_count;
+		approved_tuple_count = verified_count;
 	}
 
 	sel.Initialize(result_sel);
-	approved_tuple_count = match_count;
 	return true;
 }
 
@@ -599,6 +656,9 @@ idx_t ColumnSegment::FilterSelection(SelectionVector &sel, Vector &vector, Table
 	if (vector.GetVectorType() == VectorType::FSST_VECTOR) {
 		auto &expr = state.executor->expressions[0];
 		if (FSSTEqualityFilter(sel, vector, *expr, approved_tuple_count)) {
+			return approved_tuple_count;
+		}
+		if (ContainsFilter(sel, vector, *expr, approved_tuple_count)) {
 			return approved_tuple_count;
 		}
 	}

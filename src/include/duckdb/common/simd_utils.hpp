@@ -26,6 +26,11 @@ constexpr uint32_t CODE_LEN = sizeof(uint32_t);
 idx_t k_vert_u32(const string_t *strings, const ValidityMask &validity, const SelectionVector &sel,
                  SelectionVector &result_sel, idx_t count, const char *pattern);
 
+// Same driver over the FSST vector layout: row i is base[offsets[i + 1] : offsets[i]]
+// (descending physical offsets, see FSSTVector::GetOffsets).
+idx_t k_vert_u32(const char *base, const int32_t *offsets, const ValidityMask &validity, const SelectionVector &sel,
+                 SelectionVector &result_sel, idx_t count, const char *pattern);
+
 // Block-scan path of the contains kernel for rows of at least 19 bytes. External linkage is load-
 // bearing: it keeps interprocedural range propagation from destabilizing the auto-vectorized block
 // loop (see simd_utils.cpp).
