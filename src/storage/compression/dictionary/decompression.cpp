@@ -124,11 +124,7 @@ void CompressedStringScanState::ScanToDictionaryVector(ColumnSegment &segment, V
 
 	BitpackingPrimitives::UnPackBuffer<sel_t>(dst, src, decompress_count, current_width);
 
-	if (start_offset != 0) {
-		for (idx_t i = 0; i < scan_count; i++) {
-			sel_vec->set_index(i, sel_vec->get_index(i + start_offset));
-		}
-	}
+	sel_vec->ShiftLeft(start_offset, scan_count);
 
 	result.Dictionary(dictionary, *sel_vec, scan_count);
 }
