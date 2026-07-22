@@ -56,19 +56,20 @@ buffer_ptr<VectorBuffer> VectorFSSTStringBuffer::FlattenSliceInternal(const Logi
 	auto result_data = reinterpret_cast<string_t *>(result->GetData());
 	auto &str_allocator = result->GetStringAllocator();
 	auto decoder = GetDecoder();
+	auto &src_mask = GetValidityMask();
 	auto &dst_mask = result->GetValidityMask();
 	for (idx_t i = 0; i < count; i++) {
 		auto source_idx = sel.get_index(i);
 		auto target_idx = i;
-		if (!GetValidityMask().RowIsValid(source_idx)) {
+		if (!src_mask.RowIsValid(source_idx)) {
 			// NULL value
 			dst_mask.SetInvalid(target_idx);
 			continue;
 		}
-		auto compressed_string = GetString(source_idx);
-		if (compressed_string.GetSize() > 0) {
+		auto compressed_string = GetVarBinary(source_idx); // replace with 	auto view = GetVarBinary(index);
+		if (compressed_string.length > 0) {
 			result_data[target_idx] = FSSTPrimitives::DecompressValue(
-			    decoder, str_allocator, compressed_string.GetData(), compressed_string.GetSize());
+			    decoder, str_allocator, compressed_string.ptr, compressed_string.length);
 		} else {
 			// empty string
 			result_data[target_idx] = string_t(nullptr, 0);
@@ -104,7 +105,7 @@ string FSSTVector::SymbolTableToString(const Vector &vector) {
 }
 
 void FSSTVector::PrintSymbolTable(const Vector &vector) {
-	Printer::Print(SymbolTableToString(vector));
+	printf("%s",SymbolTableToString(vector).c_str());
 }
 
 var_binary_t FSSTVector::GetCompressedString(const Vector &vector, idx_t index) {

@@ -3,6 +3,7 @@
 #include "duckdb/storage/table/column_segment.hpp"
 
 #include "fsst.h"
+#include "duckdb/common/fsst.hpp"
 #include "duckdb/common/limits.hpp"
 #include "duckdb/common/types/null_value.hpp"
 #include "duckdb/common/types/vector.hpp"
@@ -534,8 +535,13 @@ static bool FSSTEqualityFilter(SelectionVector &sel, Vector &vector, const Expre
 // mandatory code chain. Every compressed string containing the needle contains the chain, so rows
 // without it are dropped from sel; the chain is only necessary, not sufficient, so this always
 // returns false and the survivors go through the regular (flatten + exact contains) path.
-static bool ContainsFilterFSST(SelectionVector &sel, SelectionVector &result_sel, const Vector &vector, const Expression &expr,
+static bool ContainsFilterFSST(const SelectionVector &sel, SelectionVector &result_sel, const Vector &vector, const Expression &expr,
                                idx_t &approved_tuple_count, const string &needle) {
+
+	if (vector.GetVectorType() != VectorType::FSST_VECTOR) {
+		return false;
+	}
+
 	auto decoder = FSSTVector::GetDecoder(vector);
 	if (!decoder) {
 		return false;
@@ -554,26 +560,8 @@ static bool ContainsFilterFSST(SelectionVector &sel, SelectionVector &result_sel
 	auto &validity = FSSTVector::Validity(vector);
 
 	// scan the compressed rows for the chain's first CODE_LEN codes
-	idx_t match_count = k_vert_u32(base, offsets, validity, sel, result_sel, approved_tuple_count, pattern);
-	// longer chain: verify the full code sequence in place
-	if (chain.size() > CODE_LEN) {
-		const auto chain_ptr = chain.data();
-		idx_t verified_count = 0;
-		for (idx_t i = 0; i < match_count; i++) {
-			auto sel_idx = result_sel.get_index(i);
-			const auto start = offsets[sel_idx + 1];
-			const auto len = UnsafeNumericCast<uint32_t>(offsets[sel_idx] - start);
-			if (FindStrInStr(const_uchar_ptr_cast(base + start), len, chain_ptr, chain.size()) !=
-			    DConstants::INVALID_INDEX) {
-				result_sel.set_index(verified_count++, sel_idx);
-			}
-		}
-		match_count = verified_count;
-	}
-
-	sel.Initialize(result_sel);
-	approved_tuple_count = match_count;
-	return false;
+	approved_tuple_count =  k_vert_u32(base, offsets, validity, sel, result_sel, approved_tuple_count, pattern);
+	return true;
 }
 
 // Isolated (noinline) so the flat contains fast path shows up as its own frame in a flamegraph.
@@ -608,34 +596,40 @@ static bool ContainsFilter(SelectionVector &sel, const Vector &vector, const Exp
 		return false;
 	}
 
-	bool prefiltered = false;
 	// scan the selected rows for the needle's CODE_LEN-byte prefix into a fresh output sel. the incoming sel may be
 	// unset or shared, so we cannot compact it in place. the kernel skips null and too-short rows and dereferences
 	// each string_t itself, fusing the prefilter and the prefix scan into one pass.
 	SelectionVector result_sel(approved_tuple_count);
+	SelectionVector fsst_result_sel(approved_tuple_count);
 
-	if (vector.GetVectorType() == VectorType::FSST_VECTOR) {
-		approved_tuple_count = ContainsFilterFSST(sel, result_sel, vector, expr, approved_tuple_count, needle);
-		vector.Flatten(result_sel, approved_tuple_count);
-		prefiltered = true;
+	bool was_flattened = false;
+	bool was_using_fsst = false;
+	idx_t fsst_approved = approved_tuple_count;
+	void* decoder = nullptr;
+	if (ContainsFilterFSST(sel, fsst_result_sel, vector, expr, fsst_approved, needle)) {
+		// vector.Flatten(result_sel, approved_tuple_count);
+		// was_flattened = true;
+		decoder = FSSTVector::GetDecoder(vector);
+		was_using_fsst = true;
+	} else {
+
 	}
-	const auto needle_ptr = const_uchar_ptr_cast(needle.data());
+	vector.Flatten();
+	auto &validity = FlatVector::Validity(vector);
 	char pattern[CODE_LEN];
 	memcpy(pattern, needle.data(), CODE_LEN);
-
 	const auto *strings = FlatVector::GetData<string_t>(vector);
-	auto &validity = FlatVector::Validity(vector);
+	approved_tuple_count = k_vert_u32(strings, validity, sel, result_sel, approved_tuple_count, pattern);
 
+	const auto needle_ptr = const_uchar_ptr_cast(needle.data());
 
-	if (!prefiltered) {
-		approved_tuple_count = k_vert_u32(strings, validity, sel, result_sel, approved_tuple_count, pattern);
-	}
 	// longer needle: a CODE_LEN-byte prefix match is only a candidate, verify the full substring in place
 	if (needle_size > CODE_LEN) {
 		idx_t verified_count = 0;
-		for (idx_t i = 0; i < approved_tuple_count; i++) {
-			auto sel_idx = result_sel.get_index(i);
-			auto &str = strings[sel_idx];
+		for (idx_t idx = 0; idx < approved_tuple_count; idx++) {
+			auto sel_idx = result_sel.get_index(idx);
+			auto value_idx = was_flattened ? idx : sel_idx;
+			auto &str = strings[value_idx];
 			if (FindStrInStr(const_uchar_ptr_cast(str.GetData()), str.GetSize(), needle_ptr, needle_size) !=
 			    DConstants::INVALID_INDEX) {
 				result_sel.set_index(verified_count++, sel_idx);
@@ -643,7 +637,17 @@ static bool ContainsFilter(SelectionVector &sel, const Vector &vector, const Exp
 		}
 		approved_tuple_count = verified_count;
 	}
+	if (fsst_approved < approved_tuple_count && was_using_fsst) {
+		const auto decoder_str = FSSTPrimitives::DecoderToString(decoder);
+		const auto chain = FSSTMandatoryChain(decoder, needle.data(), needle.size());
 
+		printf("ContainsFilterFSST: needle='%s', chain=[", needle.data());
+		for (size_t i = 0; i < chain.size(); i++) {
+			printf("%s%3u", i == 0 ? "" : ", ", static_cast<unsigned char>(chain[i]));
+		}
+		printf("]\n");
+		return false;
+	}
 	sel.Initialize(result_sel);
 	return true;
 }
@@ -658,16 +662,13 @@ idx_t ColumnSegment::FilterSelection(SelectionVector &sel, Vector &vector, Table
 		if (FSSTEqualityFilter(sel, vector, *expr, approved_tuple_count)) {
 			return approved_tuple_count;
 		}
-		if (ContainsFilter(sel, vector, *expr, approved_tuple_count)) {
-			return approved_tuple_count;
-		}
 	}
 
 	if (state.fast_executor && scan_count <= STANDARD_VECTOR_SIZE) {
 		return state.fast_executor->FilterSelection(sel, vector, scan_count, approved_tuple_count);
 	}
 
-	if (vector.GetVectorType() == VectorType::FLAT_VECTOR) {
+	if (vector.GetVectorType() == VectorType::FLAT_VECTOR || vector.GetVectorType() == VectorType::FSST_VECTOR) {
 		auto &expr = state.executor->expressions[0];
 		if (ContainsFilter(sel, vector, *expr, approved_tuple_count)) {
 			return approved_tuple_count;

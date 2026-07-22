@@ -684,8 +684,6 @@ void FSSTStorage::StringScanPartial(ColumnSegment &segment, ColumnScanState &sta
 		// todo: also need to populate it!
 		// if we have an result offset then we have to
 		const bool new_vector = result_offset == 0;
-		D_ASSERT(!new_vector || result.GetVectorType() == VectorType::FSST_VECTOR);
-
 		const idx_t unused_values_offset = decode_offsets.unused_delta_decoded_values;
 		// delta_decode_buffer[udv + i] is the distance from the dict end to the START of scanned row i (strings are
 		// stored in reverse row order). The scanned block runs from the END of the first row (highest address) down
@@ -707,6 +705,7 @@ void FSSTStorage::StringScanPartial(ColumnSegment &segment, ColumnScanState &sta
 						   scan_count, block_size);
 			index_base = 0;
 		} else {
+			D_ASSERT(result.GetVectorType() == VectorType::FSST_VECTOR);
 			index_base = FSSTVector::GetFSSTBuffer(result).Capacity();
 			// shifts existing bytes/offsets up so the new block can go at the front
 			FSSTVector::Grow(result, scan_count, block_size);

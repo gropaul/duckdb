@@ -178,7 +178,7 @@ buffer_ptr<VectorBuffer> VectorBuffer::FlattenSliceInternal(const LogicalType &t
 
 buffer_ptr<VectorBuffer> VectorBuffer::Slice(const LogicalType &type, idx_t offset, idx_t end) {
 	if (vector_type == VectorType::CONSTANT_VECTOR) {
-		// constant vectors do not need to get sliced - but we do need to update the count
+		// constant vectors do not need to get sliiced - but we do need to update the count
 		return ConstantSlice(type, count_t(end - offset));
 	}
 	auto result = SliceInternal(type, offset, end);

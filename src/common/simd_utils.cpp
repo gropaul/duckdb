@@ -155,6 +155,8 @@ idx_t k_vert_u32(const char *base, const int32_t *offsets, const ValidityMask &v
 		result_sel.set_index(candidate_count, sel_idx);
 		candidate_count += keep;
 	}
+	printf("Candidate count: %llu \n", candidate_count);
+
 	// pass 2: scan the surviving candidates for the CODE_LEN-byte code, compacting matches back into result_sel
 	// in place (write position never runs ahead of the read position).
 	idx_t result_count = 0;
@@ -165,6 +167,8 @@ idx_t k_vert_u32(const char *base, const int32_t *offsets, const ValidityMask &v
 		result_sel.set_index(result_count, sel_idx);
 		result_count += ContainsU32(base + start, len, target);
 	}
+	printf("Result count: %llu \n", result_count);
+
 	return result_count;
 }
 
