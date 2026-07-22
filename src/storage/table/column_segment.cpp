@@ -535,14 +535,14 @@ static bool FSSTEqualityFilter(SelectionVector &sel, Vector &vector, const Expre
 // mandatory code chain. Every compressed string containing the needle contains the chain, so rows
 // without it are dropped from sel; the chain is only necessary, not sufficient, so this always
 // returns false and the survivors go through the regular (flatten + exact contains) path.
-static bool ContainsFilterFSST(const SelectionVector &sel, SelectionVector &result_sel, const Vector &vector, const Expression &expr,
+bool  __attribute__((noinline))  ContainsFilterFSST(const SelectionVector &sel, SelectionVector &result_sel, const Vector &vector, const Expression &expr,
                                idx_t &approved_tuple_count, const string &needle) {
 
 	if (vector.GetVectorType() != VectorType::FSST_VECTOR) {
 		return false;
 	}
 
-	auto decoder = FSSTVector::GetDecoder(vector);
+	const auto decoder = FSSTVector::GetDecoder(vector);
 	if (!decoder) {
 		return false;
 	}
@@ -600,28 +600,22 @@ static bool ContainsFilter(SelectionVector &sel, const Vector &vector, const Exp
 	// unset or shared, so we cannot compact it in place. the kernel skips null and too-short rows and dereferences
 	// each string_t itself, fusing the prefilter and the prefix scan into one pass.
 	SelectionVector result_sel(approved_tuple_count);
-	SelectionVector fsst_result_sel(approved_tuple_count);
-
 	bool was_flattened = false;
-	bool was_using_fsst = false;
-	idx_t fsst_approved = approved_tuple_count;
-	void* decoder = nullptr;
-	if (ContainsFilterFSST(sel, fsst_result_sel, vector, expr, fsst_approved, needle)) {
-		// vector.Flatten(result_sel, approved_tuple_count);
-		// was_flattened = true;
-		decoder = FSSTVector::GetDecoder(vector);
-		was_using_fsst = true;
+	if (ContainsFilterFSST(sel, result_sel, vector, expr, approved_tuple_count, needle)) {
+		vector.Flatten(result_sel, approved_tuple_count);
+		was_flattened = true;
 	} else {
-
+		vector.Flatten();
+		auto &validity = FlatVector::Validity(vector);
+		char pattern[CODE_LEN];
+		memcpy(pattern, needle.data(), CODE_LEN);
+		const auto *strings = FlatVector::GetData<string_t>(vector);
+		approved_tuple_count = k_vert_u32(strings, validity, sel, result_sel, approved_tuple_count, pattern);
 	}
-	vector.Flatten();
-	auto &validity = FlatVector::Validity(vector);
-	char pattern[CODE_LEN];
-	memcpy(pattern, needle.data(), CODE_LEN);
-	const auto *strings = FlatVector::GetData<string_t>(vector);
-	approved_tuple_count = k_vert_u32(strings, validity, sel, result_sel, approved_tuple_count, pattern);
+
 
 	const auto needle_ptr = const_uchar_ptr_cast(needle.data());
+	const auto *strings = FlatVector::GetData<string_t>(vector);
 
 	// longer needle: a CODE_LEN-byte prefix match is only a candidate, verify the full substring in place
 	if (needle_size > CODE_LEN) {
@@ -636,17 +630,6 @@ static bool ContainsFilter(SelectionVector &sel, const Vector &vector, const Exp
 			}
 		}
 		approved_tuple_count = verified_count;
-	}
-	if (fsst_approved < approved_tuple_count && was_using_fsst) {
-		const auto decoder_str = FSSTPrimitives::DecoderToString(decoder);
-		const auto chain = FSSTMandatoryChain(decoder, needle.data(), needle.size());
-
-		printf("ContainsFilterFSST: needle='%s', chain=[", needle.data());
-		for (size_t i = 0; i < chain.size(); i++) {
-			printf("%s%3u", i == 0 ? "" : ", ", static_cast<unsigned char>(chain[i]));
-		}
-		printf("]\n");
-		return false;
 	}
 	sel.Initialize(result_sel);
 	return true;
