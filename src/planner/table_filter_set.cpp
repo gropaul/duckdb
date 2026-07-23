@@ -246,7 +246,8 @@ static unique_ptr<TableFilter> SerializeInternalFunctionToLegacyFilter(const Bou
 		auto &data = func_expr.BindInfo()->Cast<DynamicFilterFunctionData>();
 		return make_uniq<LegacyDynamicFilter>(data.filter_data);
 	}
-	if (func_name == BloomFilterScalarFun::NAME || func_name == PrefixRangeScalarFun::NAME) {
+	if (func_name == BloomFilterScalarFun::NAME || func_name == PrefixRangeScalarFun::NAME ||
+	    func_name == ContainsPrefilterScalarFun::NAME) {
 		return make_uniq<LegacyOptionalFilter>();
 	}
 	throw SerializationException("Unsupported internal tablefilter function \"%s\" during serialization", func_name);

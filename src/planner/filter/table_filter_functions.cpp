@@ -21,9 +21,9 @@ unique_ptr<FunctionData> TableFilterFunctions::Bind(BindScalarFunctionInput &inp
 }
 
 bool TableFilterFunctions::IsTableFilterFunction(const Identifier &name) {
-	static const char *const TABLE_FILTER_FUNCTIONS[] = {BloomFilterScalarFun::NAME, DynamicFilterScalarFun::NAME,
-	                                                     OptionalFilterScalarFun::NAME, PrefixRangeScalarFun::NAME,
-	                                                     SelectivityOptionalFilterScalarFun::NAME};
+	static const char *const TABLE_FILTER_FUNCTIONS[] = {
+	    BloomFilterScalarFun::NAME,   ContainsPrefilterScalarFun::NAME,        DynamicFilterScalarFun::NAME,
+	    OptionalFilterScalarFun::NAME, PrefixRangeScalarFun::NAME,             SelectivityOptionalFilterScalarFun::NAME};
 	for (auto function_name : TABLE_FILTER_FUNCTIONS) {
 		if (name == function_name) {
 			return true;
@@ -106,6 +106,9 @@ unique_ptr<FunctionData> TableFilterFunctionDeserialize(Deserializer &deserializ
 	}
 	if (function.GetName() == PrefixRangeScalarFun::NAME) {
 		return make_uniq<PrefixRangeFunctionData>(nullptr, string(), key_type, 0.0f, idx_t(0));
+	}
+	if (function.GetName() == ContainsPrefilterScalarFun::NAME) {
+		return make_uniq<ContainsPrefilterFunctionData>(string(), 0.0f, idx_t(0));
 	}
 	if (function.GetName() == DynamicFilterScalarFun::NAME) {
 		return make_uniq<DynamicFilterFunctionData>(nullptr);

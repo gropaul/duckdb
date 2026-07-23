@@ -14,12 +14,9 @@
 #include "duckdb/planner/expression/bound_constant_expression.hpp"
 #include "duckdb/planner/expression/bound_reference_expression.hpp"
 #include "duckdb/planner/expression/bound_function_expression.hpp"
-#include "duckdb/function/scalar/string_common.hpp"
-#include "duckdb/common/simd_utils.hpp"
 #include "duckdb/planner/expression_iterator.hpp"
 #include "duckdb/planner/filter/expression_filter.hpp"
 #include "duckdb/planner/table_filter.hpp"
-#include "duckdb/storage/compression/fsst/fsst_mandatory_chain.hpp"
 #include "duckdb/storage/data_pointer.hpp"
 #include "duckdb/storage/table/append_state.hpp"
 #include "duckdb/storage/table/scan_state.hpp"
@@ -531,110 +528,6 @@ static bool FSSTEqualityFilter(SelectionVector &sel, Vector &vector, const Expre
 	return true;
 }
 
-// Contains filter on an FSST-compressed vector: prefilter in compressed space with the needle's
-// mandatory code chain. Every compressed string containing the needle contains the chain, so rows
-// without it are dropped from sel; the chain is only necessary, not sufficient, so this always
-// returns false and the survivors go through the regular (flatten + exact contains) path.
-bool  __attribute__((noinline))  ContainsFilterFSST(const SelectionVector &sel, SelectionVector &result_sel, const Vector &vector, const Expression &expr,
-                               idx_t &approved_tuple_count, const string &needle) {
-
-	if (vector.GetVectorType() != VectorType::FSST_VECTOR) {
-		return false;
-	}
-
-	const auto decoder = FSSTVector::GetDecoder(vector);
-	if (!decoder) {
-		return false;
-	}
-	// todo: compute the chain once per segment / filter state instead of once per vector
-	const auto chain = FSSTMandatoryChain(decoder, needle.data(), needle.size());
-	if (chain.size() < CODE_LEN) {
-		// chain too short for the kernel: no prefilter, flatten + regular contains loop
-		return false;
-	}
-	char pattern[CODE_LEN];
-	memcpy(pattern, chain.data(), CODE_LEN);
-
-	const auto base = FSSTVector::GetBasePointer(vector);
-	const auto offsets = FSSTVector::GetOffsets(vector);
-	auto &validity = FSSTVector::Validity(vector);
-
-	// scan the compressed rows for the chain's first CODE_LEN codes
-	approved_tuple_count =  k_vert_u32(base, offsets, validity, sel, result_sel, approved_tuple_count, pattern);
-	return true;
-}
-
-// Isolated (noinline) so the flat contains fast path shows up as its own frame in a flamegraph.
-// Returns true if it handled the filter: contains(col, 'constant') on a flat string column with a needle
-// of at least CODE_LEN bytes. Scans for the needle's CODE_LEN-byte prefix with the k_vert_u32 kernel, then
-// verifies longer needles with a full substring search.
-static bool ContainsFilter(SelectionVector &sel, const Vector &vector, const Expression &expr,
-                                                     idx_t &approved_tuple_count) {
-	if (expr.GetExpressionClass() != ExpressionClass::BOUND_FUNCTION) {
-		return false;
-	}
-	// return false;
-	auto &func = expr.Cast<BoundFunctionExpression>();
-	if (func.Function().GetName() != "contains") {
-		return false;
-	}
-	auto &children = func.GetChildren();
-	if (children.size() != 2) {
-		return false;
-	}
-	// contains is not commutative: children[0] is the haystack column, children[1] the needle constant
-	auto &haystack = *children[0];
-	auto &needle_expr = *children[1];
-	if (haystack.GetExpressionClass() != ExpressionClass::BOUND_REF ||
-	    needle_expr.GetExpressionType() != ExpressionType::VALUE_CONSTANT) {
-		return false;
-	}
-	auto needle = StringValue::Get(needle_expr.Cast<BoundConstantExpression>().GetValue());
-	const auto needle_size = needle.size();
-	// the k_vert_u32 kernel matches CODE_LEN bytes at a time - only handle needles that are at least that long
-	if (needle_size < CODE_LEN) {
-		return false;
-	}
-
-	// scan the selected rows for the needle's CODE_LEN-byte prefix into a fresh output sel. the incoming sel may be
-	// unset or shared, so we cannot compact it in place. the kernel skips null and too-short rows and dereferences
-	// each string_t itself, fusing the prefilter and the prefix scan into one pass.
-	SelectionVector result_sel(approved_tuple_count);
-	bool was_flattened = false;
-	if (ContainsFilterFSST(sel, result_sel, vector, expr, approved_tuple_count, needle)) {
-		vector.Flatten(result_sel, approved_tuple_count);
-		was_flattened = true;
-	} else {
-		vector.Flatten();
-		auto &validity = FlatVector::Validity(vector);
-		char pattern[CODE_LEN];
-		memcpy(pattern, needle.data(), CODE_LEN);
-		const auto *strings = FlatVector::GetData<string_t>(vector);
-		approved_tuple_count = k_vert_u32(strings, validity, sel, result_sel, approved_tuple_count, pattern);
-	}
-
-
-	const auto needle_ptr = const_uchar_ptr_cast(needle.data());
-	const auto *strings = FlatVector::GetData<string_t>(vector);
-
-	// longer needle: a CODE_LEN-byte prefix match is only a candidate, verify the full substring in place
-	if (needle_size > CODE_LEN) {
-		idx_t verified_count = 0;
-		for (idx_t idx = 0; idx < approved_tuple_count; idx++) {
-			auto sel_idx = result_sel.get_index(idx);
-			auto value_idx = was_flattened ? idx : sel_idx;
-			auto &str = strings[value_idx];
-			if (FindStrInStr(const_uchar_ptr_cast(str.GetData()), str.GetSize(), needle_ptr, needle_size) !=
-			    DConstants::INVALID_INDEX) {
-				result_sel.set_index(verified_count++, sel_idx);
-			}
-		}
-		approved_tuple_count = verified_count;
-	}
-	sel.Initialize(result_sel);
-	return true;
-}
-
 idx_t ColumnSegment::FilterSelection(SelectionVector &sel, Vector &vector, TableFilterState &filter_state,
                                      idx_t scan_count, idx_t &approved_tuple_count) {
 	auto &state = filter_state.Cast<ExpressionFilterState>();
@@ -651,12 +544,6 @@ idx_t ColumnSegment::FilterSelection(SelectionVector &sel, Vector &vector, Table
 		return state.fast_executor->FilterSelection(sel, vector, scan_count, approved_tuple_count);
 	}
 
-	if (vector.GetVectorType() == VectorType::FLAT_VECTOR || vector.GetVectorType() == VectorType::FSST_VECTOR) {
-		auto &expr = state.executor->expressions[0];
-		if (ContainsFilter(sel, vector, *expr, approved_tuple_count)) {
-			return approved_tuple_count;
-		}
-	}
 	return ExecuteExpressionFilterSelection(sel, vector, state, scan_count, approved_tuple_count);
 }
 

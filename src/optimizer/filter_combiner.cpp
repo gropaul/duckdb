@@ -452,6 +452,51 @@ FilterPushdownResult FilterCombiner::TryPushdownPrefixFilter(TableFilterSet &tab
 	return FilterPushdownResult::NO_PUSHDOWN;
 }
 
+// Push a contains prefilter for contains(col, 'needle'): an advisory filter with false positives
+// that self-pauses when unselective. Returns NO_PUSHDOWN so the generic expression pushdown still
+// pushes the exact contains into the scan as well - both then run there, prefilter first.
+FilterPushdownResult FilterCombiner::TryPushdownContainsFilter(TableFilterSet &table_filters,
+                                                               const vector<ColumnIndex> &column_ids,
+                                                               Expression &expr) {
+	if (expr.GetExpressionClass() != ExpressionClass::BOUND_FUNCTION) {
+		return FilterPushdownResult::NO_PUSHDOWN;
+	}
+	auto &func = expr.Cast<BoundFunctionExpression>();
+	if (func.Function().GetName() != "contains") {
+		return FilterPushdownResult::NO_PUSHDOWN;
+	}
+	auto &children = func.GetChildren();
+	if (children.size() != 2) {
+		return FilterPushdownResult::NO_PUSHDOWN;
+	}
+	// contains is not commutative: children[0] is the haystack column, children[1] the needle constant
+	if (children[0]->GetExpressionClass() != ExpressionClass::BOUND_COLUMN_REF ||
+	    children[1]->GetExpressionType() != ExpressionType::VALUE_CONSTANT) {
+		return FilterPushdownResult::NO_PUSHDOWN;
+	}
+	auto &column_ref = children[0]->Cast<BoundColumnRefExpression>();
+	if (column_ref.GetReturnType().id() != LogicalTypeId::VARCHAR) {
+		return FilterPushdownResult::NO_PUSHDOWN;
+	}
+	auto &constant_value_expr = children[1]->Cast<BoundConstantExpression>();
+	auto &needle_value = constant_value_expr.GetValue();
+	if (needle_value.IsNull() || needle_value.type().id() != LogicalTypeId::VARCHAR) {
+		return FilterPushdownResult::NO_PUSHDOWN;
+	}
+	auto needle = StringValue::Get(needle_value);
+	if (needle.size() < ContainsPrefilterScalarFun::MIN_NEEDLE_LENGTH) {
+		return FilterPushdownResult::NO_PUSHDOWN;
+	}
+	constexpr float CONTAINS_PREFILTER_SELECTIVITY_THRESHOLD = 0.5f;
+	constexpr idx_t CONTAINS_PREFILTER_VECTORS_TO_CHECK = 10;
+	auto filter_idx = column_ref.Binding().column_index;
+	auto prefilter_expr =
+	    CreateContainsPrefilterExpression(std::move(needle), column_ref.GetReturnType(),
+	                                      CONTAINS_PREFILTER_SELECTIVITY_THRESHOLD, CONTAINS_PREFILTER_VECTORS_TO_CHECK);
+	table_filters.PushFilter(filter_idx, make_uniq<ExpressionFilter>(std::move(prefilter_expr)));
+	return FilterPushdownResult::NO_PUSHDOWN;
+}
+
 FilterPushdownResult FilterCombiner::TryPushdownLikeFilter(TableFilterSet &table_filters,
                                                            const vector<ColumnIndex> &column_ids, Expression &expr) {
 	if (expr.GetExpressionClass() != ExpressionClass::BOUND_FUNCTION) {
@@ -888,6 +933,10 @@ FilterPushdownResult FilterCombiner::TryPushdownExpression(TableFilterSet &table
 		return pushdown_result;
 	}
 	pushdown_result = TryPushdownLikeFilter(table_filters, column_ids, expr);
+	if (pushdown_result != FilterPushdownResult::NO_PUSHDOWN) {
+		return pushdown_result;
+	}
+	pushdown_result = TryPushdownContainsFilter(table_filters, column_ids, expr);
 	if (pushdown_result != FilterPushdownResult::NO_PUSHDOWN) {
 		return pushdown_result;
 	}

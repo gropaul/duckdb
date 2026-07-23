@@ -71,6 +71,8 @@ unique_ptr<Expression> CreateSelectivityOptionalFilterExpression(unique_ptr<Expr
                                                                  float selectivity_threshold, idx_t n_vectors_to_check);
 unique_ptr<Expression> CreateDynamicFilterExpression(shared_ptr<DynamicFilterData> filter_data,
                                                      const LogicalType &target_type);
+unique_ptr<Expression> CreateContainsPrefilterExpression(string needle, const LogicalType &target_type,
+                                                         float selectivity_threshold, idx_t n_vectors_to_check);
 
 //! Bind function that prevents user access to internal tablefilter functions
 struct TableFilterFunctions {
@@ -179,6 +181,20 @@ struct PrefixRangeFunctionData : public FunctionData {
 	bool Equals(const FunctionData &other) const override;
 };
 
+//! FunctionData for the contains prefilter internal function. A pure prefilter with false
+//! positives: rows that survive still need the exact contains check downstream.
+struct ContainsPrefilterFunctionData : public FunctionData {
+	ContainsPrefilterFunctionData(string needle_p, float selectivity_threshold_p, idx_t n_vectors_to_check_p);
+
+	//! The contains needle; empty after deserialization, degrading the filter to always-true.
+	string needle;
+	float selectivity_threshold;
+	idx_t n_vectors_to_check;
+
+	unique_ptr<FunctionData> Copy() const override;
+	bool Equals(const FunctionData &other) const override;
+};
+
 //! Runtime dynamic-filter state shared by internal tablefilter functions.
 struct DynamicFilterData {
 public:
@@ -240,6 +256,17 @@ struct BloomFilterScalarFun : public TableFilterBloomFilterFun {
 	static ScalarFunction GetFunction(const LogicalType &input_type);
 	static FilterPropagateResult FilterPrune(const FunctionStatisticsPruneInput &input);
 	static string ToString(const string &column_name, const string &key_column_name);
+};
+
+//! Factory for contains prefilter internal function
+struct ContainsPrefilterScalarFun : public TableFilterContainsPrefilterFun {
+	using TableFilterContainsPrefilterFun::GetFunction;
+	static constexpr const char *NAME = TableFilterContainsPrefilterFun::Name;
+	//! Minimum needle length: the byte-scan kernels match 4 bytes at a time.
+	static constexpr idx_t MIN_NEEDLE_LENGTH = 4;
+	static ScalarFunction GetFunction(const LogicalType &input_type);
+	static FilterPropagateResult FilterPrune(const FunctionStatisticsPruneInput &input);
+	static string ToString(const string &column_name, const string &needle);
 };
 
 //! Factory for prefix range internal function
