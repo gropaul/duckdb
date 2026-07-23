@@ -108,6 +108,8 @@ enum class CAPIResultSetType : uint8_t;
 
 enum class CSVState : uint8_t;
 
+enum class CTEExecutionMode : uint8_t;
+
 enum class CTEMaterialize : uint8_t;
 
 enum class CacheBlockState : uint8_t;
@@ -322,13 +324,15 @@ enum class MetaPipelineType : uint8_t;
 
 enum class Monotonicity : uint8_t;
 
+enum class MultiFileAcquireResult : uint8_t;
+
 enum class MultiFileColumnMappingMode : uint8_t;
 
 enum class MultiFileDecodeResult : uint8_t;
 
 enum class MultiFileFileState : uint8_t;
 
-enum class MultiFileScanPhase : uint8_t;
+enum class MultiFileJobState : uint8_t;
 
 enum class NType : uint8_t;
 
@@ -383,6 +387,10 @@ enum class PhysicalOperatorType : uint8_t;
 enum class PhysicalTableScanExecutionStrategy : uint8_t;
 
 enum class PhysicalType : uint8_t;
+
+enum class PipelineBroadcastExchangeConsumerMode : uint8_t;
+
+enum class PipelineInputMode : uint8_t;
 
 enum class PragmaType : uint8_t;
 
@@ -688,6 +696,9 @@ const char* EnumUtil::ToChars<CAPIResultSetType>(CAPIResultSetType value);
 
 template<>
 const char* EnumUtil::ToChars<CSVState>(CSVState value);
+
+template<>
+const char* EnumUtil::ToChars<CTEExecutionMode>(CTEExecutionMode value);
 
 template<>
 const char* EnumUtil::ToChars<CTEMaterialize>(CTEMaterialize value);
@@ -1011,6 +1022,9 @@ template<>
 const char* EnumUtil::ToChars<Monotonicity>(Monotonicity value);
 
 template<>
+const char* EnumUtil::ToChars<MultiFileAcquireResult>(MultiFileAcquireResult value);
+
+template<>
 const char* EnumUtil::ToChars<MultiFileColumnMappingMode>(MultiFileColumnMappingMode value);
 
 template<>
@@ -1020,7 +1034,7 @@ template<>
 const char* EnumUtil::ToChars<MultiFileFileState>(MultiFileFileState value);
 
 template<>
-const char* EnumUtil::ToChars<MultiFileScanPhase>(MultiFileScanPhase value);
+const char* EnumUtil::ToChars<MultiFileJobState>(MultiFileJobState value);
 
 template<>
 const char* EnumUtil::ToChars<NType>(NType value);
@@ -1102,6 +1116,12 @@ const char* EnumUtil::ToChars<PhysicalTableScanExecutionStrategy>(PhysicalTableS
 
 template<>
 const char* EnumUtil::ToChars<PhysicalType>(PhysicalType value);
+
+template<>
+const char* EnumUtil::ToChars<PipelineBroadcastExchangeConsumerMode>(PipelineBroadcastExchangeConsumerMode value);
+
+template<>
+const char* EnumUtil::ToChars<PipelineInputMode>(PipelineInputMode value);
 
 template<>
 const char* EnumUtil::ToChars<PragmaType>(PragmaType value);
@@ -1504,6 +1524,9 @@ template<>
 CSVState EnumUtil::FromString<CSVState>(const char *value);
 
 template<>
+CTEExecutionMode EnumUtil::FromString<CTEExecutionMode>(const char *value);
+
+template<>
 CTEMaterialize EnumUtil::FromString<CTEMaterialize>(const char *value);
 
 template<>
@@ -1825,6 +1848,9 @@ template<>
 Monotonicity EnumUtil::FromString<Monotonicity>(const char *value);
 
 template<>
+MultiFileAcquireResult EnumUtil::FromString<MultiFileAcquireResult>(const char *value);
+
+template<>
 MultiFileColumnMappingMode EnumUtil::FromString<MultiFileColumnMappingMode>(const char *value);
 
 template<>
@@ -1834,7 +1860,7 @@ template<>
 MultiFileFileState EnumUtil::FromString<MultiFileFileState>(const char *value);
 
 template<>
-MultiFileScanPhase EnumUtil::FromString<MultiFileScanPhase>(const char *value);
+MultiFileJobState EnumUtil::FromString<MultiFileJobState>(const char *value);
 
 template<>
 NType EnumUtil::FromString<NType>(const char *value);
@@ -1916,6 +1942,12 @@ PhysicalTableScanExecutionStrategy EnumUtil::FromString<PhysicalTableScanExecuti
 
 template<>
 PhysicalType EnumUtil::FromString<PhysicalType>(const char *value);
+
+template<>
+PipelineBroadcastExchangeConsumerMode EnumUtil::FromString<PipelineBroadcastExchangeConsumerMode>(const char *value);
+
+template<>
+PipelineInputMode EnumUtil::FromString<PipelineInputMode>(const char *value);
 
 template<>
 PragmaType EnumUtil::FromString<PragmaType>(const char *value);

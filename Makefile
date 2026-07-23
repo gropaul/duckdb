@@ -520,6 +520,7 @@ TEST_CONFIGS := \
 	test/configs/verify_statement_explain.json \
 	test/configs/verify_statement_prepare.json \
 	test/configs/verify_serializer.json \
+	test/configs/verify_compression.json \
 	test/configs/verify_stats.json \
 	test/configs/verify_statement_serialization.json \
 	test/configs/force_storage.json \
@@ -710,6 +711,10 @@ spell_tools:
 .PHONY: enum-integrity-check
 enum-integrity-check:
 	$(PYTHON) scripts/verify_enum_integrity.py src/include/duckdb.h
+
+.PHONY: extension-patch-check
+extension-patch-check:
+	cmake -DCONFIG_DIR=.github/config -DPATCH_DIR=.github/patches/extensions -P scripts/check_extension_patches.cmake
 
 .PHONY: format_venv
 format_venv:
