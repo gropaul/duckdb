@@ -3,6 +3,7 @@
 #include "duckdb/common/simd_utils.hpp"
 #include "duckdb/common/vector_operations/vector_operations.hpp"
 #include "duckdb/common/vector/constant_vector.hpp"
+#include "duckdb/common/vector/dictionary_vector.hpp"
 #include "duckdb/common/vector/flat_vector.hpp"
 #include "duckdb/common/vector/fsst_vector.hpp"
 #include "duckdb/storage/compression/fsst/fsst_mandatory_chain.hpp"
@@ -31,6 +32,63 @@ ExpressionFilterState::ExpressionFilterState(ClientContext &context, const Expre
 ExpressionFilterState::~ExpressionFilterState() {
 }
 
+// Dictionaries larger than this are not worth pre-evaluating per entry (mirrors the threshold of
+// the executor's dictionary expression optimization).
+static constexpr idx_t MAX_FILTER_DICTIONARY_SIZE = 20000;
+
+idx_t ExpressionFilterExecutor::FilterSelection(SelectionVector &sel, Vector &vector, idx_t scan_count,
+                                                idx_t &approved_tuple_count) {
+	if (approved_tuple_count == 0) {
+		return 0;
+	}
+	if (vector.GetVectorType() != VectorType::DICTIONARY_VECTOR) {
+		return FilterSelectionInternal(sel, vector, scan_count, approved_tuple_count);
+	}
+	const auto dictionary_size = DictionaryVector::DictionarySize(vector);
+	auto &dictionary_id = DictionaryVector::DictionaryId(vector);
+	if (!dictionary_size.IsValid() || dictionary_id.empty() ||
+	    dictionary_size.GetIndex() >= MAX_FILTER_DICTIONARY_SIZE ||
+	    DictionaryVector::Child(vector).GetVectorType() != VectorType::FLAT_VECTOR) {
+		// not a storage dictionary we can pre-evaluate per entry
+		return FilterSelectionInternal(sel, vector, scan_count, approved_tuple_count);
+	}
+	if (dictionary_id != cached_dictionary_id) {
+		ComputeDictionaryVerdicts(vector, dictionary_size.GetIndex());
+		cached_dictionary_id = dictionary_id;
+	}
+	// keep the rows whose dictionary entry passed the filter
+	auto &dictionary_sel = DictionaryVector::SelVector(vector);
+	if (dictionary_result_capacity < approved_tuple_count) {
+		dictionary_result_sel.Initialize(approved_tuple_count);
+		dictionary_result_capacity = approved_tuple_count;
+	}
+	idx_t result_count = 0;
+	for (idx_t i = 0; i < approved_tuple_count; i++) {
+		const auto row_idx = sel.get_index(i);
+		dictionary_result_sel.set_index(result_count, row_idx);
+		result_count += dictionary_verdicts[dictionary_sel.get_index(row_idx)];
+	}
+	sel.Initialize(dictionary_result_sel);
+	approved_tuple_count = result_count;
+	return result_count;
+}
+
+void ExpressionFilterExecutor::ComputeDictionaryVerdicts(Vector &dictionary_vector, idx_t dictionary_size) {
+	auto &child = DictionaryVector::Child(dictionary_vector);
+	dictionary_verdicts.assign(dictionary_size, 0);
+	// evaluate the filter over the unique entries, one STANDARD_VECTOR_SIZE block at a time
+	for (idx_t offset = 0; offset < dictionary_size; offset += STANDARD_VECTOR_SIZE) {
+		const auto block_count = MinValue<idx_t>(dictionary_size - offset, STANDARD_VECTOR_SIZE);
+		Vector block(child, offset, offset + block_count);
+		SelectionVector block_sel;
+		idx_t block_approved = block_count;
+		FilterSelectionInternal(block_sel, block, block_count, block_approved);
+		for (idx_t i = 0; i < block_approved; i++) {
+			dictionary_verdicts[offset + block_sel.get_index(i)] = 1;
+		}
+	}
+}
+
 // Fallback child of a mixed conjunction: evaluates one conjunct through the regular
 // ExpressionExecutor, so that sibling conjuncts with kernel executors keep the fast path.
 class GenericFilterExecutor final : public ExpressionFilterExecutor {
@@ -40,7 +98,7 @@ public:
 		executor->AddExpression(expression);
 	}
 
-	idx_t FilterSelection(SelectionVector &sel, Vector &vector, idx_t scan_count,
+	idx_t FilterSelectionInternal(SelectionVector &sel, Vector &vector, idx_t scan_count,
 	                      idx_t &approved_tuple_count) override {
 		if (approved_tuple_count == 0) {
 			return 0;
@@ -80,7 +138,7 @@ public:
 	    : children(std::move(children_p)) {
 	}
 
-	idx_t FilterSelection(SelectionVector &sel, Vector &vector, idx_t scan_count,
+	idx_t FilterSelectionInternal(SelectionVector &sel, Vector &vector, idx_t scan_count,
 	                      idx_t &approved_tuple_count) override {
 		for (auto &child : children) {
 			child->FilterSelection(sel, vector, scan_count, approved_tuple_count);
@@ -97,7 +155,7 @@ private:
 
 class OptionalFilterExecutor final : public ExpressionFilterExecutor {
 public:
-	idx_t FilterSelection(SelectionVector &sel, Vector &vector, idx_t scan_count,
+	idx_t FilterSelectionInternal(SelectionVector &sel, Vector &vector, idx_t scan_count,
 	                      idx_t &approved_tuple_count) override {
 		return approved_tuple_count;
 	}
@@ -109,7 +167,7 @@ public:
 	    : comparison_type(comparison_type_p), constant(std::move(constant_p)) {
 	}
 
-	idx_t FilterSelection(SelectionVector &sel, Vector &vector, idx_t scan_count,
+	idx_t FilterSelectionInternal(SelectionVector &sel, Vector &vector, idx_t scan_count,
 	                      idx_t &approved_tuple_count) override {
 		(void)scan_count;
 		if (approved_tuple_count == 0) {
@@ -236,7 +294,7 @@ public:
 	    : child(std::move(child_p)), stats(n_vectors_to_check, selectivity_threshold) {
 	}
 
-	idx_t FilterSelection(SelectionVector &sel, Vector &vector, idx_t scan_count,
+	idx_t FilterSelectionInternal(SelectionVector &sel, Vector &vector, idx_t scan_count,
 	                      idx_t &approved_tuple_count) override {
 		if (approved_tuple_count == 0) {
 			return 0;
@@ -269,7 +327,7 @@ public:
 		}
 	}
 
-	idx_t FilterSelection(SelectionVector &sel, Vector &vector, idx_t scan_count,
+	idx_t FilterSelectionInternal(SelectionVector &sel, Vector &vector, idx_t scan_count,
 	                      idx_t &approved_tuple_count) override {
 		if (approved_tuple_count == 0) {
 			return 0;
@@ -413,7 +471,7 @@ public:
 		}
 	}
 
-	idx_t FilterSelection(SelectionVector &sel, Vector &vector, idx_t scan_count,
+	idx_t FilterSelectionInternal(SelectionVector &sel, Vector &vector, idx_t scan_count,
 	                      idx_t &approved_tuple_count) override {
 		if (approved_tuple_count == 0) {
 			return 0;
@@ -490,7 +548,7 @@ public:
 		}
 	}
 
-	idx_t FilterSelection(SelectionVector &sel, Vector &vector, idx_t scan_count,
+	idx_t FilterSelectionInternal(SelectionVector &sel, Vector &vector, idx_t scan_count,
 	                      idx_t &approved_tuple_count) override {
 		if (approved_tuple_count == 0) {
 			return 0;
@@ -504,7 +562,7 @@ public:
 		}
 		const auto before_count = approved_tuple_count;
 		idx_t result_count;
-		if (vector.GetVectorType() == VectorType::FSST_VECTOR) {
+		if () {
 			if (!FilterFSST(sel, vector, before_count, result_count)) {
 				// no usable chain for this symbol table - pass everything through
 				return approved_tuple_count;

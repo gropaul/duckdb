@@ -20,8 +20,25 @@ class Vector;
 struct ExpressionFilterExecutor {
 	virtual ~ExpressionFilterExecutor() = default;
 
-	virtual idx_t FilterSelection(SelectionVector &sel, Vector &vector, idx_t scan_count,
-	                              idx_t &approved_tuple_count) = 0;
+	//! Driver over one vector. Storage dictionaries are handled here once per dictionary: the
+	//! filter runs over the unique entries and the per-entry verdicts are cached by dictionary id;
+	//! rows then map through the dictionary selection. Everything else forwards to
+	//! FilterSelectionInternal. Requires the verdict to be a deterministic function of the value.
+	idx_t FilterSelection(SelectionVector &sel, Vector &vector, idx_t scan_count, idx_t &approved_tuple_count);
+
+protected:
+	virtual idx_t FilterSelectionInternal(SelectionVector &sel, Vector &vector, idx_t scan_count,
+	                                      idx_t &approved_tuple_count) = 0;
+
+private:
+	void ComputeDictionaryVerdicts(Vector &dictionary_vector, idx_t dictionary_size);
+
+private:
+	//! Per-entry filter verdicts for the current storage dictionary
+	string cached_dictionary_id;
+	vector<uint8_t> dictionary_verdicts;
+	SelectionVector dictionary_result_sel;
+	idx_t dictionary_result_capacity = 0;
 };
 
 //! Thread-local state for executing a table filter
