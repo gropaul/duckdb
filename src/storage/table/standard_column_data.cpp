@@ -86,7 +86,7 @@ void StandardColumnData::Filter(TransactionData transaction, idx_t vector_index,
 	// the compression functions need to support this
 	auto compression = GetCompressionFunction();
 	bool has_filter = compression && compression->filter;
-	bool filter_includes_validity = compression && compression->validity == CompressionValidity::NO_VALIDITY_REQUIRED;
+	bool filter_includes_validity = compression && compression->validity_read == CompressionValidity::NO_VALIDITY_REQUIRED;
 	auto validity_compression = validity->GetCompressionFunction();
 	bool validity_has_filter = filter_includes_validity || (validity_compression && validity_compression->filter);
 	auto target_count = GetVectorCount(vector_index);
