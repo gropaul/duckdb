@@ -33,6 +33,7 @@
 #include "duckdb/optimizer/rule/join_dependent_filter.hpp"
 #include "duckdb/optimizer/rule/list.hpp"
 #include "duckdb/optimizer/sampling_pushdown.hpp"
+#include "duckdb/optimizer/scalar_fn_pushdown.hpp"
 #include "duckdb/optimizer/statistics_propagator.hpp"
 #include "duckdb/optimizer/aggregate_function_rewriter.hpp"
 #include "duckdb/optimizer/topn_optimizer.hpp"
@@ -71,12 +72,14 @@ Optimizer::Optimizer(Binder &binder, ClientContext &context) : context(context),
 	rewriter.rules.push_back(make_uniq<ComparisonSimplificationRule>(rewriter));
 	rewriter.rules.push_back(make_uniq<InClauseSimplificationRule>(rewriter));
 	rewriter.rules.push_back(make_uniq<InEnumSimplificationRule>(rewriter));
+	rewriter.rules.push_back(make_uniq<EnumCompareSimplificationRule>(rewriter));
 	rewriter.rules.push_back(make_uniq<EqualOrNullSimplification>(rewriter));
 	rewriter.rules.push_back(make_uniq<MoveConstantsRule>(rewriter));
 	rewriter.rules.push_back(make_uniq<MoveUnaryMinusRule>(rewriter));
 	rewriter.rules.push_back(make_uniq<MonotonePreimageRule>(rewriter));
 	rewriter.rules.push_back(make_uniq<LikeOptimizationRule>(rewriter));
-	rewriter.rules.push_back(make_uniq<LeftToPrefixRule>(rewriter));
+	rewriter.rules.push_back(make_uniq<StringPrefixRule>(rewriter));
+	rewriter.rules.push_back(make_uniq<InstrPrefixRule>(rewriter));
 	rewriter.rules.push_back(make_uniq<OrderedAggregateOptimizer>(rewriter));
 	rewriter.rules.push_back(make_uniq<DistinctAggregateOptimizer>(rewriter));
 	rewriter.rules.push_back(make_uniq<DistinctWindowedOptimizer>(rewriter));
@@ -90,6 +93,7 @@ Optimizer::Optimizer(Binder &binder, ClientContext &context) : context(context),
 	rewriter.rules.push_back(make_uniq<ListComprehensionRewriteRule>(rewriter));
 	rewriter.rules.push_back(make_uniq<ContainsToInClauseRule>(rewriter));
 	rewriter.rules.push_back(make_uniq<NotComparisonSimplificationRule>(rewriter));
+	rewriter.rules.push_back(make_uniq<NotConjunctionSimplificationRule>(rewriter));
 
 #ifdef DEBUG
 	for (auto &rule : rewriter.rules) {
@@ -212,16 +216,6 @@ void Optimizer::RunBuiltInOptimizers() {
 	RunOptimizer(OptimizerType::FILTER_PULLUP, [&]() {
 		FilterPullup filter_pullup;
 		plan = filter_pullup.Rewrite(std::move(plan));
-	});
-
-	/* Push down type casts in SELECT e.g. SELECT num::UHUGEINT to file readers.
-	 * This pass must run before FILTER_PUSHDOWN. After filter pushdown
-	 * get.table_filters are populated because WHERE clauses may have been
-	 * pushed. This makes type pushdown much more complex.
-	 */
-	RunOptimizer(OptimizerType::TYPE_PUSHDOWN, [&] {
-		TypePushdown type_pushdown(context);
-		plan = type_pushdown.Optimize(std::move(plan));
 	});
 
 	// perform filter pushdown
@@ -439,6 +433,18 @@ void Optimizer::RunBuiltInOptimizers() {
 	RunOptimizer(OptimizerType::ROW_NUMBER_REWRITER, [&]() {
 		RowNumberRewriter window_rewriter;
 		plan = window_rewriter.Optimize(std::move(plan));
+	});
+
+	// Push down type casts in SELECT e.g. SELECT num::UHUGEINT to file readers.
+	RunOptimizer(OptimizerType::TYPE_PUSHDOWN, [&] {
+		TypePushdown type_pushdown(context);
+		plan = type_pushdown.Optimize(std::move(plan));
+	});
+
+	// Pushdown scalar functions in SELECT like SELECT strlen(str) to readers
+	RunOptimizer(OptimizerType::SCALAR_FN_PUSHDOWN, [&] {
+		ScalarFnPushdown fn_pushdown(context);
+		plan = fn_pushdown.Optimize(std::move(plan));
 	});
 }
 

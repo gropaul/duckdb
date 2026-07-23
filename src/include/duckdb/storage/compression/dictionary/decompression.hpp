@@ -27,6 +27,8 @@ private:
 	void ScanToFlatVectorInternal(Vector &result, idx_t result_offset, idx_t start, idx_t scan_count);
 	string_t FetchStringFromDict(int32_t dict_offset, uint16_t string_len);
 	uint16_t GetStringLength(sel_t index);
+	void ValidateDictionaryIndex(sel_t index);
+	void ValidateDictionaryOffset(uint32_t dict_offset);
 
 public:
 	BufferHandle owned_handle;
