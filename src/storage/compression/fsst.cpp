@@ -542,8 +542,7 @@ struct FSSTScanState : public StringScanState {
 	                                 ArenaAllocator &str_allocator) const {
 		uint32_t str_len = string_lengths[offsets.scan_offset + index];
 		auto str_ptr = FSSTStorage::FetchStringPointer(
-		    dict, baseptr,
-		    UnsafeNumericCast<int32_t>(string_offsets[index + offsets.unused_delta_decoded_values]));
+		    dict, baseptr, UnsafeNumericCast<int32_t>(string_offsets[index + offsets.unused_delta_decoded_values]));
 
 		if (str_len == 0) {
 			return string_t(nullptr, 0);
@@ -576,7 +575,6 @@ unique_ptr<SegmentScanState> FSSTStorage::StringInitScan(const QueryContext &con
 	state->duckdb_fsst_decoder_ptr = state->duckdb_fsst_decoder.get();
 	// FSSTPrimitives::SaveDecoder(state->duckdb_fsst_decoder_ptr, "scripts/fsst_symbol_table/tables/hits/url");
 
-
 	const auto &stats = segment.GetStats();
 	if (stats.GetStatsType() == StatisticsType::STRING_STATS && StringStats::HasMaxStringLength(stats)) {
 		state->all_values_inlined = StringStats::MaxStringLength(stats) <= string_t::INLINE_LENGTH;
@@ -585,7 +583,8 @@ unique_ptr<SegmentScanState> FSSTStorage::StringInitScan(const QueryContext &con
 	return std::move(state);
 }
 
-void DeltaDecodeStringOffsets(uint32_t *string_lengths, uint32_t *string_offsets, idx_t decode_count, uint32_t last_known_value) {
+void DeltaDecodeStringOffsets(uint32_t *string_lengths, uint32_t *string_offsets, idx_t decode_count,
+                              uint32_t last_known_value) {
 	string_offsets[0] = string_lengths[0];
 	string_offsets[0] += last_known_value;
 	for (idx_t i = 1; i < decode_count; i++) {
@@ -604,9 +603,8 @@ void CopyCompressedBlock(data_ptr_t dest, const_data_ptr_t src, idx_t block_size
 	memcpy(dest, src, block_size);
 }
 
-void
-PopulateOffsets(int32_t *offsets, const uint32_t *delta_decode, idx_t unused_values_offset, uint32_t block_top,
-                idx_t block_size, idx_t scan_count, idx_t index_base) {
+void PopulateOffsets(int32_t *offsets, const uint32_t *delta_decode, idx_t unused_values_offset, uint32_t block_top,
+                     idx_t block_size, idx_t scan_count, idx_t index_base) {
 	// The new block sits at the front of the byte buffer ([0, block_size)), so positions are relative to 0.
 	// index_base is 0 for a new vector; when appending it is the existing value count, and offsets[index_base] is
 	// already the block's top boundary (Grow shifted it there), so we only fill [index_base + 1 ..].
@@ -642,8 +640,8 @@ bp_delta_offsets_t FSSTStorage::StartScan(FSSTScanState &scan_state, data_ptr_t 
 		scan_state.delta_decode_capacity = offsets.total_delta_decode_count;
 	}
 	DeltaDecodeStringOffsets(scan_state.string_lengths.get() + offsets.bitunpack_alignment_offset,
-	                   scan_state.string_offsets.get(), offsets.total_delta_decode_count,
-	                   scan_state.last_known_row_offset);
+	                         scan_state.string_offsets.get(), offsets.total_delta_decode_count,
+	                         scan_state.last_known_row_offset);
 	return offsets;
 }
 
@@ -677,7 +675,6 @@ void FSSTStorage::StringScanPartial(ColumnSegment &segment, ColumnScanState &sta
 	auto &bitunpack_buffer = scan_state.string_lengths;
 	auto &string_offsets = scan_state.string_offsets;
 	if (enable_fsst_vectors) {
-
 		D_ASSERT(scan_state.duckdb_fsst_decoder);
 
 		// todo: Now we check: If there is a result_offset then we also need already to get an FSST VECTOR and then we
@@ -702,7 +699,7 @@ void FSSTStorage::StringScanPartial(ColumnSegment &segment, ColumnScanState &sta
 		if (new_vector) {
 			const auto string_block_limit = StringUncompressed::GetStringBlockLimit(segment.GetBlockSize());
 			FSSTVector::Create(result, scan_state.duckdb_fsst_decoder, scan_state.fsst_encoder, string_block_limit,
-						   scan_count, block_size);
+			                   scan_count, block_size);
 			index_base = 0;
 		} else {
 			D_ASSERT(result.GetVectorType() == VectorType::FSST_VECTOR);
@@ -720,13 +717,13 @@ void FSSTStorage::StringScanPartial(ColumnSegment &segment, ColumnScanState &sta
 		PopulateOffsets(fsst_buffer.GetOffsets(), string_offsets.get(), unused_values_offset, block_top, block_size,
 		                scan_count, index_base);
 	} else {
-
 		D_ASSERT(result.GetVectorType() == VectorType::FLAT_VECTOR);
 		string_t *result_data = FlatVector::GetDataMutable<string_t>(result);
 		// Just decompress
 		auto &str_allocator = StringVector::GetStringAllocator(result);
 		for (idx_t i = 0; i < scan_count; i++) {
-			result_data[i + result_offset] = scan_state.DecompressString(dict, baseptr, decode_offsets, i, str_allocator);
+			result_data[i + result_offset] =
+			    scan_state.DecompressString(dict, baseptr, decode_offsets, i, str_allocator);
 		}
 	}
 	EndScan(scan_state, decode_offsets, start, scan_count);
@@ -793,7 +790,7 @@ void FSSTStorage::StringFetchRow(ColumnSegment &segment, ColumnFetchState &state
 	               offsets.bitunpack_start_row, width);
 	auto delta_decode_buffer = unique_ptr<uint32_t[]>(new uint32_t[offsets.total_delta_decode_count]);
 	DeltaDecodeStringOffsets(string_lengths.get() + offsets.bitunpack_alignment_offset, delta_decode_buffer.get(),
-	                   offsets.total_delta_decode_count, 0);
+	                         offsets.total_delta_decode_count, 0);
 
 	uint32_t string_length = string_lengths[offsets.scan_offset];
 

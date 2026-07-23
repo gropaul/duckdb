@@ -22,8 +22,8 @@ unique_ptr<FunctionData> TableFilterFunctions::Bind(BindScalarFunctionInput &inp
 
 bool TableFilterFunctions::IsTableFilterFunction(const Identifier &name) {
 	static const char *const TABLE_FILTER_FUNCTIONS[] = {
-	    BloomFilterScalarFun::NAME,   ContainsPrefilterScalarFun::NAME,        DynamicFilterScalarFun::NAME,
-	    OptionalFilterScalarFun::NAME, PrefixRangeScalarFun::NAME,             SelectivityOptionalFilterScalarFun::NAME};
+	    BloomFilterScalarFun::NAME,    ContainsPrefilterScalarFun::NAME, DynamicFilterScalarFun::NAME,
+	    OptionalFilterScalarFun::NAME, PrefixRangeScalarFun::NAME,       SelectivityOptionalFilterScalarFun::NAME};
 	for (auto function_name : TABLE_FILTER_FUNCTIONS) {
 		if (name == function_name) {
 			return true;

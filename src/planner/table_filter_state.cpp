@@ -99,7 +99,7 @@ public:
 	}
 
 	idx_t FilterSelectionInternal(SelectionVector &sel, Vector &vector, idx_t scan_count,
-	                      idx_t &approved_tuple_count) override {
+	                              idx_t &approved_tuple_count) override {
 		if (approved_tuple_count == 0) {
 			return 0;
 		}
@@ -139,7 +139,7 @@ public:
 	}
 
 	idx_t FilterSelectionInternal(SelectionVector &sel, Vector &vector, idx_t scan_count,
-	                      idx_t &approved_tuple_count) override {
+	                              idx_t &approved_tuple_count) override {
 		for (auto &child : children) {
 			child->FilterSelection(sel, vector, scan_count, approved_tuple_count);
 			if (approved_tuple_count == 0) {
@@ -156,7 +156,7 @@ private:
 class OptionalFilterExecutor final : public ExpressionFilterExecutor {
 public:
 	idx_t FilterSelectionInternal(SelectionVector &sel, Vector &vector, idx_t scan_count,
-	                      idx_t &approved_tuple_count) override {
+	                              idx_t &approved_tuple_count) override {
 		return approved_tuple_count;
 	}
 };
@@ -168,7 +168,7 @@ public:
 	}
 
 	idx_t FilterSelectionInternal(SelectionVector &sel, Vector &vector, idx_t scan_count,
-	                      idx_t &approved_tuple_count) override {
+	                              idx_t &approved_tuple_count) override {
 		(void)scan_count;
 		if (approved_tuple_count == 0) {
 			return 0;
@@ -295,7 +295,7 @@ public:
 	}
 
 	idx_t FilterSelectionInternal(SelectionVector &sel, Vector &vector, idx_t scan_count,
-	                      idx_t &approved_tuple_count) override {
+	                              idx_t &approved_tuple_count) override {
 		if (approved_tuple_count == 0) {
 			return 0;
 		}
@@ -328,7 +328,7 @@ public:
 	}
 
 	idx_t FilterSelectionInternal(SelectionVector &sel, Vector &vector, idx_t scan_count,
-	                      idx_t &approved_tuple_count) override {
+	                              idx_t &approved_tuple_count) override {
 		if (approved_tuple_count == 0) {
 			return 0;
 		}
@@ -472,7 +472,7 @@ public:
 	}
 
 	idx_t FilterSelectionInternal(SelectionVector &sel, Vector &vector, idx_t scan_count,
-	                      idx_t &approved_tuple_count) override {
+	                              idx_t &approved_tuple_count) override {
 		if (approved_tuple_count == 0) {
 			return 0;
 		}
@@ -549,7 +549,7 @@ public:
 	}
 
 	idx_t FilterSelectionInternal(SelectionVector &sel, Vector &vector, idx_t scan_count,
-	                      idx_t &approved_tuple_count) override {
+	                              idx_t &approved_tuple_count) override {
 		if (approved_tuple_count == 0) {
 			return 0;
 		}
@@ -577,7 +577,6 @@ public:
 
 private:
 	bool FilterFSST(SelectionVector &sel, Vector &vector, const idx_t count, idx_t &result_count) {
-
 		if (vector.GetVectorType() != VectorType::FSST_VECTOR) {
 			return false;
 		}

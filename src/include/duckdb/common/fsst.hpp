@@ -102,8 +102,7 @@ public:
 		}
 		// sort each bucket by descending length so the first match is the longest
 		for (auto &bucket : buckets) {
-			std::sort(bucket.begin(), bucket.end(),
-			          [](const Symbol &a, const Symbol &b) { return a.len > b.len; });
+			std::sort(bucket.begin(), bucket.end(), [](const Symbol &a, const Symbol &b) { return a.len > b.len; });
 		}
 	}
 

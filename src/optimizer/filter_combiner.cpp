@@ -490,9 +490,9 @@ FilterPushdownResult FilterCombiner::TryPushdownContainsFilter(TableFilterSet &t
 	constexpr float CONTAINS_PREFILTER_SELECTIVITY_THRESHOLD = 0.5f;
 	constexpr idx_t CONTAINS_PREFILTER_VECTORS_TO_CHECK = 10;
 	auto filter_idx = column_ref.Binding().column_index;
-	auto prefilter_expr =
-	    CreateContainsPrefilterExpression(std::move(needle), column_ref.GetReturnType(),
-	                                      CONTAINS_PREFILTER_SELECTIVITY_THRESHOLD, CONTAINS_PREFILTER_VECTORS_TO_CHECK);
+	auto prefilter_expr = CreateContainsPrefilterExpression(std::move(needle), column_ref.GetReturnType(),
+	                                                        CONTAINS_PREFILTER_SELECTIVITY_THRESHOLD,
+	                                                        CONTAINS_PREFILTER_VECTORS_TO_CHECK);
 	table_filters.PushFilter(filter_idx, make_uniq<ExpressionFilter>(std::move(prefilter_expr)));
 	return FilterPushdownResult::NO_PUSHDOWN;
 }

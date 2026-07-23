@@ -489,7 +489,7 @@ idx_t ColumnSegment::FilterSelection(SelectionVector &sel, Vector &vector, Unifi
 // Isolated (noinline) so the FSST equality fast path shows up as its own frame in a flamegraph.
 // Returns true if it handled the filter (equality on an FSST-compressed column).
 static bool FSSTEqualityFilter(SelectionVector &sel, Vector &vector, const Expression &expr,
-                                                         idx_t &approved_tuple_count) {
+                               idx_t &approved_tuple_count) {
 	if (!BoundComparisonExpression::IsComparison(expr) || expr.GetExpressionType() != ExpressionType::COMPARE_EQUAL) {
 		return false;
 	}

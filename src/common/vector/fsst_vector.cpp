@@ -68,8 +68,8 @@ buffer_ptr<VectorBuffer> VectorFSSTStringBuffer::FlattenSliceInternal(const Logi
 		}
 		auto compressed_string = GetVarBinary(source_idx); // replace with 	auto view = GetVarBinary(index);
 		if (compressed_string.length > 0) {
-			result_data[target_idx] = FSSTPrimitives::DecompressValue(
-			    decoder, str_allocator, compressed_string.ptr, compressed_string.length);
+			result_data[target_idx] = FSSTPrimitives::DecompressValue(decoder, str_allocator, compressed_string.ptr,
+			                                                          compressed_string.length);
 		} else {
 			// empty string
 			result_data[target_idx] = string_t(nullptr, 0);
@@ -105,7 +105,7 @@ string FSSTVector::SymbolTableToString(const Vector &vector) {
 }
 
 void FSSTVector::PrintSymbolTable(const Vector &vector) {
-	printf("%s",SymbolTableToString(vector).c_str());
+	printf("%s", SymbolTableToString(vector).c_str());
 }
 
 var_binary_t FSSTVector::GetCompressedString(const Vector &vector, idx_t index) {
