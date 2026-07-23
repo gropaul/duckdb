@@ -562,15 +562,11 @@ public:
 		}
 		const auto before_count = approved_tuple_count;
 		idx_t result_count;
-		if () {
-			if (!FilterFSST(sel, vector, before_count, result_count)) {
-				// no usable chain for this symbol table - pass everything through
-				return approved_tuple_count;
-			}
-		} else if (vector.GetVectorType() == VectorType::FLAT_VECTOR) {
+		const bool fsst_executable = FilterFSST(sel, vector, before_count, result_count);
+
+		if (!fsst_executable) {
+			vector.Flatten();
 			result_count = FilterFlat(sel, vector, before_count);
-		} else {
-			return approved_tuple_count;
 		}
 		if (stats) {
 			stats->Update(result_count, before_count);
@@ -580,8 +576,12 @@ public:
 	}
 
 private:
-	bool FilterFSST(SelectionVector &sel, Vector &vector, idx_t count, idx_t &result_count) {
-		auto decoder = FSSTVector::GetDecoder(vector);
+	bool FilterFSST(SelectionVector &sel, Vector &vector, const idx_t count, idx_t &result_count) {
+
+		if (vector.GetVectorType() != VectorType::FSST_VECTOR) {
+			return false;
+		}
+		const auto decoder = FSSTVector::GetDecoder(vector);
 		if (!decoder) {
 			return false;
 		}
