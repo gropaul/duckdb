@@ -12,6 +12,24 @@ VectorFSSTStringBuffer::VectorFSSTStringBuffer(capacity_t capacity, idx_t auxili
 	vector_type = VectorType::FSST_VECTOR;
 }
 
+VectorFSSTStringBuffer::VectorFSSTStringBuffer(const VectorFSSTStringBuffer &source, count_t count)
+    : VariableBinaryBuffer(source, count) {
+	buffer_type = VectorBufferType::FSST_BUFFER;
+	vector_type = VectorType::FSST_VECTOR;
+	duckdb_fsst_decoder = source.duckdb_fsst_decoder;
+	fsst_encoder = source.fsst_encoder;
+	decompress_buffer.resize(source.decompress_buffer.size());
+}
+
+VectorFSSTStringBuffer::VectorFSSTStringBuffer(const VectorFSSTStringBuffer &source, count_t count, idx_t offset)
+    : VariableBinaryBuffer(source, count, offset) {
+	buffer_type = VectorBufferType::FSST_BUFFER;
+	vector_type = VectorType::FSST_VECTOR;
+	duckdb_fsst_decoder = source.duckdb_fsst_decoder;
+	fsst_encoder = source.fsst_encoder;
+	decompress_buffer.resize(source.decompress_buffer.size());
+}
+
 VectorFSSTStringBuffer::~VectorFSSTStringBuffer() {
 }
 
@@ -49,33 +67,96 @@ Value VectorFSSTStringBuffer::GetValue(const LogicalType &type, idx_t index) con
 	}
 }
 
-buffer_ptr<VectorBuffer> VectorFSSTStringBuffer::FlattenSliceInternal(const LogicalType &type,
-                                                                      const SelectionVector &sel, idx_t count) const {
+template <bool SEL_IS_IDENTITY, bool SRC_HAS_INVALIDS>
+buffer_ptr<VectorBuffer> VectorFSSTStringBuffer::FlattenSliceTemplated(const SelectionVector &sel,
+                                                                       idx_t count) const {
 	auto result = make_buffer<VectorStringBuffer>(capacity_t(count));
 
 	auto result_data = reinterpret_cast<string_t *>(result->GetData());
 	auto &str_allocator = result->GetStringAllocator();
-	auto decoder = GetDecoder();
+	const auto decoder = GetDecoder();
 	auto &src_mask = GetValidityMask();
 	auto &dst_mask = result->GetValidityMask();
-	for (idx_t i = 0; i < count; i++) {
-		auto source_idx = sel.get_index(i);
-		auto target_idx = i;
-		if (!src_mask.RowIsValid(source_idx)) {
+	for (idx_t idx = 0; idx < count; idx++) {
+		const idx_t sel_idx = SEL_IS_IDENTITY ? idx : sel.get_index_unsafe(idx);
+		if (SRC_HAS_INVALIDS && !src_mask.RowIsValid(sel_idx)) {
 			// NULL value
-			dst_mask.SetInvalid(target_idx);
+			dst_mask.SetInvalid(idx);
 			continue;
 		}
-		auto compressed_string = GetVarBinary(source_idx); // replace with 	auto view = GetVarBinary(index);
+		auto compressed_string = GetVarBinary(sel_idx);
 		if (compressed_string.length > 0) {
-			result_data[target_idx] = FSSTPrimitives::DecompressValue(decoder, str_allocator, compressed_string.ptr,
-			                                                          compressed_string.length);
+			result_data[idx] = FSSTPrimitives::DecompressValue(decoder, str_allocator, compressed_string.ptr,
+			                                                   compressed_string.length);
 		} else {
 			// empty string
-			result_data[target_idx] = string_t(nullptr, 0);
+			result_data[idx] = string_t(nullptr, 0);
 		}
 	}
 	result->SetVectorSize(count);
+	return result;
+}
+
+buffer_ptr<VectorBuffer> VectorFSSTStringBuffer::FlattenSliceInternal(const LogicalType &type,
+                                                                      const SelectionVector &sel, idx_t count) const {
+	const bool sel_is_identity = !sel.IsSet();
+	const bool src_has_invalids = GetValidityMask().CanHaveNull();
+	if (sel_is_identity) {
+		if (src_has_invalids) {
+			return FlattenSliceTemplated<true, true>(sel, count);
+		}
+		return FlattenSliceTemplated<true, false>(sel, count);
+	}
+	if (src_has_invalids) {
+		return FlattenSliceTemplated<false, true>(sel, count);
+	}
+	return FlattenSliceTemplated<false, false>(sel, count);
+}
+
+buffer_ptr<VectorBuffer> VectorFSSTStringBuffer::SliceInternal(const LogicalType &type, idx_t offset, idx_t end) {
+	D_ASSERT(end <= Size());
+	if (offset == 0 && end == Size()) {
+		// full-range slice: keep the current buffer
+		return nullptr;
+	}
+	// zero-copy range view: shares the byte buffer and the shifted offsets/lengths sub-arrays
+	auto count = end - offset;
+	auto result = make_buffer<VectorFSSTStringBuffer>(*this, count_t(count), offset);
+	result->GetValidityMask().Slice(GetValidityMask(), offset, count);
+	result->AddAuxiliaryData(make_uniq<VectorBufferHolder>(shared_from_this()));
+	return result;
+}
+
+buffer_ptr<VectorBuffer> VectorFSSTStringBuffer::SliceInternal(const LogicalType &type, const SelectionVector &sel,
+                                                               idx_t count) {
+	if (!sel.IsSet()) {
+		// incremental selection: slice the range [0, count) directly
+		return SliceInternal(type, idx_t(0), count);
+	}
+
+	// slice view: share the byte buffer, gather the selected offsets/lengths into the fresh arrays
+	auto result = make_buffer<VectorFSSTStringBuffer>(*this, count_t(count));
+	auto new_offsets = result->GetOffsets();
+	auto new_lengths = result->GetLengths();
+	const auto old_offsets = GetOffsets();
+	const auto old_lengths = GetLengths();
+	for (idx_t i = 0; i < count; i++) {
+		const auto source_idx = sel.get_index(i);
+		new_offsets[i] = old_offsets[source_idx];
+		new_lengths[i] = old_lengths[source_idx];
+	}
+	// only remap validity when the source has nulls, and only write bits for the null rows: an all-valid
+	// selection (e.g. survivors of an equality/IN filter, which never match NULL) leaves the mask unset
+	auto &src_mask = GetValidityMask();
+	if (src_mask.CanHaveNull()) {
+		auto &dst_mask = result->GetValidityMask();
+		for (idx_t i = 0; i < count; i++) {
+			if (!src_mask.RowIsValid(sel.get_index(i))) {
+				dst_mask.SetInvalid(i);
+			}
+		}
+	}
+	result->AddAuxiliaryData(make_uniq<VectorBufferHolder>(shared_from_this()));
 	return result;
 }
 
@@ -112,12 +193,8 @@ var_binary_t FSSTVector::GetCompressedString(const Vector &vector, idx_t index) 
 	return GetFSSTBuffer(vector).GetVarBinary(index);
 }
 
-const char *FSSTVector::GetBasePointer(const Vector &vector) {
-	return const_char_ptr_cast(GetFSSTBuffer(vector).GetBytes());
-}
-
-const int32_t *FSSTVector::GetOffsets(const Vector &vector) {
-	return GetFSSTBuffer(vector).GetOffsets();
+var_binary_view_t FSSTVector::GetDataView(const Vector &vector) {
+	return GetFSSTBuffer(vector).GetView();
 }
 
 string FSSTVector::CompressValue(const Vector &vector, const char *input, idx_t input_len) {

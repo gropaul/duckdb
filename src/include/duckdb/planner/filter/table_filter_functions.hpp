@@ -71,7 +71,7 @@ unique_ptr<Expression> CreateSelectivityOptionalFilterExpression(unique_ptr<Expr
                                                                  float selectivity_threshold, idx_t n_vectors_to_check);
 unique_ptr<Expression> CreateDynamicFilterExpression(shared_ptr<DynamicFilterData> filter_data,
                                                      const LogicalType &target_type);
-unique_ptr<Expression> CreateContainsPrefilterExpression(string needle, const LogicalType &target_type,
+unique_ptr<Expression> CreateContainsPrefilterExpression(vector<string> needles, const LogicalType &target_type,
                                                          float selectivity_threshold, idx_t n_vectors_to_check);
 
 //! Bind function that prevents user access to internal tablefilter functions
@@ -186,12 +186,14 @@ struct PrefixRangeFunctionData : public FunctionData {
 };
 
 //! FunctionData for the contains prefilter internal function. A pure prefilter with false
-//! positives: rows that survive still need the exact contains check downstream.
+//! positives: a row survives if it can contain ANY of the needles, and surviving rows still
+//! need the exact check downstream.
 struct ContainsPrefilterFunctionData : public FunctionData {
-	ContainsPrefilterFunctionData(string needle_p, float selectivity_threshold_p, idx_t n_vectors_to_check_p);
+	ContainsPrefilterFunctionData(vector<string> needles_p, float selectivity_threshold_p,
+	                              idx_t n_vectors_to_check_p);
 
-	//! The contains needle; empty after deserialization, degrading the filter to always-true.
-	string needle;
+	//! The contains needles; empty after deserialization, degrading the filter to always-true.
+	vector<string> needles;
 	float selectivity_threshold;
 	idx_t n_vectors_to_check;
 
@@ -270,7 +272,7 @@ struct ContainsPrefilterScalarFun : public TableFilterContainsPrefilterFun {
 	static constexpr idx_t MIN_NEEDLE_LENGTH = 4;
 	static ScalarFunction GetFunction(const LogicalType &input_type);
 	static FilterPropagateResult FilterPrune(const FunctionStatisticsPruneInput &input);
-	static string ToString(const string &column_name, const string &needle);
+	static string ToString(const string &column_name, const vector<string> &needles);
 };
 
 //! Factory for prefix range internal function

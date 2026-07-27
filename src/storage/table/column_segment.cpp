@@ -467,13 +467,7 @@ static idx_t ExecuteExpressionFilterSelection(SelectionVector &sel, Vector &vect
 		DataChunk chunk;
 		chunk.data.emplace_back(Vector::Ref(vector));
 		chunk.SetChildCardinality(scan_count);
-		SelectionVector identity_sel;
-		optional_ptr<SelectionVector> current_sel = &sel;
-		if (!sel.IsSet()) {
-			identity_sel = SelectionVector::Incremental(approved_tuple_count);
-			current_sel = &identity_sel;
-		}
-		approved_tuple_count = state.executor->SelectExpression(chunk, result_sel, current_sel, approved_tuple_count);
+		approved_tuple_count = state.executor->SelectExpression(chunk, result_sel, sel, approved_tuple_count);
 	}
 	sel.Initialize(result_sel);
 	return approved_tuple_count;
@@ -486,59 +480,9 @@ idx_t ColumnSegment::FilterSelection(SelectionVector &sel, Vector &vector, Unifi
 	return FilterSelection(sel, vector, filter_state, scan_count, approved_tuple_count);
 }
 
-// Isolated (noinline) so the FSST equality fast path shows up as its own frame in a flamegraph.
-// Returns true if it handled the filter (equality on an FSST-compressed column).
-static bool FSSTEqualityFilter(SelectionVector &sel, Vector &vector, const Expression &expr,
-                               idx_t &approved_tuple_count) {
-	if (!BoundComparisonExpression::IsComparison(expr) || expr.GetExpressionType() != ExpressionType::COMPARE_EQUAL) {
-		return false;
-	}
-	auto &comp = expr.Cast<BoundFunctionExpression>();
-	auto &comp_left = BoundComparisonExpression::Left(comp);
-	auto &comp_right = BoundComparisonExpression::Right(comp);
-	Value val;
-	bool left_is_ref = comp_left.GetExpressionClass() == ExpressionClass::BOUND_REF;
-	bool right_is_ref = comp_right.GetExpressionClass() == ExpressionClass::BOUND_REF;
-	if (comp_right.GetExpressionType() == ExpressionType::VALUE_CONSTANT && left_is_ref) {
-		val = comp_right.Cast<BoundConstantExpression>().GetValue();
-	} else if (comp_left.GetExpressionType() == ExpressionType::VALUE_CONSTANT && right_is_ref) {
-		val = comp_left.Cast<BoundConstantExpression>().GetValue();
-	}
-
-	auto uncompressed = StringValue::Get(val);
-	auto compressed = FSSTVector::CompressValue(vector, uncompressed.data(), uncompressed.size());
-	string_t target_str(compressed);
-	auto binary_target = var_binary_t::FromString(target_str);
-
-	SelectionVector result_sel(approved_tuple_count);
-	idx_t result_count = 0;
-	const auto *base = FSSTVector::GetBasePointer(vector);
-	const auto *offsets = FSSTVector::GetOffsets(vector);
-	for (idx_t idx = 0; idx < approved_tuple_count; idx++) {
-		auto sel_idx = sel.get_index(idx);
-		const int32_t start = offsets[sel_idx + 1];
-		const int32_t end = offsets[sel_idx];
-		const var_binary_t row {base + start, idx_t(end - start)};
-		const bool eq = row == binary_target;
-		result_sel.set_index(result_count, sel_idx);
-		result_count += eq;
-	}
-	sel.Initialize(result_sel);
-	approved_tuple_count = result_count;
-	return true;
-}
-
 idx_t ColumnSegment::FilterSelection(SelectionVector &sel, Vector &vector, TableFilterState &filter_state,
                                      idx_t scan_count, idx_t &approved_tuple_count) {
 	auto &state = filter_state.Cast<ExpressionFilterState>();
-
-	// hacky implementation of the fsst eq filter
-	if (vector.GetVectorType() == VectorType::FSST_VECTOR) {
-		auto &expr = state.executor->expressions[0];
-		if (FSSTEqualityFilter(sel, vector, *expr, approved_tuple_count)) {
-			return approved_tuple_count;
-		}
-	}
 
 	if (state.fast_executor && scan_count <= STANDARD_VECTOR_SIZE) {
 		return state.fast_executor->FilterSelection(sel, vector, scan_count, approved_tuple_count);

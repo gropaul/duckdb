@@ -603,19 +603,18 @@ void CopyCompressedBlock(data_ptr_t dest, const_data_ptr_t src, idx_t block_size
 	memcpy(dest, src, block_size);
 }
 
-void PopulateOffsets(int32_t *offsets, const uint32_t *delta_decode, idx_t unused_values_offset, uint32_t block_top,
-                     idx_t block_size, idx_t scan_count, idx_t index_base) {
+void PopulateOffsets(int32_t *offsets, uint32_t *lengths, const uint32_t *delta_decode, const uint32_t *row_lengths,
+                     idx_t unused_values_offset, uint32_t block_top, idx_t block_size, idx_t scan_count,
+                     idx_t index_base) {
 	// The new block sits at the front of the byte buffer ([0, block_size)), so positions are relative to 0.
-	// index_base is 0 for a new vector; when appending it is the existing value count, and offsets[index_base] is
-	// already the block's top boundary (Grow shifted it there), so we only fill [index_base + 1 ..].
-	// No loop-carried dependency - each entry depends only on its own delta_decode value, so this vectorizes.
-	if (index_base == 0) {
-		offsets[0] = UnsafeNumericCast<int32_t>(block_size);
-	}
+	// index_base is 0 for a new vector; when appending it is the existing value count (Grow already shifted
+	// the existing offsets up). No loop-carried dependency - each entry depends only on its own delta_decode
+	// value, so this vectorizes.
 	for (idx_t i = 0; i < scan_count; i++) {
 		const uint32_t cur_end = delta_decode[unused_values_offset + i] - block_top;
-		offsets[index_base + i + 1] = UnsafeNumericCast<int32_t>(block_size - cur_end);
+		offsets[index_base + i] = UnsafeNumericCast<int32_t>(block_size - cur_end);
 	}
+	memcpy(lengths + index_base, row_lengths, sizeof(uint32_t) * scan_count);
 }
 
 //===--------------------------------------------------------------------===//
@@ -709,13 +708,14 @@ void FSSTStorage::StringScanPartial(ColumnSegment &segment, ColumnScanState &sta
 		}
 
 		// The scanned rows' compressed strings are one contiguous block in the dictionary. Copy the whole block to the
-		// front, then fill the descending physical offsets (relative to block_top) so reads need no arithmetic.
+		// front, then fill the per-row offsets and lengths (relative to block_top) so reads need no arithmetic.
 		auto &fsst_buffer = FSSTVector::GetFSSTBuffer(result);
 		auto src = FetchStringPointer(dict, baseptr, UnsafeNumericCast<int32_t>(block_bottom));
 
 		CopyCompressedBlock(fsst_buffer.GetBytes(), const_data_ptr_cast(src), block_size);
-		PopulateOffsets(fsst_buffer.GetOffsets(), string_offsets.get(), unused_values_offset, block_top, block_size,
-		                scan_count, index_base);
+		PopulateOffsets(fsst_buffer.GetOffsets(), fsst_buffer.GetLengths(), string_offsets.get(),
+		                bitunpack_buffer.get() + decode_offsets.scan_offset, unused_values_offset, block_top,
+		                block_size, scan_count, index_base);
 	} else {
 		D_ASSERT(result.GetVectorType() == VectorType::FLAT_VECTOR);
 		string_t *result_data = FlatVector::GetDataMutable<string_t>(result);

@@ -1,10 +1,12 @@
 #include "duckdb/planner/table_filter_state.hpp"
+#include "duckdb/common/limits.hpp"
 #include "duckdb/common/operator/comparison_operators.hpp"
-#include "duckdb/common/simd_utils.hpp"
+#include "duckdb/planner/filter/prefilter.hpp"
 #include "duckdb/common/vector_operations/vector_operations.hpp"
 #include "duckdb/common/vector/constant_vector.hpp"
 #include "duckdb/common/vector/dictionary_vector.hpp"
 #include "duckdb/common/vector/flat_vector.hpp"
+#include "duckdb/common/vector/fsst_ops.hpp"
 #include "duckdb/common/vector/fsst_vector.hpp"
 #include "duckdb/storage/compression/fsst/fsst_mandatory_chain.hpp"
 #include "duckdb/planner/expression/bound_conjunction_expression.hpp"
@@ -177,6 +179,8 @@ public:
 		const auto before_count = approved_tuple_count;
 		if (constant.IsNull()) {
 			approved_tuple_count = 0;
+		} else if (TryFSSTSelect(sel, vector, approved_tuple_count)) {
+			// handled on the compressed data directly
 		} else {
 			UnifiedVectorFormat vdata;
 			vector.ToUnifiedFormat(vdata);
@@ -190,6 +194,31 @@ public:
 	}
 
 private:
+	//! Evaluate eq/neq against an FSST vector on the compressed data; returns false if the shape does not match
+	bool TryFSSTSelect(SelectionVector &sel, Vector &vector, idx_t &approved_tuple_count) {
+		if (vector.GetVectorType() != VectorType::FSST_VECTOR) {
+			return false;
+		}
+		if (comparison_type != ExpressionType::COMPARE_EQUAL && comparison_type != ExpressionType::COMPARE_NOTEQUAL) {
+			return false;
+		}
+		Vector constant_vector(constant, count_t(1));
+		auto &current_sel = sel.IsSet() ? sel : *FlatVector::IncrementalSelectionVector();
+		idx_t match_count;
+		bool handled;
+		if (comparison_type == ExpressionType::COMPARE_EQUAL) {
+			handled = FSSTOps::TryEquals(vector, constant_vector, &current_sel, approved_tuple_count, &result_sel,
+			                             nullptr, nullptr, match_count);
+		} else {
+			handled = FSSTOps::TryNotEquals(vector, constant_vector, &current_sel, approved_tuple_count, &result_sel,
+			                                nullptr, nullptr, match_count);
+		}
+		if (handled) {
+			approved_tuple_count = match_count;
+		}
+		return handled;
+	}
+
 	template <class T, class OP, bool CAN_HAVE_NULL>
 	idx_t TemplatedSelect(const UnifiedVectorFormat &vdata, T predicate, const SelectionVector &sel,
 	                      idx_t approved_tuple_count) {
@@ -558,15 +587,30 @@ private:
 	unique_ptr<SelectivityOptionalFilterState::SelectivityStats> stats;
 };
 
-// Contains prefilter: one k_vert_u32 scan per vector, dropping rows that definitely do not
-// contain the needle. On FSST vectors it scans the compressed codes for the first CODE_LEN codes
-// of the needle's mandatory chain; on flat vectors it scans for the needle's CODE_LEN-byte prefix.
-// Survivors have false positives and anything the kernel cannot handle passes through untouched -
-// the exact contains downstream is the correctness authority.
+// Contains prefilter: one PrefilterContainsAny scan per vector, dropping rows that definitely
+// cannot contain ANY of the needles. On FSST vectors it scans the compressed codes for the first
+// codes of each needle's mandatory chain - 4 codes when every needle has a chain that long,
+// falling back to 2 codes otherwise. On flat vectors it scans for each needle's 4-byte prefix.
+// The targets are precomputed - per needle at construction for the flat path, per decoder for
+// the chain path. Survivors have false positives and anything the kernel cannot handle passes
+// through untouched - the exact filter downstream is the correctness authority.
 class ContainsPrefilterExecutor final : public ExpressionFilterExecutor {
 public:
+	static constexpr idx_t FLAT_TARGET_LEN = sizeof(uint32_t);
+	static constexpr idx_t CHAIN_TARGET_LEN_U16 = sizeof(uint16_t);
+
 	ContainsPrefilterExecutor(const ContainsPrefilterFunctionData &data, bool inside_selectivity_optional)
-	    : needle(data.needle) {
+	    : needles(data.needles) {
+		for (auto &needle : needles) {
+			if (needle.size() < FLAT_TARGET_LEN) {
+				// unusable needle set (e.g. after deserialization): degrade to always-true
+				flat_targets.clear();
+				break;
+			}
+			uint32_t target;
+			memcpy(&target, needle.data(), FLAT_TARGET_LEN);
+			flat_targets.push_back(target);
+		}
 		if (!inside_selectivity_optional && data.n_vectors_to_check != 0) {
 			stats = make_uniq<SelectivityOptionalFilterState::SelectivityStats>(data.n_vectors_to_check,
 			                                                                    data.selectivity_threshold);
@@ -578,7 +622,7 @@ public:
 		if (approved_tuple_count == 0) {
 			return 0;
 		}
-		if (needle.size() < CODE_LEN) {
+		if (flat_targets.empty()) {
 			return approved_tuple_count;
 		}
 		if (stats && !stats->IsActive()) {
@@ -590,8 +634,12 @@ public:
 		const bool fsst_executable = FilterFSST(sel, vector, before_count, result_count);
 
 		if (!fsst_executable) {
-			vector.Flatten();
-			result_count = FilterFlat(sel, vector, before_count);
+			if (vector.GetVectorType() == VectorType::FLAT_VECTOR) {
+				result_count = FilterFlat(sel, vector, before_count);
+			} else {
+				// don't decompress, hope that later filter will take this out.
+				return approved_tuple_count;
+			}
 		}
 		if (stats) {
 			stats->Update(result_count, before_count);
@@ -610,30 +658,60 @@ private:
 			return false;
 		}
 		if (decoder != cached_decoder) {
-			cached_chain = FSSTMandatoryChain(decoder, needle.data(), needle.size());
+			ComputeChainTargets(decoder);
 			cached_decoder = decoder;
 		}
-		if (cached_chain.size() < CODE_LEN) {
+		if (cached_chain_targets_u32.empty() && cached_chain_targets_u16.empty()) {
 			return false;
 		}
-		char pattern[CODE_LEN];
-		memcpy(pattern, cached_chain.data(), CODE_LEN);
 		PrepareCapacity(count);
-		const auto base = FSSTVector::GetBasePointer(vector);
-		const auto offsets = FSSTVector::GetOffsets(vector);
+		const auto view = FSSTVector::GetDataView(vector);
 		auto &validity = FSSTVector::Validity(vector);
-		result_count = k_vert_u32(base, offsets, validity, sel, result_sel, count, pattern);
+		if (!cached_chain_targets_u32.empty()) {
+			result_count = PrefilterContainsAny(view, validity, sel, result_sel, count,
+			                                    cached_chain_targets_u32.data(), cached_chain_targets_u32.size());
+		} else {
+			result_count = PrefilterContainsAny(view, validity, sel, result_sel, count,
+			                                    cached_chain_targets_u16.data(), cached_chain_targets_u16.size());
+		}
 		sel.Initialize(result_sel);
 		return true;
 	}
 
+	void ComputeChainTargets(void *decoder) {
+		cached_chain_targets_u32.clear();
+		cached_chain_targets_u16.clear();
+		vector<vector<uint8_t>> chains;
+		idx_t min_chain_size = NumericLimits<idx_t>::Maximum();
+		for (auto &needle : needles) {
+			chains.push_back(FSSTMandatoryChain(decoder, needle.data(), needle.size()));
+			min_chain_size = MinValue<idx_t>(min_chain_size, chains.back().size());
+		}
+		// OR semantics: every needle must be covered by a target of the same width, so the
+		// shortest chain picks the width. Prefer 4 codes (fewer false positives); fall back to
+		// 2 codes when any chain is shorter. Below 2 codes a row matching that needle may carry
+		// no detectable chain at all - the whole needle set is unusable for this symbol table.
+		if (min_chain_size >= sizeof(uint32_t)) {
+			for (auto &chain : chains) {
+				uint32_t target;
+				memcpy(&target, chain.data(), sizeof(uint32_t));
+				cached_chain_targets_u32.push_back(target);
+			}
+		} else if (min_chain_size >= CHAIN_TARGET_LEN_U16) {
+			for (auto &chain : chains) {
+				uint16_t target;
+				memcpy(&target, chain.data(), CHAIN_TARGET_LEN_U16);
+				cached_chain_targets_u16.push_back(target);
+			}
+		}
+	}
+
 	idx_t FilterFlat(SelectionVector &sel, Vector &vector, idx_t count) {
-		char pattern[CODE_LEN];
-		memcpy(pattern, needle.data(), CODE_LEN);
 		PrepareCapacity(count);
 		const auto strings = FlatVector::GetData<string_t>(vector);
 		auto &validity = FlatVector::Validity(vector);
-		const auto result_count = k_vert_u32(strings, validity, sel, result_sel, count, pattern);
+		const auto result_count =
+		    PrefilterContainsAny(strings, validity, sel, result_sel, count, flat_targets.data(), flat_targets.size());
 		sel.Initialize(result_sel);
 		return result_count;
 	}
@@ -646,10 +724,16 @@ private:
 		current_capacity = count;
 	}
 
-	string needle;
-	//! Mandatory chain cache, keyed on the segment's decoder
+	vector<string> needles;
+	//! Per-needle kernel targets for the flat path (first 4 bytes of each needle);
+	//! empty when the needle set is unusable
+	vector<uint32_t> flat_targets;
+	//! Per-needle chain targets for the compressed path, keyed on the segment's decoder.
+	//! At most one width is populated; both empty when any needle has no usable chain
+	//! for this symbol table.
 	void *cached_decoder = nullptr;
-	vector<uint8_t> cached_chain;
+	vector<uint32_t> cached_chain_targets_u32;
+	vector<uint16_t> cached_chain_targets_u16;
 	SelectionVector result_sel;
 	idx_t current_capacity = 0;
 	unique_ptr<SelectivityOptionalFilterState::SelectivityStats> stats;

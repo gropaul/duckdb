@@ -70,7 +70,6 @@ add_library_unity(
   radix_partitioning.cpp
   re2_regex.cpp
   random_engine.cpp
-  simd_utils.cpp
   stacktrace.cpp
   string_util.cpp
   enum_util.cpp

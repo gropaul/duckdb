@@ -18,6 +18,12 @@ class FSSTEncoder;
 class VectorFSSTStringBuffer : public VariableBinaryBuffer {
 public:
 	VectorFSSTStringBuffer(capacity_t capacity, idx_t auxiliary_size);
+	//! Slice view sharing source's byte buffer, with fresh offsets/lengths arrays for the caller to gather into.
+	//! The caller must keep source alive via auxiliary data.
+	VectorFSSTStringBuffer(const VectorFSSTStringBuffer &source, count_t count);
+	//! Range view sharing source's byte buffer and offsets/lengths (shifted by offset), fully zero-copy.
+	//! The caller must keep source alive via auxiliary data.
+	VectorFSSTStringBuffer(const VectorFSSTStringBuffer &source, count_t count, idx_t offset);
 	~VectorFSSTStringBuffer() override;
 
 public:
@@ -43,7 +49,13 @@ public:
 protected:
 	buffer_ptr<VectorBuffer> FlattenSliceInternal(const LogicalType &type, const SelectionVector &sel,
 	                                              idx_t count) const override;
+	buffer_ptr<VectorBuffer> SliceInternal(const LogicalType &type, idx_t offset, idx_t end) override;
+	buffer_ptr<VectorBuffer> SliceInternal(const LogicalType &type, const SelectionVector &sel, idx_t count) override;
 	void VerifyInternal(const LogicalType &type, const SelectionVector &sel, idx_t count) const override;
+
+private:
+	template <bool SEL_IS_IDENTITY, bool SRC_HAS_INVALIDS>
+	buffer_ptr<VectorBuffer> FlattenSliceTemplated(const SelectionVector &sel, idx_t count) const;
 
 private:
 	buffer_ptr<void> duckdb_fsst_decoder;
@@ -87,17 +99,13 @@ struct FSSTVector {
 	DUCKDB_API static void PrintSymbolTable(const Vector &vector);
 	//! Raw compressed bytes + length of value index (points into the byte buffer; no copy)
 	DUCKDB_API static var_binary_t GetCompressedString(const Vector &vector, idx_t index);
-	//! Base of the compressed byte buffer. Fetch once, then index with GetOffsets to avoid per-value buffer lookups.
-	DUCKDB_API static const char *GetBasePointer(const Vector &vector);
-	//! Descending physical offsets (capacity + 1 entries); value i = base[offsets[i + 1] : offsets[i]]
-	DUCKDB_API static const int32_t *GetOffsets(const Vector &vector);
+	//! Positional view over the compressed data (base + offsets + lengths); fetch once, then read
+	//! values with view.GetVarBinary(i). Valid for sliced and unsliced vectors alike.
+	DUCKDB_API static var_binary_view_t GetDataView(const Vector &vector);
+	//! The FSST buffer of the vector
+	DUCKDB_API static VectorFSSTStringBuffer &GetFSSTBuffer(const Vector &vector);
 	//! Compress a string using the vector's symbol table, returning the compressed bytes.
 	DUCKDB_API static string CompressValue(const Vector &vector, const char *input, idx_t input_len);
-
-private:
-	//! FSSTStorage fills the buffer with compressed bytes + offsets during scan
-	friend struct FSSTStorage;
-	static VectorFSSTStringBuffer &GetFSSTBuffer(const Vector &vector);
 };
 
 } // namespace duckdb

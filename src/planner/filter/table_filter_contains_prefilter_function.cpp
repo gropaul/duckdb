@@ -15,23 +15,23 @@
 
 namespace duckdb {
 
-ContainsPrefilterFunctionData::ContainsPrefilterFunctionData(string needle_p, float selectivity_threshold_p,
+ContainsPrefilterFunctionData::ContainsPrefilterFunctionData(vector<string> needles_p, float selectivity_threshold_p,
                                                              idx_t n_vectors_to_check_p)
-    : needle(std::move(needle_p)), selectivity_threshold(selectivity_threshold_p),
+    : needles(std::move(needles_p)), selectivity_threshold(selectivity_threshold_p),
       n_vectors_to_check(n_vectors_to_check_p) {
 }
 
 unique_ptr<FunctionData> ContainsPrefilterFunctionData::Copy() const {
-	return make_uniq<ContainsPrefilterFunctionData>(needle, selectivity_threshold, n_vectors_to_check);
+	return make_uniq<ContainsPrefilterFunctionData>(needles, selectivity_threshold, n_vectors_to_check);
 }
 
 bool ContainsPrefilterFunctionData::Equals(const FunctionData &other_p) const {
 	auto &other = other_p.Cast<ContainsPrefilterFunctionData>();
-	return needle == other.needle;
+	return needles == other.needles;
 }
 
 // The prefilter is only useful at the scan level, where ContainsPrefilterExecutor runs the
-// k_vert_u32 kernel over the raw vector. Evaluated as a generic expression it would only
+// PrefilterContainsAny kernel over the raw vector. Evaluated as a generic expression it would only
 // duplicate the exact contains that follows anyway, so it is a no-op.
 static idx_t ContainsPrefilterSelect(DataChunk &args, ExpressionState &state, optional_ptr<const SelectionVector> sel,
                                      optional_ptr<SelectionVector> true_sel, optional_ptr<SelectionVector> false_sel) {
@@ -48,19 +48,23 @@ ScalarFunction ContainsPrefilterScalarFun::GetFunction(const LogicalType &input_
 	return func;
 }
 
-string ContainsPrefilterScalarFun::ToString(const string &column_name, const string &needle) {
-	return "contains_prefilter(" + column_name + ", '" + needle + "')";
+string ContainsPrefilterScalarFun::ToString(const string &column_name, const vector<string> &needles) {
+	string needle_list;
+	for (auto &needle : needles) {
+		needle_list += (needle_list.empty() ? "'" : ", '") + needle + "'";
+	}
+	return "contains_prefilter(" + column_name + ", [" + needle_list + "])";
 }
 
 FilterPropagateResult ContainsPrefilterScalarFun::FilterPrune(const FunctionStatisticsPruneInput &input) {
 	return FilterPropagateResult::NO_PRUNING_POSSIBLE;
 }
 
-unique_ptr<Expression> CreateContainsPrefilterExpression(string needle, const LogicalType &target_type,
+unique_ptr<Expression> CreateContainsPrefilterExpression(vector<string> needles, const LogicalType &target_type,
                                                          float selectivity_threshold, idx_t n_vectors_to_check) {
 	auto function = ContainsPrefilterScalarFun::GetFunction(target_type);
 	auto bind_data =
-	    make_uniq<ContainsPrefilterFunctionData>(std::move(needle), selectivity_threshold, n_vectors_to_check);
+	    make_uniq<ContainsPrefilterFunctionData>(std::move(needles), selectivity_threshold, n_vectors_to_check);
 	vector<unique_ptr<Expression>> arguments;
 	arguments.push_back(make_uniq<BoundReferenceExpression>(target_type, storage_t(0)));
 	return make_uniq<BoundFunctionExpression>(BoundScalarFunction(function), std::move(arguments),

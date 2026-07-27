@@ -7,6 +7,7 @@
 #include "duckdb/common/operator/comparison_operators.hpp"
 #include "duckdb/common/vector_operations/binary_executor.hpp"
 #include "duckdb/common/vector/flat_vector.hpp"
+#include "duckdb/common/vector/fsst_ops.hpp"
 #include "duckdb/common/vector/vector_iterator.hpp"
 
 namespace duckdb {
@@ -145,6 +146,9 @@ idx_t VectorOperations::Equals(const Vector &left, const Vector &right, optional
                                idx_t count, optional_ptr<SelectionVector> true_sel,
                                optional_ptr<SelectionVector> false_sel, optional_ptr<ValidityMask> null_mask) {
 	idx_t result;
+	if (FSSTOps::TryEquals(left, right, sel, count, true_sel, false_sel, null_mask, result)) {
+		return result;
+	}
 	if (TryPrimitiveSelectOperation<duckdb::Equals>(left, right, sel, count, true_sel, false_sel, null_mask, result)) {
 		return result;
 	}
@@ -156,6 +160,9 @@ idx_t VectorOperations::NotEquals(const Vector &left, const Vector &right, optio
                                   idx_t count, optional_ptr<SelectionVector> true_sel,
                                   optional_ptr<SelectionVector> false_sel, optional_ptr<ValidityMask> null_mask) {
 	idx_t result;
+	if (FSSTOps::TryNotEquals(left, right, sel, count, true_sel, false_sel, null_mask, result)) {
+		return result;
+	}
 	if (TryPrimitiveSelectOperation<duckdb::NotEquals>(left, right, sel, count, true_sel, false_sel, null_mask,
 	                                                   result)) {
 		return result;

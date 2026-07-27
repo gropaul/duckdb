@@ -452,45 +452,78 @@ FilterPushdownResult FilterCombiner::TryPushdownPrefixFilter(TableFilterSet &tab
 	return FilterPushdownResult::NO_PUSHDOWN;
 }
 
-// Push a contains prefilter for contains(col, 'needle'): an advisory filter with false positives
-// that self-pauses when unselective. Returns NO_PUSHDOWN so the generic expression pushdown still
-// pushes the exact contains into the scan as well - both then run there, prefilter first.
-FilterPushdownResult FilterCombiner::TryPushdownContainsFilter(TableFilterSet &table_filters,
-                                                               const vector<ColumnIndex> &column_ids,
-                                                               Expression &expr) {
+// Extract the needle of contains(col, 'needle'), returning the haystack column ref through
+// column_ref. Returns false for any other expression shape or a needle too short for the kernel.
+static bool TryGetContainsNeedle(Expression &expr, optional_ptr<BoundColumnRefExpression> &column_ref,
+                                 string &needle) {
 	if (expr.GetExpressionClass() != ExpressionClass::BOUND_FUNCTION) {
-		return FilterPushdownResult::NO_PUSHDOWN;
+		return false;
 	}
 	auto &func = expr.Cast<BoundFunctionExpression>();
 	if (func.Function().GetName() != "contains") {
-		return FilterPushdownResult::NO_PUSHDOWN;
+		return false;
 	}
 	auto &children = func.GetChildren();
 	if (children.size() != 2) {
-		return FilterPushdownResult::NO_PUSHDOWN;
+		return false;
 	}
 	// contains is not commutative: children[0] is the haystack column, children[1] the needle constant
 	if (children[0]->GetExpressionClass() != ExpressionClass::BOUND_COLUMN_REF ||
 	    children[1]->GetExpressionType() != ExpressionType::VALUE_CONSTANT) {
-		return FilterPushdownResult::NO_PUSHDOWN;
+		return false;
 	}
-	auto &column_ref = children[0]->Cast<BoundColumnRefExpression>();
-	if (column_ref.GetReturnType().id() != LogicalTypeId::VARCHAR) {
-		return FilterPushdownResult::NO_PUSHDOWN;
+	auto &ref = children[0]->Cast<BoundColumnRefExpression>();
+	if (ref.GetReturnType().id() != LogicalTypeId::VARCHAR) {
+		return false;
 	}
-	auto &constant_value_expr = children[1]->Cast<BoundConstantExpression>();
-	auto &needle_value = constant_value_expr.GetValue();
+	auto &needle_value = children[1]->Cast<BoundConstantExpression>().GetValue();
 	if (needle_value.IsNull() || needle_value.type().id() != LogicalTypeId::VARCHAR) {
-		return FilterPushdownResult::NO_PUSHDOWN;
+		return false;
 	}
-	auto needle = StringValue::Get(needle_value);
+	needle = StringValue::Get(needle_value);
 	if (needle.size() < ContainsPrefilterScalarFun::MIN_NEEDLE_LENGTH) {
+		return false;
+	}
+	column_ref = &ref;
+	return true;
+}
+
+// Push a contains prefilter for contains(col, 'needle') or for an OR where every branch is a
+// contains on the same column (the prefilter then drops rows matching no needle). The prefilter
+// is advisory with false positives and self-pauses when unselective. Returns NO_PUSHDOWN so the
+// generic expression pushdown still pushes the exact predicate into the scan as well - both then
+// run there, prefilter first.
+FilterPushdownResult FilterCombiner::TryPushdownContainsFilter(TableFilterSet &table_filters,
+                                                               const vector<ColumnIndex> &column_ids,
+                                                               Expression &expr) {
+	optional_ptr<BoundColumnRefExpression> column_ref;
+	vector<string> needles;
+	string needle;
+	if (TryGetContainsNeedle(expr, column_ref, needle)) {
+		needles.push_back(std::move(needle));
+	} else if (expr.GetExpressionClass() == ExpressionClass::BOUND_CONJUNCTION &&
+	           expr.GetExpressionType() == ExpressionType::CONJUNCTION_OR) {
+		// every OR branch must be a contains on the same column
+		auto &conjunction = expr.Cast<BoundConjunctionExpression>();
+		for (auto &child : conjunction.GetChildren()) {
+			optional_ptr<BoundColumnRefExpression> child_ref;
+			if (!TryGetContainsNeedle(*child, child_ref, needle)) {
+				return FilterPushdownResult::NO_PUSHDOWN;
+			}
+			if (column_ref && column_ref->Binding() != child_ref->Binding()) {
+				return FilterPushdownResult::NO_PUSHDOWN;
+			}
+			column_ref = child_ref;
+			needles.push_back(std::move(needle));
+		}
+	}
+	if (needles.empty()) {
 		return FilterPushdownResult::NO_PUSHDOWN;
 	}
 	constexpr float CONTAINS_PREFILTER_SELECTIVITY_THRESHOLD = 0.5f;
-	constexpr idx_t CONTAINS_PREFILTER_VECTORS_TO_CHECK = 10;
-	auto filter_idx = column_ref.Binding().column_index;
-	auto prefilter_expr = CreateContainsPrefilterExpression(std::move(needle), column_ref.GetReturnType(),
+	constexpr idx_t CONTAINS_PREFILTER_VECTORS_TO_CHECK = 6;
+	auto filter_idx = column_ref->Binding().column_index;
+	auto prefilter_expr = CreateContainsPrefilterExpression(std::move(needles), column_ref->GetReturnType(),
 	                                                        CONTAINS_PREFILTER_SELECTIVITY_THRESHOLD,
 	                                                        CONTAINS_PREFILTER_VECTORS_TO_CHECK);
 	table_filters.PushFilter(filter_idx, make_uniq<ExpressionFilter>(std::move(prefilter_expr)));

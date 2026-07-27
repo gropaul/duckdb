@@ -28,11 +28,24 @@ struct var_binary_t {
 	}
 };
 
-//! Stores variable-length binary values as a contiguous byte buffer plus a descending int32 offsets array.
-//! offsets holds physical byte positions (capacity + 1 entries): offsets[0] == total, offsets[capacity] == 0, and
-//! value i occupies byte_data[offsets[i + 1] : offsets[i]] (start = offsets[i+1], length = offsets[i] - offsets[i+1]).
-//! Values are stored REVERSED in the byte buffer (value 0 at the end, the last value at the front) because that is
-//! how they arrive from the dictionary block. Pre-sized at construction.
+//! A non-owning view of a whole VariableBinaryBuffer: fetch once, then read values positionally.
+//! Valid for sliced and unsliced buffers alike - logical row i is always base[offsets[i] : offsets[i] + lengths[i]].
+//! The source buffer must outlive the view.
+struct var_binary_view_t {
+	const char *base;
+	const int32_t *offsets;
+	const uint32_t *lengths;
+
+	inline var_binary_t GetVarBinary(idx_t index) const {
+		return {base + offsets[index], idx_t(lengths[index])};
+	}
+};
+
+//! Stores variable-length binary values as a contiguous byte buffer plus per-value int32 offsets and
+//! uint32 lengths arrays (capacity entries each): value i occupies byte_data[offsets[i] : offsets[i] + lengths[i]].
+//! Freshly scanned buffers are REVERSE-packed (value 0 at the end, the last value at the front) because that is
+//! how they arrive from the dictionary block, but nothing may rely on adjacency: a slice shares the byte buffer
+//! and simply gathers new offsets/lengths arrays. Pre-sized at construction.
 class VariableBinaryBuffer : public VectorBuffer {
 public:
 	//! element_count: number of values this buffer will hold (also the vector size - pre-sized, fully filled)
@@ -41,10 +54,35 @@ public:
 	                     Allocator &allocator = Allocator::DefaultAllocator())
 	    : VectorBuffer(VectorType::FLAT_VECTOR, VectorBufferType::VARIABLE_BINARY_BUFFER, count_t(element_count)),
 	      offset_data(allocator.Allocate(sizeof(int32_t) * (element_count + 1))),
+	      length_data(allocator.Allocate(sizeof(uint32_t) * (element_count + 1))),
 	      byte_data(allocator.Allocate(auxiliary_size == 0 ? 1 : auxiliary_size)), capacity(element_count) {
 		offsets = reinterpret_cast<int32_t *>(offset_data.get());
+		lengths = reinterpret_cast<uint32_t *>(length_data.get());
 		byte_data_ptr = byte_data.get();
 		validity.Resize(element_count);
+	}
+
+	//! Slice view constructor: shares the byte buffer of source without copying the payload.
+	//! Allocates fresh offsets/lengths arrays for count values; the caller fills them (or uses the
+	//! range variant below) and must keep source alive via auxiliary data.
+	VariableBinaryBuffer(const VariableBinaryBuffer &source, count_t count,
+	                     Allocator &allocator = Allocator::DefaultAllocator())
+	    : VectorBuffer(VectorType::FLAT_VECTOR, VectorBufferType::VARIABLE_BINARY_BUFFER, count),
+	      offset_data(allocator.Allocate(sizeof(int32_t) * (count + 1))),
+	      length_data(allocator.Allocate(sizeof(uint32_t) * (count + 1))), byte_data_ptr(source.byte_data_ptr),
+	      capacity(count), is_view(true) {
+		offsets = reinterpret_cast<int32_t *>(offset_data.get());
+		lengths = reinterpret_cast<uint32_t *>(length_data.get());
+		validity.Resize(count);
+	}
+
+	//! Range view constructor: shares the byte buffer AND the offsets/lengths of source (shifted by offset).
+	//! Fully zero-copy; the caller must keep source alive via auxiliary data.
+	VariableBinaryBuffer(const VariableBinaryBuffer &source, count_t count, idx_t offset)
+	    : VectorBuffer(VectorType::FLAT_VECTOR, VectorBufferType::VARIABLE_BINARY_BUFFER, count),
+	      offsets(source.offsets + offset), lengths(source.lengths + offset), byte_data_ptr(source.byte_data_ptr),
+	      capacity(count), is_view(true) {
+		validity.Resize(count);
 	}
 
 public:
@@ -64,18 +102,27 @@ public:
 	const_data_ptr_t GetBytes() const {
 		return byte_data_ptr;
 	}
-	//! Descending physical offsets; populators fill this, callers can grab it once and index directly
+	//! Per-value byte positions into the byte buffer; populators fill this
 	int32_t *GetOffsets() {
 		return offsets;
 	}
 	const int32_t *GetOffsets() const {
 		return offsets;
 	}
+	//! Per-value byte lengths; populators fill this
+	uint32_t *GetLengths() {
+		return lengths;
+	}
+	const uint32_t *GetLengths() const {
+		return lengths;
+	}
+	//! Positional view over the whole buffer: fetch once, then read values without per-value buffer lookups
+	var_binary_view_t GetView() const {
+		return {const_char_ptr_cast(byte_data_ptr), offsets, lengths};
+	}
 	//! Raw bytes + length of value index (points into the byte buffer; safe for any length)
 	var_binary_t GetVarBinary(idx_t index) const {
-		const int32_t start = offsets[index + 1];
-		const int32_t end = offsets[index];
-		return {const_char_ptr_cast(byte_data_ptr) + start, idx_t(end - start)};
+		return {const_char_ptr_cast(byte_data_ptr) + offsets[index], idx_t(lengths[index])};
 	}
 	//! View of value index as a string_t into the byte buffer (no copy)
 	string_t GetString(idx_t index) const {
@@ -83,17 +130,22 @@ public:
 		return string_t(view.ptr, UnsafeNumericCast<uint32_t>(view.length));
 	}
 
-	//! Total payload bytes currently held (reverse layout: offsets[0] is the top of the byte buffer)
+	//! Total payload bytes currently held (reverse layout: value 0 sits at the top of the byte buffer)
 	idx_t ByteSize() const {
-		return capacity == 0 ? 0 : idx_t(offsets[0]);
+		if (is_view) {
+			throw InternalException("ByteSize is not defined for a slice view of a VariableBinaryBuffer");
+		}
+		return capacity == 0 ? 0 : idx_t(offsets[0]) + lengths[0];
 	}
 
 	//! Grow to hold added_count more values / added_bytes more payload, preserving existing contents.
 	//! The new (later-scanned) block goes at the FRONT of the byte buffer, so existing bytes shift UP by added_bytes
-	//! and existing offsets shift up by the same amount. This keeps the whole buffer one contiguous reverse-packed
-	//! region, so the shared boundary stays valid across blocks. Leaves offset slots [old capacity + 1 ..] and byte
-	//! region [0 .. added_bytes) for the caller to fill.
+	//! and existing offsets shift up by the same amount (lengths are unaffected). Leaves the offset/length slots
+	//! [old capacity ..] and byte region [0 .. added_bytes) for the caller to fill.
 	void Grow(idx_t added_count, idx_t added_bytes) {
+		if (is_view) {
+			throw InternalException("Cannot Grow a slice view of a VariableBinaryBuffer");
+		}
 		auto &alloc = *byte_data.GetAllocator();
 		const idx_t old_capacity = capacity;
 		const idx_t old_bytes = ByteSize();
@@ -102,16 +154,21 @@ public:
 
 		AllocatedData new_offset_data = alloc.Allocate(sizeof(int32_t) * (new_capacity + 1));
 		auto new_offsets = reinterpret_cast<int32_t *>(new_offset_data.get());
-		for (idx_t i = 0; i <= old_capacity; i++) {
+		for (idx_t i = 0; i < old_capacity; i++) {
 			new_offsets[i] = offsets[i] + UnsafeNumericCast<int32_t>(added_bytes);
 		}
+		AllocatedData new_length_data = alloc.Allocate(sizeof(uint32_t) * (new_capacity + 1));
+		auto new_lengths = reinterpret_cast<uint32_t *>(new_length_data.get());
+		memcpy(new_lengths, lengths, sizeof(uint32_t) * old_capacity);
 
 		AllocatedData new_byte_data = alloc.Allocate(new_bytes == 0 ? 1 : new_bytes);
 		memcpy(new_byte_data.get() + added_bytes, byte_data_ptr, old_bytes);
 
 		offset_data = std::move(new_offset_data);
+		length_data = std::move(new_length_data);
 		byte_data = std::move(new_byte_data);
 		offsets = new_offsets;
+		lengths = new_lengths;
 		byte_data_ptr = byte_data.get();
 		capacity = new_capacity;
 		validity.Resize(new_capacity);
@@ -120,15 +177,20 @@ public:
 
 private:
 	ValidityMask validity;
-	//! descending physical byte positions, capacity + 1 entries; offsets[0] == total, offsets[capacity] == 0
+	//! per-value byte positions into the byte buffer, capacity entries
 	AllocatedData offset_data;
 	int32_t *offsets;
+	//! per-value byte lengths, capacity entries
+	AllocatedData length_data;
+	uint32_t *lengths;
 
 	//! contiguous payload bytes
 	AllocatedData byte_data;
 	data_ptr_t byte_data_ptr;
 	//! number of values this buffer holds
 	idx_t capacity;
+	//! true when this buffer shares another buffer's byte data (must not Grow)
+	bool is_view = false;
 };
 
 } // namespace duckdb
