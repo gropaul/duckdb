@@ -11,9 +11,11 @@ namespace duckdb {
 struct CompressedStringScanState : public StringScanState {
 public:
 	explicit CompressedStringScanState(BufferHandle &&handle_p)
-	    : StringScanState(), owned_handle(std::move(handle_p)), handle(owned_handle) {
+	    : StringScanState(), owned_handle(std::move(handle_p)), handle(owned_handle),
+	      invalid_value_sel(STANDARD_VECTOR_SIZE) {
 	}
-	explicit CompressedStringScanState(BufferHandle &handle_p) : StringScanState(), owned_handle(), handle(handle_p) {
+	explicit CompressedStringScanState(BufferHandle &handle_p)
+	    : StringScanState(), owned_handle(), handle(handle_p), invalid_value_sel(STANDARD_VECTOR_SIZE) {
 	}
 
 public:
@@ -47,6 +49,9 @@ public:
 	idx_t dictionary_size;
 	StringDictionaryContainer dict;
 	idx_t block_size;
+
+	//! Have a selection vector to track null values when scanning to a flat vector
+	SelectionVector invalid_value_sel;
 };
 
 } // namespace duckdb

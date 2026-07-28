@@ -230,6 +230,12 @@ public:
 	      serialize_state(serialize_state), deserialize_state(deserialize_state), visit_block_ids(visit_block_ids) {
 	}
 
+public:
+	//! Whether the validity mask must be scanned separately when scanning the data
+	bool RequiredValidityScan() const {
+		return validity_scan == CompressionValidity::REQUIRES_VALIDITY;
+	}
+
 	//! Compression type
 	CompressionType type;
 	//! The data type this function can compress
@@ -308,8 +314,14 @@ public:
 	compression_get_segment_info_t get_segment_info = nullptr;
 
 	//! Whether the validity mask should be separately compressed
-	//! or this compression function can also be used to decompress the validity
-	CompressionValidity validity = CompressionValidity::REQUIRES_VALIDITY;
+	//! or this compression function can also be used to decompress the validity when writing
+	CompressionValidity validity_write = CompressionValidity::REQUIRES_VALIDITY;
+
+	//! Whether we need to scan the validity mask when scanning the data.
+	//! This can be distinct from validity_write as e.g., for DICTIONARY_COMPRESSION: Here, we still write
+	//! validity data to be backward compatible but don't need to read it as the dictionary itself
+	//! also encodes validity.
+	CompressionValidity validity_scan = CompressionValidity::REQUIRES_VALIDITY;
 };
 
 //! The set of compression functions

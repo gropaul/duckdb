@@ -145,6 +145,8 @@ void CompressedStringScanState::ScanToFlatVector(Vector &result, idx_t result_of
 	BitpackingPrimitives::UnPackBuffer<sel_t>(data_ptr_cast(sel_vec_ptr), src, decompress_count, current_width);
 
 	auto result_data = FlatVector::Writer<string_t>(result, scan_count, result_offset);
+	idx_t invalid_value_count = 0;
+
 	for (idx_t i = 0; i < scan_count; i++) {
 		// Lookup dict offset in index buffer
 		auto string_number = sel_vec->get_index(i + start_offset);
@@ -152,6 +154,17 @@ void CompressedStringScanState::ScanToFlatVector(Vector &result, idx_t result_of
 		auto dict_offset = index_buffer_ptr[string_number];
 		auto str_len = GetStringLength(UnsafeNumericCast<sel_t>(string_number));
 		result_data.WriteStringRef(FetchStringFromDict(UnsafeNumericCast<int32_t>(dict_offset), str_len));
+		invalid_value_sel.set_index(invalid_value_count, i + result_offset);
+		invalid_value_count += string_number == 0;
+	}
+
+	if (invalid_value_count > 0) {
+		auto &result_validity = FlatVector::ValidityMutable(result);
+		result_validity.EnsureWritable();
+		for (idx_t i = 0; i < invalid_value_count; i++) {
+			const idx_t row_idx = invalid_value_sel.get_index(i);
+			result_validity.SetInvalidUnsafe(row_idx);
+		}
 	}
 }
 
