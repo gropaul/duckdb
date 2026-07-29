@@ -219,6 +219,10 @@ public:
 
 	VectorValidityIterator Validity() const;
 
+	//! Returns a mutable reference to the validity mask of the vector
+	//! FSST vectors are handled directly, any other vector type is flattened first
+	DUCKDB_API ValidityMask &ValidityMutable();
+
 	//! This allows a vector to reference another vector while const
 	//! This is only used internally in `Flatten` - since referencing
 	// an arbitrary other vector could change the logical data contained in the vector (and not be const)

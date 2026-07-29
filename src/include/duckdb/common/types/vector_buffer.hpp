@@ -36,7 +36,8 @@ enum class VectorBufferType : uint8_t {
 	DICTIONARY_BUFFER, // VectorType::DICTIONARY    - Any             - Holds SelectionVector and dict child vector
 	FSST_BUFFER,       // VectorType::FSST          - String          - Holds string_t array, StringHeap and FSST table
 	SHREDDED_BUFFER,   // VectorType::SHREDDED      - Variant         - Holds shredded variant
-	SEQUENCE_BUFFER    // VectorType::SEQUENCE      - Any             - Holds linear numeric sequence (start, increment)
+	SEQUENCE_BUFFER,   // VectorType::SEQUENCE      - Any             - Holds linear numeric sequence (start, increment)
+	VARIABLE_BINARY_BUFFER // VectorType::FLAT      - String          - Holds contiguous bytes + var_binary_t view array
 };
 
 enum class VectorAppendMode { ALLOW_RESIZE, ERROR_ON_NO_SPACE };

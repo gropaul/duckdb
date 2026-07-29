@@ -451,6 +451,14 @@ void Vector::Flatten(const SelectionVector &sel, idx_t count) const {
 	}
 }
 
+ValidityMask &Vector::ValidityMutable() {
+	if (GetVectorType() == VectorType::FSST_VECTOR) {
+		return FSSTVector::Validity(*this);
+	}
+	Flatten();
+	return FlatVector::ValidityMutable(*this);
+}
+
 void Vector::ToUnifiedFormat(idx_t count, UnifiedVectorFormat &format) const {
 	ToUnifiedFormat(format);
 }

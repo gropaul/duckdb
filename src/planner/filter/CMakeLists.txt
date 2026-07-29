@@ -10,9 +10,11 @@ add_library_unity(
   null_filter.cpp
   struct_filter.cpp
   optional_filter.cpp
+  prefilter.cpp
   prefix_range_filter.cpp
   selectivity_optional_filter.cpp
   table_filter_bloom_function.cpp
+  table_filter_contains_prefilter_function.cpp
   table_filter_dynamic_function.cpp
   table_filter_functions.cpp
   table_filter_optional_function.cpp

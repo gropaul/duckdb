@@ -5,6 +5,7 @@ add_library_unity(
   constant_vector.cpp
   dictionary_vector.cpp
   flat_vector.cpp
+  fsst_ops.cpp
   fsst_vector.cpp
   list_vector.cpp
   map_vector.cpp

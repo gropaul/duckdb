@@ -2,14 +2,18 @@
 #include "duckdb/common/vector/struct_vector.hpp"
 #include "duckdb/storage/table/column_segment.hpp"
 
+#include "fsst.h"
+#include "duckdb/common/fsst.hpp"
 #include "duckdb/common/limits.hpp"
 #include "duckdb/common/types/null_value.hpp"
 #include "duckdb/common/types/vector.hpp"
+#include "duckdb/common/vector/fsst_vector.hpp"
 #include "duckdb/common/vector_operations/vector_operations.hpp"
 #include "duckdb/main/config.hpp"
 #include "duckdb/planner/expression/bound_comparison_expression.hpp"
 #include "duckdb/planner/expression/bound_constant_expression.hpp"
 #include "duckdb/planner/expression/bound_reference_expression.hpp"
+#include "duckdb/planner/expression/bound_function_expression.hpp"
 #include "duckdb/planner/expression_iterator.hpp"
 #include "duckdb/planner/filter/expression_filter.hpp"
 #include "duckdb/planner/table_filter.hpp"
@@ -111,13 +115,17 @@ void ColumnSegment::InitializeScan(ColumnScanState &state) {
 
 void ColumnSegment::Scan(ColumnScanState &state, idx_t scan_count, Vector &result, idx_t result_offset,
                          ScanVectorType scan_type) {
+	// printf("ColumnSegment::Scan: scan_count=%llu, result_offset=%llu, scan_type=%d, compression_type=%d\n",
+	// scan_count, result_offset, static_cast<int>(scan_type), static_cast<int>(this->GetCompressionFunction().type));
 	if (scan_type == ScanVectorType::SCAN_ENTIRE_VECTOR) {
 		D_ASSERT(result_offset == 0);
 		Scan(state, scan_count, result);
 	} else {
-		D_ASSERT(result.GetVectorType() == VectorType::FLAT_VECTOR);
+		D_ASSERT(result.GetVectorType() == VectorType::FLAT_VECTOR ||
+		         result.GetVectorType() == VectorType::FSST_VECTOR);
 		ScanPartial(state, scan_count, result, result_offset);
-		D_ASSERT(result.GetVectorType() == VectorType::FLAT_VECTOR);
+		D_ASSERT(result.GetVectorType() == VectorType::FLAT_VECTOR ||
+		         result.GetVectorType() == VectorType::FSST_VECTOR);
 	}
 }
 
@@ -459,13 +467,7 @@ static idx_t ExecuteExpressionFilterSelection(SelectionVector &sel, Vector &vect
 		DataChunk chunk;
 		chunk.data.emplace_back(Vector::Ref(vector));
 		chunk.SetChildCardinality(scan_count);
-		SelectionVector identity_sel;
-		optional_ptr<SelectionVector> current_sel = &sel;
-		if (!sel.IsSet()) {
-			identity_sel = SelectionVector::Incremental(approved_tuple_count);
-			current_sel = &identity_sel;
-		}
-		approved_tuple_count = state.executor->SelectExpression(chunk, result_sel, current_sel, approved_tuple_count);
+		approved_tuple_count = state.executor->SelectExpression(chunk, result_sel, sel, approved_tuple_count);
 	}
 	sel.Initialize(result_sel);
 	return approved_tuple_count;
@@ -481,9 +483,11 @@ idx_t ColumnSegment::FilterSelection(SelectionVector &sel, Vector &vector, Unifi
 idx_t ColumnSegment::FilterSelection(SelectionVector &sel, Vector &vector, TableFilterState &filter_state,
                                      idx_t scan_count, idx_t &approved_tuple_count) {
 	auto &state = filter_state.Cast<ExpressionFilterState>();
+
 	if (state.fast_executor && scan_count <= STANDARD_VECTOR_SIZE) {
 		return state.fast_executor->FilterSelection(sel, vector, scan_count, approved_tuple_count);
 	}
+
 	return ExecuteExpressionFilterSelection(sel, vector, state, scan_count, approved_tuple_count);
 }
 

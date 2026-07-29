@@ -1,8 +1,14 @@
 #include "duckdb/planner/table_filter_state.hpp"
+#include "duckdb/common/limits.hpp"
 #include "duckdb/common/operator/comparison_operators.hpp"
+#include "duckdb/planner/filter/prefilter.hpp"
 #include "duckdb/common/vector_operations/vector_operations.hpp"
 #include "duckdb/common/vector/constant_vector.hpp"
+#include "duckdb/common/vector/dictionary_vector.hpp"
 #include "duckdb/common/vector/flat_vector.hpp"
+#include "duckdb/common/vector/fsst_ops.hpp"
+#include "duckdb/common/vector/fsst_vector.hpp"
+#include "duckdb/storage/compression/fsst/fsst_mandatory_chain.hpp"
 #include "duckdb/planner/expression/bound_conjunction_expression.hpp"
 #include "duckdb/planner/expression/bound_constant_expression.hpp"
 #include "duckdb/planner/expression/bound_function_expression.hpp"
@@ -12,7 +18,7 @@
 
 namespace duckdb {
 
-static unique_ptr<ExpressionFilterExecutor> TryCreateFastExecutor(const Expression &expression,
+static unique_ptr<ExpressionFilterExecutor> TryCreateFastExecutor(ClientContext &context, const Expression &expression,
                                                                   bool inside_selectivity_optional);
 
 static void InitializeExecutor(ClientContext &context, const Expression &expression, ExpressionFilterState &state) {
@@ -21,12 +27,112 @@ static void InitializeExecutor(ClientContext &context, const Expression &express
 }
 
 ExpressionFilterState::ExpressionFilterState(ClientContext &context, const Expression &expression) {
-	fast_executor = TryCreateFastExecutor(expression, false);
+	fast_executor = TryCreateFastExecutor(context, expression, false);
 	InitializeExecutor(context, expression, *this);
 }
 
 ExpressionFilterState::~ExpressionFilterState() {
 }
+
+// Dictionaries larger than this are not worth pre-evaluating per entry (mirrors the threshold of
+// the executor's dictionary expression optimization).
+static constexpr idx_t MAX_FILTER_DICTIONARY_SIZE = 20000;
+
+idx_t ExpressionFilterExecutor::FilterSelection(SelectionVector &sel, Vector &vector, idx_t scan_count,
+                                                idx_t &approved_tuple_count) {
+	if (approved_tuple_count == 0) {
+		return 0;
+	}
+	if (vector.GetVectorType() != VectorType::DICTIONARY_VECTOR) {
+		return FilterSelectionInternal(sel, vector, scan_count, approved_tuple_count);
+	}
+	const auto dictionary_size = DictionaryVector::DictionarySize(vector);
+	auto &dictionary_id = DictionaryVector::DictionaryId(vector);
+	if (!dictionary_size.IsValid() || dictionary_id.empty() ||
+	    dictionary_size.GetIndex() >= MAX_FILTER_DICTIONARY_SIZE ||
+	    DictionaryVector::Child(vector).GetVectorType() != VectorType::FLAT_VECTOR) {
+		// not a storage dictionary we can pre-evaluate per entry
+		return FilterSelectionInternal(sel, vector, scan_count, approved_tuple_count);
+	}
+	if (dictionary_id != cached_dictionary_id) {
+		ComputeDictionaryVerdicts(vector, dictionary_size.GetIndex());
+		cached_dictionary_id = dictionary_id;
+	}
+	// keep the rows whose dictionary entry passed the filter
+	auto &dictionary_sel = DictionaryVector::SelVector(vector);
+	if (dictionary_result_capacity < approved_tuple_count) {
+		dictionary_result_sel.Initialize(approved_tuple_count);
+		dictionary_result_capacity = approved_tuple_count;
+	}
+	idx_t result_count = 0;
+	for (idx_t i = 0; i < approved_tuple_count; i++) {
+		const auto row_idx = sel.get_index(i);
+		dictionary_result_sel.set_index(result_count, row_idx);
+		result_count += dictionary_verdicts[dictionary_sel.get_index(row_idx)];
+	}
+	sel.Initialize(dictionary_result_sel);
+	approved_tuple_count = result_count;
+	return result_count;
+}
+
+void ExpressionFilterExecutor::ComputeDictionaryVerdicts(Vector &dictionary_vector, idx_t dictionary_size) {
+	auto &child = DictionaryVector::Child(dictionary_vector);
+	dictionary_verdicts.assign(dictionary_size, 0);
+	// evaluate the filter over the unique entries, one STANDARD_VECTOR_SIZE block at a time
+	for (idx_t offset = 0; offset < dictionary_size; offset += STANDARD_VECTOR_SIZE) {
+		const auto block_count = MinValue<idx_t>(dictionary_size - offset, STANDARD_VECTOR_SIZE);
+		Vector block(child, offset, offset + block_count);
+		SelectionVector block_sel;
+		idx_t block_approved = block_count;
+		FilterSelectionInternal(block_sel, block, block_count, block_approved);
+		for (idx_t i = 0; i < block_approved; i++) {
+			dictionary_verdicts[offset + block_sel.get_index(i)] = 1;
+		}
+	}
+}
+
+// Fallback child of a mixed conjunction: evaluates one conjunct through the regular
+// ExpressionExecutor, so that sibling conjuncts with kernel executors keep the fast path.
+class GenericFilterExecutor final : public ExpressionFilterExecutor {
+public:
+	GenericFilterExecutor(ClientContext &context, const Expression &expression) {
+		executor = make_uniq<ExpressionExecutor>(context);
+		executor->AddExpression(expression);
+	}
+
+	idx_t FilterSelectionInternal(SelectionVector &sel, Vector &vector, idx_t scan_count,
+	                              idx_t &approved_tuple_count) override {
+		if (approved_tuple_count == 0) {
+			return 0;
+		}
+		PrepareCapacity(approved_tuple_count);
+		DataChunk chunk;
+		chunk.data.emplace_back(Vector::Ref(vector));
+		chunk.SetChildCardinality(scan_count);
+		SelectionVector identity_sel;
+		optional_ptr<SelectionVector> current_sel = &sel;
+		if (!sel.IsSet()) {
+			identity_sel = SelectionVector::Incremental(approved_tuple_count);
+			current_sel = &identity_sel;
+		}
+		approved_tuple_count = executor->SelectExpression(chunk, result_sel, current_sel, approved_tuple_count);
+		sel.Initialize(result_sel);
+		return approved_tuple_count;
+	}
+
+private:
+	void PrepareCapacity(idx_t count) {
+		if (current_capacity >= count) {
+			return;
+		}
+		result_sel.Initialize(count);
+		current_capacity = count;
+	}
+
+	unique_ptr<ExpressionExecutor> executor;
+	SelectionVector result_sel;
+	idx_t current_capacity = 0;
+};
 
 class ConjunctionAndFilterExecutor final : public ExpressionFilterExecutor {
 public:
@@ -34,8 +140,8 @@ public:
 	    : children(std::move(children_p)) {
 	}
 
-	idx_t FilterSelection(SelectionVector &sel, Vector &vector, idx_t scan_count,
-	                      idx_t &approved_tuple_count) override {
+	idx_t FilterSelectionInternal(SelectionVector &sel, Vector &vector, idx_t scan_count,
+	                              idx_t &approved_tuple_count) override {
 		for (auto &child : children) {
 			child->FilterSelection(sel, vector, scan_count, approved_tuple_count);
 			if (approved_tuple_count == 0) {
@@ -51,8 +157,8 @@ private:
 
 class OptionalFilterExecutor final : public ExpressionFilterExecutor {
 public:
-	idx_t FilterSelection(SelectionVector &sel, Vector &vector, idx_t scan_count,
-	                      idx_t &approved_tuple_count) override {
+	idx_t FilterSelectionInternal(SelectionVector &sel, Vector &vector, idx_t scan_count,
+	                              idx_t &approved_tuple_count) override {
 		return approved_tuple_count;
 	}
 };
@@ -63,8 +169,8 @@ public:
 	    : comparison_type(comparison_type_p), constant(std::move(constant_p)) {
 	}
 
-	idx_t FilterSelection(SelectionVector &sel, Vector &vector, idx_t scan_count,
-	                      idx_t &approved_tuple_count) override {
+	idx_t FilterSelectionInternal(SelectionVector &sel, Vector &vector, idx_t scan_count,
+	                              idx_t &approved_tuple_count) override {
 		(void)scan_count;
 		if (approved_tuple_count == 0) {
 			return 0;
@@ -73,6 +179,8 @@ public:
 		const auto before_count = approved_tuple_count;
 		if (constant.IsNull()) {
 			approved_tuple_count = 0;
+		} else if (TryFSSTSelect(sel, vector, approved_tuple_count)) {
+			// handled on the compressed data directly
 		} else {
 			UnifiedVectorFormat vdata;
 			vector.ToUnifiedFormat(vdata);
@@ -86,6 +194,31 @@ public:
 	}
 
 private:
+	//! Evaluate eq/neq against an FSST vector on the compressed data; returns false if the shape does not match
+	bool TryFSSTSelect(SelectionVector &sel, Vector &vector, idx_t &approved_tuple_count) {
+		if (vector.GetVectorType() != VectorType::FSST_VECTOR) {
+			return false;
+		}
+		if (comparison_type != ExpressionType::COMPARE_EQUAL && comparison_type != ExpressionType::COMPARE_NOTEQUAL) {
+			return false;
+		}
+		Vector constant_vector(constant, count_t(1));
+		auto &current_sel = sel.IsSet() ? sel : *FlatVector::IncrementalSelectionVector();
+		idx_t match_count;
+		bool handled;
+		if (comparison_type == ExpressionType::COMPARE_EQUAL) {
+			handled = FSSTOps::TryEquals(vector, constant_vector, &current_sel, approved_tuple_count, &result_sel,
+			                             nullptr, nullptr, match_count);
+		} else {
+			handled = FSSTOps::TryNotEquals(vector, constant_vector, &current_sel, approved_tuple_count, &result_sel,
+			                                nullptr, nullptr, match_count);
+		}
+		if (handled) {
+			approved_tuple_count = match_count;
+		}
+		return handled;
+	}
+
 	template <class T, class OP, bool CAN_HAVE_NULL>
 	idx_t TemplatedSelect(const UnifiedVectorFormat &vdata, T predicate, const SelectionVector &sel,
 	                      idx_t approved_tuple_count) {
@@ -190,8 +323,8 @@ public:
 	    : child(std::move(child_p)), stats(n_vectors_to_check, selectivity_threshold) {
 	}
 
-	idx_t FilterSelection(SelectionVector &sel, Vector &vector, idx_t scan_count,
-	                      idx_t &approved_tuple_count) override {
+	idx_t FilterSelectionInternal(SelectionVector &sel, Vector &vector, idx_t scan_count,
+	                              idx_t &approved_tuple_count) override {
 		if (approved_tuple_count == 0) {
 			return 0;
 		}
@@ -223,8 +356,8 @@ public:
 		}
 	}
 
-	idx_t FilterSelection(SelectionVector &sel, Vector &vector, idx_t scan_count,
-	                      idx_t &approved_tuple_count) override {
+	idx_t FilterSelectionInternal(SelectionVector &sel, Vector &vector, idx_t scan_count,
+	                              idx_t &approved_tuple_count) override {
 		if (approved_tuple_count == 0) {
 			return 0;
 		}
@@ -367,8 +500,8 @@ public:
 		}
 	}
 
-	idx_t FilterSelection(SelectionVector &sel, Vector &vector, idx_t scan_count,
-	                      idx_t &approved_tuple_count) override {
+	idx_t FilterSelectionInternal(SelectionVector &sel, Vector &vector, idx_t scan_count,
+	                              idx_t &approved_tuple_count) override {
 		if (approved_tuple_count == 0) {
 			return 0;
 		}
@@ -454,6 +587,158 @@ private:
 	unique_ptr<SelectivityOptionalFilterState::SelectivityStats> stats;
 };
 
+// Contains prefilter: one PrefilterContainsAny scan per vector, dropping rows that definitely
+// cannot contain ANY of the needles. On FSST vectors it scans the compressed codes for the first
+// codes of each needle's mandatory chain - 4 codes when every needle has a chain that long,
+// falling back to 2 codes otherwise. On flat vectors it scans for each needle's 4-byte prefix.
+// The targets are precomputed - per needle at construction for the flat path, per decoder for
+// the chain path. Survivors have false positives and anything the kernel cannot handle passes
+// through untouched - the exact filter downstream is the correctness authority.
+class ContainsPrefilterExecutor final : public ExpressionFilterExecutor {
+public:
+	static constexpr idx_t FLAT_TARGET_LEN = sizeof(uint32_t);
+	static constexpr idx_t CHAIN_TARGET_LEN_U16 = sizeof(uint16_t);
+
+	ContainsPrefilterExecutor(const ContainsPrefilterFunctionData &data, bool inside_selectivity_optional)
+	    : needles(data.needles) {
+		for (auto &needle : needles) {
+			if (needle.size() < FLAT_TARGET_LEN) {
+				// unusable needle set (e.g. after deserialization): degrade to always-true
+				flat_targets.clear();
+				break;
+			}
+			uint32_t target;
+			memcpy(&target, needle.data(), FLAT_TARGET_LEN);
+			flat_targets.push_back(target);
+		}
+		if (!inside_selectivity_optional && data.n_vectors_to_check != 0) {
+			stats = make_uniq<SelectivityOptionalFilterState::SelectivityStats>(data.n_vectors_to_check,
+			                                                                    data.selectivity_threshold);
+		}
+	}
+
+	idx_t FilterSelectionInternal(SelectionVector &sel, Vector &vector, idx_t scan_count,
+	                              idx_t &approved_tuple_count) override {
+		if (approved_tuple_count == 0) {
+			return 0;
+		}
+		if (flat_targets.empty()) {
+			return approved_tuple_count;
+		}
+		if (stats && !stats->IsActive()) {
+			stats->Update(0, 0);
+			return approved_tuple_count;
+		}
+		const auto before_count = approved_tuple_count;
+		idx_t result_count;
+		const bool fsst_executable = FilterFSST(sel, vector, before_count, result_count);
+
+		if (!fsst_executable) {
+			if (vector.GetVectorType() == VectorType::FLAT_VECTOR) {
+				result_count = FilterFlat(sel, vector, before_count);
+			} else {
+				// don't decompress, hope that later filter will take this out.
+				return approved_tuple_count;
+			}
+		}
+		if (stats) {
+			stats->Update(result_count, before_count);
+		}
+		approved_tuple_count = result_count;
+		return approved_tuple_count;
+	}
+
+private:
+	bool FilterFSST(SelectionVector &sel, Vector &vector, const idx_t count, idx_t &result_count) {
+		if (vector.GetVectorType() != VectorType::FSST_VECTOR) {
+			return false;
+		}
+		const auto decoder = FSSTVector::GetDecoder(vector);
+		if (!decoder) {
+			return false;
+		}
+		if (decoder != cached_decoder) {
+			ComputeChainTargets(decoder);
+			cached_decoder = decoder;
+		}
+		if (cached_chain_targets_u32.empty() && cached_chain_targets_u16.empty()) {
+			return false;
+		}
+		PrepareCapacity(count);
+		const auto view = FSSTVector::GetDataView(vector);
+		auto &validity = FSSTVector::Validity(vector);
+		if (!cached_chain_targets_u32.empty()) {
+			result_count = PrefilterContainsAny(view, validity, sel, result_sel, count,
+			                                    cached_chain_targets_u32.data(), cached_chain_targets_u32.size());
+		} else {
+			result_count = PrefilterContainsAny(view, validity, sel, result_sel, count,
+			                                    cached_chain_targets_u16.data(), cached_chain_targets_u16.size());
+		}
+		sel.Initialize(result_sel);
+		return true;
+	}
+
+	void ComputeChainTargets(void *decoder) {
+		cached_chain_targets_u32.clear();
+		cached_chain_targets_u16.clear();
+		vector<vector<uint8_t>> chains;
+		idx_t min_chain_size = NumericLimits<idx_t>::Maximum();
+		for (auto &needle : needles) {
+			chains.push_back(FSSTMandatoryChain(decoder, needle.data(), needle.size()));
+			min_chain_size = MinValue<idx_t>(min_chain_size, chains.back().size());
+		}
+		// OR semantics: every needle must be covered by a target of the same width, so the
+		// shortest chain picks the width. Prefer 4 codes (fewer false positives); fall back to
+		// 2 codes when any chain is shorter. Below 2 codes a row matching that needle may carry
+		// no detectable chain at all - the whole needle set is unusable for this symbol table.
+		if (min_chain_size >= sizeof(uint32_t)) {
+			for (auto &chain : chains) {
+				uint32_t target;
+				memcpy(&target, chain.data(), sizeof(uint32_t));
+				cached_chain_targets_u32.push_back(target);
+			}
+		} else if (min_chain_size >= CHAIN_TARGET_LEN_U16) {
+			for (auto &chain : chains) {
+				uint16_t target;
+				memcpy(&target, chain.data(), CHAIN_TARGET_LEN_U16);
+				cached_chain_targets_u16.push_back(target);
+			}
+		}
+	}
+
+	idx_t FilterFlat(SelectionVector &sel, Vector &vector, idx_t count) {
+		PrepareCapacity(count);
+		const auto strings = FlatVector::GetData<string_t>(vector);
+		auto &validity = FlatVector::Validity(vector);
+		const auto result_count =
+		    PrefilterContainsAny(strings, validity, sel, result_sel, count, flat_targets.data(), flat_targets.size());
+		sel.Initialize(result_sel);
+		return result_count;
+	}
+
+	void PrepareCapacity(idx_t count) {
+		if (current_capacity >= count) {
+			return;
+		}
+		result_sel.Initialize(count);
+		current_capacity = count;
+	}
+
+	vector<string> needles;
+	//! Per-needle kernel targets for the flat path (first 4 bytes of each needle);
+	//! empty when the needle set is unusable
+	vector<uint32_t> flat_targets;
+	//! Per-needle chain targets for the compressed path, keyed on the segment's decoder.
+	//! At most one width is populated; both empty when any needle has no usable chain
+	//! for this symbol table.
+	void *cached_decoder = nullptr;
+	vector<uint32_t> cached_chain_targets_u32;
+	vector<uint16_t> cached_chain_targets_u16;
+	SelectionVector result_sel;
+	idx_t current_capacity = 0;
+	unique_ptr<SelectivityOptionalFilterState::SelectivityStats> stats;
+};
+
 static bool IsColumnReferenceFunction(const BoundFunctionExpression &func) {
 	auto &children = func.GetChildren();
 	if (children.size() != 1 || children[0]->GetExpressionClass() != ExpressionClass::BOUND_REF) {
@@ -531,7 +816,8 @@ static unique_ptr<ExpressionFilterExecutor> TryCreateComparisonExecutor(const Bo
 	return make_uniq<ComparisonFilterExecutor>(comparison_type, constant->GetValue());
 }
 
-static unique_ptr<ExpressionFilterExecutor> TryCreateFunctionExecutor(const BoundFunctionExpression &func,
+static unique_ptr<ExpressionFilterExecutor> TryCreateFunctionExecutor(ClientContext &context,
+                                                                      const BoundFunctionExpression &func,
                                                                       bool inside_selectivity_optional) {
 	if (!inside_selectivity_optional && func.GetChildren().size() == 2 &&
 	    BoundComparisonExpression::IsComparison(func.GetExpressionType())) {
@@ -553,7 +839,7 @@ static unique_ptr<ExpressionFilterExecutor> TryCreateFunctionExecutor(const Boun
 		if (!data.child_filter_expr) {
 			return make_uniq<OptionalFilterExecutor>();
 		}
-		auto child = TryCreateFastExecutor(*data.child_filter_expr, true);
+		auto child = TryCreateFastExecutor(context, *data.child_filter_expr, true);
 		if (!child) {
 			return nullptr;
 		}
@@ -574,26 +860,43 @@ static unique_ptr<ExpressionFilterExecutor> TryCreateFunctionExecutor(const Boun
 		return make_uniq<PrefixRangeFilterExecutor>(func.BindInfo()->Cast<PrefixRangeFunctionData>(),
 		                                            inside_selectivity_optional);
 	}
+	if (func_name == ContainsPrefilterScalarFun::NAME) {
+		if (!func.BindInfo()) {
+			return nullptr;
+		}
+		return make_uniq<ContainsPrefilterExecutor>(func.BindInfo()->Cast<ContainsPrefilterFunctionData>(),
+		                                            inside_selectivity_optional);
+	}
 	return nullptr;
 }
 
-static unique_ptr<ExpressionFilterExecutor> TryCreateFastExecutor(const Expression &expression,
+static unique_ptr<ExpressionFilterExecutor> TryCreateFastExecutor(ClientContext &context, const Expression &expression,
                                                                   bool inside_selectivity_optional) {
 	switch (expression.GetExpressionClass()) {
 	case ExpressionClass::BOUND_FUNCTION:
-		return TryCreateFunctionExecutor(expression.Cast<BoundFunctionExpression>(), inside_selectivity_optional);
+		return TryCreateFunctionExecutor(context, expression.Cast<BoundFunctionExpression>(),
+		                                 inside_selectivity_optional);
 	case ExpressionClass::BOUND_CONJUNCTION: {
 		if (expression.GetExpressionType() != ExpressionType::CONJUNCTION_AND) {
 			return nullptr;
 		}
 		auto &conjunction = expression.Cast<BoundConjunctionExpression>();
-		vector<unique_ptr<ExpressionFilterExecutor>> children;
-		for (auto &child_expr : conjunction.GetChildren()) {
-			auto child_executor = TryCreateFastExecutor(*child_expr, inside_selectivity_optional);
-			if (!child_executor) {
-				return nullptr;
+		auto &child_exprs = conjunction.GetChildren();
+		vector<unique_ptr<ExpressionFilterExecutor>> children(child_exprs.size());
+		idx_t fast_count = 0;
+		for (idx_t child_idx = 0; child_idx < child_exprs.size(); child_idx++) {
+			children[child_idx] = TryCreateFastExecutor(context, *child_exprs[child_idx], inside_selectivity_optional);
+			fast_count += children[child_idx] != nullptr;
+		}
+		if (fast_count == 0) {
+			// no conjunct has a kernel executor: leave the whole expression to the regular executor
+			return nullptr;
+		}
+		// mixed conjunction: conjuncts without a kernel executor run through the regular executor
+		for (idx_t child_idx = 0; child_idx < child_exprs.size(); child_idx++) {
+			if (!children[child_idx]) {
+				children[child_idx] = make_uniq<GenericFilterExecutor>(context, *child_exprs[child_idx]);
 			}
-			children.push_back(std::move(child_executor));
 		}
 		return make_uniq<ConjunctionAndFilterExecutor>(std::move(children));
 	}

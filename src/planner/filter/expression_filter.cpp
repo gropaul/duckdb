@@ -727,6 +727,9 @@ string ExpressionFilter::InternalFunctionToString(const BoundFunctionExpression 
 	} else if (func_name == PrefixRangeScalarFun::NAME) {
 		auto &data = func_expr.BindInfo()->Cast<PrefixRangeFunctionData>();
 		return PrefixRangeScalarFun::ToString(column_name, data.key_column_name);
+	} else if (func_name == ContainsPrefilterScalarFun::NAME) {
+		auto &data = func_expr.BindInfo()->Cast<ContainsPrefilterFunctionData>();
+		return ContainsPrefilterScalarFun::ToString(column_name, data.needles);
 	} else if (func_name == DynamicFilterScalarFun::NAME) {
 		const auto has_filter_data =
 		    func_expr.BindInfo() && func_expr.BindInfo()->Cast<DynamicFilterFunctionData>().filter_data;

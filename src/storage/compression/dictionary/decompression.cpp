@@ -104,6 +104,9 @@ void CompressedStringScanState::Initialize(ColumnSegment &segment, bool initiali
 	index_buffer_ptr = reinterpret_cast<uint32_t *>(baseptr + index_buffer_offset);
 	base_data = data_ptr_cast(baseptr + DictionaryCompression::DICTIONARY_HEADER_SIZE);
 
+	block_size = segment.GetBlockSize();
+	can_have_nulls = segment.GetStats().CanHaveNull();
+
 	dict = DictionaryCompression::GetDictionary(segment, *handle);
 	auto index_buffer_end = index_buffer_offset + sizeof(uint32_t) * index_buffer_count;
 	if (dict.end > segment_capacity || dict.size > dict.end || dict.end - dict.size < index_buffer_end) {
@@ -127,6 +130,16 @@ void CompressedStringScanState::Initialize(ColumnSegment &segment, bool initiali
 }
 
 void CompressedStringScanState::ScanToFlatVector(Vector &result, idx_t result_offset, idx_t start, idx_t scan_count) {
+	if (can_have_nulls) {
+		ScanToFlatVectorInternal<true>(result, result_offset, start, scan_count);
+	} else {
+		ScanToFlatVectorInternal<false>(result, result_offset, start, scan_count);
+	}
+}
+
+template <bool CAN_HAVE_NULLS>
+void CompressedStringScanState::ScanToFlatVectorInternal(Vector &result, idx_t result_offset, idx_t start,
+                                                         idx_t scan_count) {
 	// Handling non-bitpacking-group-aligned start values;
 	idx_t start_offset = start % BitpackingPrimitives::BITPACKING_ALGORITHM_GROUP_SIZE;
 
@@ -145,10 +158,13 @@ void CompressedStringScanState::ScanToFlatVector(Vector &result, idx_t result_of
 	BitpackingPrimitives::UnPackBuffer<sel_t>(data_ptr_cast(sel_vec_ptr), src, decompress_count, current_width);
 
 	auto result_data = FlatVector::Writer<string_t>(result, scan_count, result_offset);
+
 	for (idx_t i = 0; i < scan_count; i++) {
 		// Lookup dict offset in index buffer
 		auto string_number = sel_vec->get_index(i + start_offset);
-		ValidateDictionaryIndex(string_number);
+		if (CAN_HAVE_NULLS) {
+			FlatVector::ValidityMutable(result).Set(i + result_offset, string_number != 0);
+		}
 		auto dict_offset = index_buffer_ptr[string_number];
 		auto str_len = GetStringLength(UnsafeNumericCast<sel_t>(string_number));
 		result_data.WriteStringRef(FetchStringFromDict(UnsafeNumericCast<int32_t>(dict_offset), str_len));
@@ -175,14 +191,7 @@ void CompressedStringScanState::ScanToDictionaryVector(ColumnSegment &segment, V
 
 	BitpackingPrimitives::UnPackBuffer<sel_t>(dst, src, decompress_count, current_width);
 
-	if (start_offset != 0) {
-		for (idx_t i = 0; i < scan_count; i++) {
-			sel_vec->set_index(i, sel_vec->get_index(i + start_offset));
-		}
-	}
-	for (idx_t i = 0; i < scan_count; i++) {
-		ValidateDictionaryIndex(sel_vec->get_index(i));
-	}
+	sel_vec->ShiftLeft(start_offset, scan_count);
 
 	result.Dictionary(dictionary, *sel_vec, scan_count);
 }

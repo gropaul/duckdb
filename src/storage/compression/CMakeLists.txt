@@ -3,6 +3,7 @@ add_subdirectory(alp)
 add_subdirectory(roaring)
 add_subdirectory(dictionary)
 add_subdirectory(dict_fsst)
+add_subdirectory(fsst)
 
 add_library_unity(
   duckdb_storage_compression

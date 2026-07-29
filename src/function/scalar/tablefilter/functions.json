@@ -8,6 +8,14 @@
         "type": "scalar_function"
     },
     {
+        "name": "__internal_tablefilter_contains_prefilter",
+        "struct": "TableFilterContainsPrefilterFun",
+        "parameters": "",
+        "description": "",
+        "example": "",
+        "type": "scalar_function"
+    },
+    {
         "name": "__internal_tablefilter_dynamic",
         "struct": "TableFilterDynamicFun",
         "parameters": "",

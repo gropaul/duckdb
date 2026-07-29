@@ -25,6 +25,16 @@ struct TableFilterBloomFilterFun {
 	static ScalarFunction GetFunction();
 };
 
+struct TableFilterContainsPrefilterFun {
+	static constexpr const char *Name = "__internal_tablefilter_contains_prefilter";
+	static constexpr const char *Parameters = "";
+	static constexpr const char *Description = "";
+	static constexpr const char *Example = "";
+	static constexpr const char *Categories = "";
+
+	static ScalarFunction GetFunction();
+};
+
 struct TableFilterDynamicFun {
 	static constexpr const char *Name = "__internal_tablefilter_dynamic";
 	static constexpr const char *Parameters = "";
