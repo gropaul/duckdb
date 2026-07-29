@@ -18,17 +18,20 @@ public:
 
 public:
 	void Initialize(ColumnSegment &segment, bool initialize_dictionary = true);
+	template <bool NEEDS_STRING_OFFSET_CHECK = false>
 	void ScanToFlatVector(Vector &result, idx_t result_offset, idx_t start, idx_t scan_count);
 	void ScanToDictionaryVector(ColumnSegment &segment, Vector &result, idx_t result_offset, idx_t start,
 	                            idx_t scan_count);
 
 private:
-	template <bool CAN_HAVE_NULLS>
-	void ScanToFlatVectorInternal(Vector &result, idx_t result_offset, idx_t start, idx_t scan_count);
-	string_t FetchStringFromDict(int32_t dict_offset, uint16_t string_len);
+	string_t FetchStringFromDict(uint32_t dict_offset, uint16_t string_len);
 	uint16_t GetStringLength(sel_t index);
-	void ValidateDictionaryIndex(sel_t index);
-	void ValidateDictionaryOffset(uint32_t dict_offset);
+	void ValidateDictionary(const SelectionVector &sel, idx_t scan_count) const;
+	//! Validate the index buffer (offsets monotonic and within the dictionary) so scans can trust it.
+	void ValidateIndexBuffer() const;
+
+	template <bool NEEDS_STRING_OFFSET_CHECK, bool CAN_HAVE_NULLS>
+	void ScanToFlatVectorInternal(Vector &result, idx_t result_offset, idx_t start, idx_t scan_count);
 
 public:
 	BufferHandle owned_handle;
