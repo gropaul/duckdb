@@ -155,9 +155,10 @@ void CompressedStringScanState::ScanToFlatVectorInternal(Vector &result, idx_t r
 
 	auto result_data = FlatVector::Writer<string_t>(result, scan_count, result_offset);
 
+	const auto sel_reference = sel_vec.get();
 	for (idx_t i = 0; i < scan_count; i++) {
 		// Lookup dict offset in index buffer
-		auto string_number = sel_vec->get_index(i + start_offset);
+		auto string_number = sel_reference->get_index(i + start_offset);
 		if (CAN_HAVE_NULLS) {
 			FlatVector::ValidityMutable(result).Set(i + result_offset, string_number != 0);
 		}
