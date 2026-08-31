@@ -1,6 +1,7 @@
 #include "duckdb/optimizer/filter_combiner.hpp"
 
 #include "duckdb/common/enums/expression_type.hpp"
+#include "duckdb/main/settings.hpp"
 #include "duckdb/execution/expression_executor.hpp"
 #include "duckdb/function/scalar/string_common.hpp"
 #include "duckdb/optimizer/optimizer.hpp"
@@ -460,8 +461,7 @@ FilterPushdownResult FilterCombiner::TryPushdownPrefixFilter(TableFilterSet &tab
 
 // Extract the needle of contains(col, 'needle'), returning the haystack column ref through
 // column_ref. Returns false for any other expression shape or a needle too short for the kernel.
-static bool TryGetContainsNeedle(Expression &expr, optional_ptr<BoundColumnRefExpression> &column_ref,
-                                 string &needle) {
+static bool TryGetContainsNeedle(Expression &expr, optional_ptr<BoundColumnRefExpression> &column_ref, string &needle) {
 	if (expr.GetExpressionClass() != ExpressionClass::BOUND_FUNCTION) {
 		return false;
 	}
@@ -502,6 +502,9 @@ static bool TryGetContainsNeedle(Expression &expr, optional_ptr<BoundColumnRefEx
 FilterPushdownResult FilterCombiner::TryPushdownContainsFilter(TableFilterSet &table_filters,
                                                                const vector<ColumnIndex> &column_ids,
                                                                Expression &expr) {
+	if (!Settings::Get<EnableContainsPrefilterSetting>(context)) {
+		return FilterPushdownResult::NO_PUSHDOWN;
+	}
 	optional_ptr<BoundColumnRefExpression> column_ref;
 	vector<string> needles;
 	string needle;

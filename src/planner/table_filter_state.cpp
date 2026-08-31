@@ -1,5 +1,6 @@
 #include "duckdb/planner/table_filter_state.hpp"
 #include "duckdb/common/limits.hpp"
+#include "duckdb/main/settings.hpp"
 #include "duckdb/common/operator/comparison_operators.hpp"
 #include "duckdb/planner/filter/prefilter.hpp"
 #include "duckdb/common/vector_operations/vector_operations.hpp"
@@ -165,8 +166,8 @@ public:
 
 class ComparisonFilterExecutor final : public ExpressionFilterExecutor {
 public:
-	ComparisonFilterExecutor(ExpressionType comparison_type_p, Value constant_p)
-	    : comparison_type(comparison_type_p), constant(std::move(constant_p)) {
+	ComparisonFilterExecutor(ExpressionType comparison_type_p, Value constant_p, bool fsst_eq_enabled_p)
+	    : comparison_type(comparison_type_p), constant(std::move(constant_p)), fsst_eq_enabled(fsst_eq_enabled_p) {
 	}
 
 	idx_t FilterSelectionInternal(SelectionVector &sel, Vector &vector, idx_t scan_count,
@@ -196,7 +197,7 @@ public:
 private:
 	//! Evaluate eq/neq against an FSST vector on the compressed data; returns false if the shape does not match
 	bool TryFSSTSelect(SelectionVector &sel, Vector &vector, idx_t &approved_tuple_count) {
-		if (vector.GetVectorType() != VectorType::FSST_VECTOR) {
+		if (!fsst_eq_enabled || vector.GetVectorType() != VectorType::FSST_VECTOR) {
 			return false;
 		}
 		if (comparison_type != ExpressionType::COMPARE_EQUAL && comparison_type != ExpressionType::COMPARE_NOTEQUAL) {
@@ -312,6 +313,8 @@ private:
 
 	ExpressionType comparison_type;
 	Value constant;
+	//! enable_fsst_eq: when false, FSST vectors are decompressed instead of compared in the compressed domain
+	bool fsst_eq_enabled;
 	SelectionVector result_sel;
 	idx_t current_capacity = 0;
 };
@@ -599,8 +602,9 @@ public:
 	static constexpr idx_t FLAT_TARGET_LEN = sizeof(uint32_t);
 	static constexpr idx_t CHAIN_TARGET_LEN_U16 = sizeof(uint16_t);
 
-	ContainsPrefilterExecutor(const ContainsPrefilterFunctionData &data, bool inside_selectivity_optional)
-	    : needles(data.needles) {
+	ContainsPrefilterExecutor(const ContainsPrefilterFunctionData &data, bool inside_selectivity_optional,
+	                          bool fsst_chain_enabled_p)
+	    : needles(data.needles), fsst_chain_enabled(fsst_chain_enabled_p) {
 		for (auto &needle : needles) {
 			if (needle.size() < FLAT_TARGET_LEN) {
 				// unusable needle set (e.g. after deserialization): degrade to always-true
@@ -650,7 +654,7 @@ public:
 
 private:
 	bool FilterFSST(SelectionVector &sel, Vector &vector, const idx_t count, idx_t &result_count) {
-		if (vector.GetVectorType() != VectorType::FSST_VECTOR) {
+		if (!fsst_chain_enabled || vector.GetVectorType() != VectorType::FSST_VECTOR) {
 			return false;
 		}
 		const auto decoder = FSSTVector::GetDecoder(vector);
@@ -668,11 +672,11 @@ private:
 		const auto view = FSSTVector::GetDataView(vector);
 		auto &validity = FSSTVector::Validity(vector);
 		if (!cached_chain_targets_u32.empty()) {
-			result_count = PrefilterContainsAny(view, validity, sel, result_sel, count,
-			                                    cached_chain_targets_u32.data(), cached_chain_targets_u32.size());
+			result_count = PrefilterContainsAny(view, validity, sel, result_sel, count, cached_chain_targets_u32.data(),
+			                                    cached_chain_targets_u32.size());
 		} else {
-			result_count = PrefilterContainsAny(view, validity, sel, result_sel, count,
-			                                    cached_chain_targets_u16.data(), cached_chain_targets_u16.size());
+			result_count = PrefilterContainsAny(view, validity, sel, result_sel, count, cached_chain_targets_u16.data(),
+			                                    cached_chain_targets_u16.size());
 		}
 		sel.Initialize(result_sel);
 		return true;
@@ -725,6 +729,9 @@ private:
 	}
 
 	vector<string> needles;
+	//! enable_fsst_contains_prefilter: when false, FSST vectors pass through untouched instead of
+	//! being scanned for the needles' mandatory code chains
+	bool fsst_chain_enabled;
 	//! Per-needle kernel targets for the flat path (first 4 bytes of each needle);
 	//! empty when the needle set is unusable
 	vector<uint32_t> flat_targets;
@@ -779,7 +786,8 @@ static bool IsSupportedComparisonType(PhysicalType type) {
 	}
 }
 
-static unique_ptr<ExpressionFilterExecutor> TryCreateComparisonExecutor(const BoundFunctionExpression &func) {
+static unique_ptr<ExpressionFilterExecutor> TryCreateComparisonExecutor(ClientContext &context,
+                                                                        const BoundFunctionExpression &func) {
 	auto comparison_type = func.GetExpressionType();
 	switch (comparison_type) {
 	case ExpressionType::COMPARE_EQUAL:
@@ -813,7 +821,8 @@ static unique_ptr<ExpressionFilterExecutor> TryCreateComparisonExecutor(const Bo
 	if (column_type != constant_type || !IsSupportedComparisonType(column_type)) {
 		return nullptr;
 	}
-	return make_uniq<ComparisonFilterExecutor>(comparison_type, constant->GetValue());
+	return make_uniq<ComparisonFilterExecutor>(comparison_type, constant->GetValue(),
+	                                           Settings::Get<EnableFSSTEqSetting>(context));
 }
 
 static unique_ptr<ExpressionFilterExecutor> TryCreateFunctionExecutor(ClientContext &context,
@@ -821,7 +830,7 @@ static unique_ptr<ExpressionFilterExecutor> TryCreateFunctionExecutor(ClientCont
                                                                       bool inside_selectivity_optional) {
 	if (!inside_selectivity_optional && func.GetChildren().size() == 2 &&
 	    BoundComparisonExpression::IsComparison(func.GetExpressionType())) {
-		return TryCreateComparisonExecutor(func);
+		return TryCreateComparisonExecutor(context, func);
 	}
 	if (!IsColumnReferenceFunction(func)) {
 		return nullptr;
@@ -865,7 +874,8 @@ static unique_ptr<ExpressionFilterExecutor> TryCreateFunctionExecutor(ClientCont
 			return nullptr;
 		}
 		return make_uniq<ContainsPrefilterExecutor>(func.BindInfo()->Cast<ContainsPrefilterFunctionData>(),
-		                                            inside_selectivity_optional);
+		                                            inside_selectivity_optional,
+		                                            Settings::Get<EnableFSSTContainsPrefilterSetting>(context));
 	}
 	return nullptr;
 }

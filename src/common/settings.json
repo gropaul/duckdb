@@ -609,6 +609,14 @@
         "default_value": "true"
     },
     {
+        "name": "enable_contains_prefilter",
+        "description": "Push a byte-level prefilter for contains(col, 'needle') into the scan, dropping rows that cannot match before the exact predicate runs",
+        "type": "BOOLEAN",
+        "scope": "global",
+        "default_value": "true",
+        "struct": "EnableContainsPrefilterSetting"
+    },
+    {
         "name": "enable_external_access",
         "description": "Allow the database to access external state (through e.g. loading/installing modules, COPY TO/FROM, CSV \"\n\t    \"readers, pandas replacement scans, etc)",
         "type": "BOOLEAN",
@@ -629,11 +637,27 @@
         ]
     },
     {
+        "name": "enable_fsst_contains_prefilter",
+        "description": "Allow the contains prefilter to run on FSST compressed vectors by searching the needle's mandatory code chain, instead of falling back to the decompressed path",
+        "type": "BOOLEAN",
+        "scope": "global",
+        "default_value": "true",
+        "struct": "EnableFSSTContainsPrefilterSetting"
+    },
+    {
+        "name": "enable_fsst_eq",
+        "description": "Allow equality and inequality filters on FSST compressed vectors to be evaluated on the compressed data, without decompressing",
+        "type": "BOOLEAN",
+        "scope": "global",
+        "default_value": "true",
+        "struct": "EnableFSSTEqSetting"
+    },
+    {
         "name": "enable_fsst_vectors",
         "description": "Allow scans on FSST compressed segments to emit compressed vectors to utilize late decompression",
         "type": "BOOLEAN",
         "scope": "global",
-        "default_value": "false",
+        "default_value": "true",
         "struct": "EnableFSSTVectorsSetting"
     },
     {
