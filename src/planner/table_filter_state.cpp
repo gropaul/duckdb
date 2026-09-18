@@ -694,6 +694,24 @@ static bool TryGetContainsNeedle(const Expression &expr, string &needle) {
 	return true;
 }
 
+// contains(col, 'needle'), or an OR of them: what ContainsFilterExecutor answers
+static bool IsContainsFilter(const Expression &expr) {
+	string needle;
+	if (TryGetContainsNeedle(expr, needle)) {
+		return true;
+	}
+	if (expr.GetExpressionClass() != ExpressionClass::BOUND_CONJUNCTION ||
+	    expr.GetExpressionType() != ExpressionType::CONJUNCTION_OR) {
+		return false;
+	}
+	for (auto &child : expr.Cast<BoundConjunctionExpression>().GetChildren()) {
+		if (!TryGetContainsNeedle(*child, needle)) {
+			return false;
+		}
+	}
+	return true;
+}
+
 static bool IsSupportedComparisonType(PhysicalType type) {
 	switch (type) {
 	case PhysicalType::BOOL:
@@ -841,16 +859,19 @@ static unique_ptr<ExpressionFilterExecutor> TryCreateFastExecutor(ClientContext 
 			// no conjunct has a kernel executor: leave the whole expression to the regular executor
 			return nullptr;
 		}
-		// mixed conjunction: the kernel executors run first, so that the conjuncts evaluated through the
-		// regular executor, which decompress what they read, only see the rows the kernels let through
+		// mixed conjunction: conjuncts without a kernel executor run through the regular executor, which
+		// decompresses the rows it reads. A contains executor never does, so it moves to the front and the
+		// rest keep the order the optimizer chose.
 		vector<unique_ptr<ExpressionFilterExecutor>> ordered;
-		for (auto &child : children) {
-			if (child) {
-				ordered.push_back(std::move(child));
+		for (idx_t child_idx = 0; child_idx < child_exprs.size(); child_idx++) {
+			if (children[child_idx] && IsContainsFilter(*child_exprs[child_idx])) {
+				ordered.push_back(std::move(children[child_idx]));
 			}
 		}
 		for (idx_t child_idx = 0; child_idx < child_exprs.size(); child_idx++) {
-			if (!children[child_idx]) {
+			if (children[child_idx]) {
+				ordered.push_back(std::move(children[child_idx]));
+			} else {
 				ordered.push_back(make_uniq<GenericFilterExecutor>(context, *child_exprs[child_idx]));
 			}
 		}
