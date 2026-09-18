@@ -244,6 +244,8 @@ public:
 	idx_t max_row;
 	//! The current batch index
 	idx_t batch_index;
+	//! Distinct for every row group this table scan enters, over both collections; 0 before the first
+	idx_t row_group_id = 0;
 	//! The row_number base for the current batch (number of committed rows before this batch)
 	//! Only set when the row_number virtual column is being scanned
 	optional_idx row_number_base;
@@ -267,6 +269,8 @@ public:
 	optional_ptr<SegmentNode<RowGroup>> GetNextRowGroup(SegmentNode<RowGroup> &row_group) const;
 	optional_ptr<SegmentNode<RowGroup>> GetNextRowGroup(SegmentLock &l, SegmentNode<RowGroup> &row_group) const;
 	optional_ptr<SegmentNode<RowGroup>> GetRootSegment() const;
+	//! Make `node` the current row group and give it the next row_group_id
+	void EnterRowGroup(SegmentNode<RowGroup> &node);
 	bool Scan(DuckTransaction &transaction, DataChunk &result);
 	bool Scan(DataChunk &result, TableScanType type, optional_ptr<SegmentLock> l = nullptr);
 
@@ -318,6 +322,8 @@ public:
 	ScanFilterInfo filters;
 	//! Sampling info
 	ScanSamplingInfo sampling_info;
+	//! Row groups entered so far, over table_state and local_state together
+	idx_t row_groups_entered = 0;
 
 public:
 	void Initialize(vector<StorageIndex> column_ids, optional_ptr<ClientContext> context = nullptr,

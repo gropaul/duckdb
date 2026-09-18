@@ -1,0 +1,24 @@
+# name: test/sql/filter/test_fsst_filter_is_null.test
+# description: 
+# group: [filter]
+
+statement ok
+PRAGMA enable_verification
+
+statement ok
+ATTACH '/Users/paul/imdb.duckdb' AS imdb (READ_ONLY);
+
+statement ok
+use imdb
+
+statement ok
+PRAGMA threads=1
+
+statement ok
+set enable_fsst_vectors='false'
+
+# this fails in postgres and monetdb, but succeeds in sqlite
+query I
+SELECT COUNT(*) FROM movie_companies WHERE note is NULL;
+----
+1271989

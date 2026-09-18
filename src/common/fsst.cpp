@@ -12,9 +12,9 @@ namespace duckdb {
 string FSSTPrimitives::DecompressValue(void *duckdb_fsst_decoder, const char *compressed_string,
                                        const idx_t compressed_string_len, vector<unsigned char> &decompress_buffer) {
 	auto compressed_string_ptr = reinterpret_cast<const unsigned char *>(compressed_string);
-	auto fsst_decoder = static_cast<duckdb_fsst_decoder_t *>(duckdb_fsst_decoder);
-	auto decompressed_string_size = duckdb_fsst_decompress(fsst_decoder, compressed_string_len, compressed_string_ptr,
-	                                                       decompress_buffer.size(), decompress_buffer.data());
+	auto fsst_decoder = static_cast<fsst_decoder_t *>(duckdb_fsst_decoder);
+	auto decompressed_string_size = fsst_decompress(fsst_decoder, compressed_string_len, compressed_string_ptr,
+	                                                decompress_buffer.size(), decompress_buffer.data());
 
 	D_ASSERT(!decompress_buffer.empty());
 	D_ASSERT(decompressed_string_size <= decompress_buffer.size() - 1);
@@ -25,7 +25,7 @@ string FSSTPrimitives::DecoderToString(void *duckdb_fsst_decoder) {
 	if (!duckdb_fsst_decoder) {
 		return "FSST decoder: nullptr\n";
 	}
-	auto decoder = static_cast<duckdb_fsst_decoder_t *>(duckdb_fsst_decoder);
+	auto decoder = static_cast<fsst_decoder_t *>(duckdb_fsst_decoder);
 	string result;
 	result += StringUtil::Format("FSST symbol table (version=%llu, zeroTerminated=%u)\n",
 	                             (unsigned long long)decoder->version, (unsigned)decoder->zeroTerminated);

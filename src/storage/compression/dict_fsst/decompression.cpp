@@ -9,7 +9,7 @@ namespace duckdb {
 namespace dict_fsst {
 
 CompressedStringScanState::~CompressedStringScanState() {
-	delete reinterpret_cast<duckdb_fsst_decoder_t *>(decoder);
+	delete reinterpret_cast<fsst_decoder_t *>(decoder);
 }
 
 string_t CompressedStringScanState::FetchStringFromDict(Vector &result, uint32_t dict_offset, idx_t dict_idx) {
@@ -84,8 +84,8 @@ void CompressedStringScanState::Initialize(bool initialize_dictionary) {
 	switch (mode) {
 	case DictFSSTMode::FSST_ONLY:
 	case DictFSSTMode::DICT_FSST: {
-		decoder = new duckdb_fsst_decoder_t;
-		auto ret = duckdb_fsst_import(reinterpret_cast<duckdb_fsst_decoder_t *>(decoder), baseptr + symbol_table_dest);
+		decoder = new fsst_decoder_t;
+		auto ret = fsst_import(reinterpret_cast<fsst_decoder_t *>(decoder), baseptr + symbol_table_dest);
 		if (ret == 0) {
 			throw IOException("Failed to scan DICT_FSST string segment: invalid FSST symbol table. Database file "
 			                  "appears to be corrupted.");

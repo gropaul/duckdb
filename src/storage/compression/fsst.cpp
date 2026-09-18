@@ -33,6 +33,11 @@ typedef struct BPDeltaDecodeOffsets {
 	idx_t total_bitunpack_count;       //              <------------------------------------------------>
 } bp_delta_offsets_t;
 
+//! version (8) + flags (1) + length histogram (8): the fixed part of a serialized FSST symbol table
+static constexpr idx_t FSST_SYMBOL_TABLE_HEADER_SIZE = 17;
+//! the code counts fsst_export appends behind the symbols: 256 uint32 entries
+static constexpr idx_t FSST_FREQUENCY_SECTION_SIZE = 256 * sizeof(uint32_t);
+
 struct FSSTStorage {
 	static constexpr double MINIMUM_COMPRESSION_RATIO = 1.2;
 	static constexpr double ANALYSIS_SAMPLE_SIZE = 0.25;
@@ -61,7 +66,7 @@ struct FSSTStorage {
 
 	static char *FetchStringPointer(StringDictionaryContainer dict, data_ptr_t baseptr, int32_t dict_offset);
 	static bp_delta_offsets_t CalculateBpDeltaOffsets(int64_t last_known_row, idx_t start, idx_t scan_count);
-	static bool ParseFSSTSegmentHeader(data_ptr_t base_ptr, duckdb_fsst_decoder_t *decoder_out,
+	static bool ParseFSSTSegmentHeader(data_ptr_t base_ptr, fsst_decoder_t *decoder_out, idx_t *symbol_count_out,
 	                                   bitpacking_width_t *width_out, const idx_t segment_capacity,
 	                                   const idx_t segment_count);
 	static bp_delta_offsets_t StartScan(FSSTScanState &scan_state, data_ptr_t base_data, idx_t start,
@@ -79,11 +84,11 @@ struct FSSTAnalyzeState : public AnalyzeState {
 
 	~FSSTAnalyzeState() override {
 		if (fsst_encoder) {
-			duckdb_fsst_destroy(fsst_encoder);
+			fsst_destroy(fsst_encoder);
 		}
 	}
 
-	duckdb_fsst_encoder_t *fsst_encoder = nullptr;
+	fsst_encoder_t *fsst_encoder = nullptr;
 	idx_t count;
 
 	StringHeap fsst_string_heap;
@@ -162,21 +167,22 @@ idx_t FSSTStorage::StringFinalAnalyze(AnalyzeState &state_p) {
 	size_t output_buffer_size = 7 + 2 * state.fsst_string_total_size; // size as specified in fsst.h
 
 	vector<size_t> fsst_string_sizes;
-	vector<unsigned char *> fsst_string_ptrs;
+	vector<const unsigned char *> fsst_string_ptrs;
 	for (auto &str : state.fsst_strings) {
 		fsst_string_sizes.push_back(str.GetSize());
-		fsst_string_ptrs.push_back((unsigned char *)str.GetData()); // NOLINT
+		fsst_string_ptrs.push_back((const unsigned char *)str.GetData()); // NOLINT
 	}
 
-	state.fsst_encoder = duckdb_fsst_create(string_count, &fsst_string_sizes[0], &fsst_string_ptrs[0], 0);
+	state.fsst_encoder = fsst_create(string_count, &fsst_string_sizes[0], &fsst_string_ptrs[0], 0);
+	// codes in byte order of their symbols, so a needle prefix names a contiguous code range
+	fsst_sort_codes(state.fsst_encoder);
 
 	// TODO: do we really need to encode to get a size estimate?
 	auto compressed_ptrs = vector<unsigned char *>(string_count, nullptr);
 	auto compressed_sizes = vector<size_t>(string_count, 0);
 	unique_ptr<unsigned char[]> compressed_buffer(new unsigned char[output_buffer_size]);
 
-	auto res =
-	    duckdb_fsst_compress(state.fsst_encoder, string_count, &fsst_string_sizes[0], &fsst_string_ptrs[0],
+	auto res = fsst_compress(state.fsst_encoder, string_count, &fsst_string_sizes[0], &fsst_string_ptrs[0],
 	                         output_buffer_size, compressed_buffer.get(), &compressed_sizes[0], &compressed_ptrs[0]);
 
 	if (string_count != res) {
@@ -196,8 +202,8 @@ idx_t FSSTStorage::StringFinalAnalyze(AnalyzeState &state_p) {
 	    BitpackingPrimitives::GetRequiredSize(string_count + state.empty_strings, minimum_width);
 
 	auto estimated_base_size = double(bitpacked_offsets_size + compressed_dict_size) * (1 / ANALYSIS_SAMPLE_SIZE);
-	auto num_blocks = estimated_base_size / double(state.info.GetBlockSize() - sizeof(duckdb_fsst_decoder_t));
-	auto symtable_size = num_blocks * sizeof(duckdb_fsst_decoder_t);
+	auto num_blocks = estimated_base_size / double(state.info.GetBlockSize() - sizeof(fsst_decoder_t));
+	auto symtable_size = num_blocks * sizeof(fsst_decoder_t);
 	auto estimated_size = estimated_base_size + symtable_size;
 
 	return LossyNumericCast<idx_t>(estimated_size * MINIMUM_COMPRESSION_RATIO);
@@ -217,7 +223,7 @@ public:
 
 	~FSSTCompressionState() override {
 		if (fsst_encoder) {
-			duckdb_fsst_destroy(fsst_encoder);
+			fsst_destroy(fsst_encoder);
 		}
 	}
 
@@ -226,6 +232,7 @@ public:
 		current_width = 0;
 		max_compressed_string_length = 0;
 		last_fitting_size = 0;
+		memset(segment_code_counts, 0, sizeof(segment_code_counts));
 
 		// Reset the pointers into the current segment
 		current_dictionary = FSSTStorage::GetDictionary(*current_segment, handle);
@@ -251,6 +258,11 @@ public:
 		current_dictionary.size += compressed_string_len;
 		auto dict_pos = current_end_ptr - current_dictionary.size;
 		memcpy(dict_pos, compressed_string, compressed_string_len);
+		// the code frequencies of this segment, stored with its symbol table for readers that plan
+		// over the compressed codes; a literal behind an escape counts as the code it looks like
+		for (idx_t i = 0; i < compressed_string_len; i++) {
+			segment_code_counts[compressed_string[i]]++;
+		}
 		current_dictionary.Verify(info.GetBlockSize());
 
 		// We just push the string length to effectively delta encode the strings
@@ -325,6 +337,13 @@ public:
 	idx_t Finalize() {
 		auto &buffer_manager = BufferManager::GetBufferManager(current_segment->GetDatabase());
 		auto handle = buffer_manager.Pin(current_segment->GetBlockHandle());
+
+		// serialize the symbol table again, now carrying this segment's code counts
+		fsst_set_frequency(fsst_encoder, segment_code_counts);
+		auto serialized_size = fsst_export(fsst_encoder, &fsst_serialized_symbol_table[0]);
+		if (serialized_size != fsst_serialized_symbol_table_size) {
+			throw InternalException("FSST symbol table changed size between space reservation and serialization");
+		}
 		if (current_dictionary.end != info.GetBlockSize()) {
 			throw InternalException("dictionary end does not match the block size in FSSTCompressionState::Finalize");
 		}
@@ -395,9 +414,11 @@ public:
 	bitpacking_width_t current_width;
 	idx_t last_fitting_size;
 
-	duckdb_fsst_encoder_t *fsst_encoder = nullptr;
-	unsigned char fsst_serialized_symbol_table[sizeof(duckdb_fsst_decoder_t)];
-	size_t fsst_serialized_symbol_table_size = sizeof(duckdb_fsst_decoder_t);
+	fsst_encoder_t *fsst_encoder = nullptr;
+	unsigned char fsst_serialized_symbol_table[sizeof(fsst_decoder_t)];
+	size_t fsst_serialized_symbol_table_size = sizeof(fsst_decoder_t);
+	//! Occurrences of each byte in this segment's compressed data, serialized with its symbol table
+	uint32_t segment_code_counts[256] = {};
 };
 
 unique_ptr<CompressionState> FSSTStorage::InitCompression(ColumnDataCheckpointData &checkpoint_data,
@@ -410,8 +431,11 @@ unique_ptr<CompressionState> FSSTStorage::InitCompression(ColumnDataCheckpointDa
 	}
 
 	compression_state->fsst_encoder = analyze_state.fsst_encoder;
+	// the symbol table is serialized again per segment, with that segment's code counts appended, so the
+	// space it needs is known up front: what the symbols take plus the fixed count array
 	compression_state->fsst_serialized_symbol_table_size =
-	    duckdb_fsst_export(compression_state->fsst_encoder, &compression_state->fsst_serialized_symbol_table[0]);
+	    fsst_export(compression_state->fsst_encoder, &compression_state->fsst_serialized_symbol_table[0]) +
+	    FSST_FREQUENCY_SECTION_SIZE;
 	analyze_state.fsst_encoder = nullptr;
 
 	return std::move(compression_state);
@@ -427,7 +451,7 @@ void FSSTStorage::Compress(CompressionState &state_p, const Vector &scan_vector)
 
 	// Collect pointers to strings to compress
 	vector<size_t> sizes_in;
-	vector<unsigned char *> strings_in;
+	vector<const unsigned char *> strings_in;
 	size_t total_size = 0;
 	idx_t total_count = 0;
 	const auto count = scan_vector.size();
@@ -443,7 +467,7 @@ void FSSTStorage::Compress(CompressionState &state_p, const Vector &scan_vector)
 		total_count++;
 		total_size += data[idx].GetSize();
 		sizes_in.push_back(data[idx].GetSize());
-		strings_in.push_back((unsigned char *)data[idx].GetData()); // NOLINT
+		strings_in.push_back((const unsigned char *)data[idx].GetData()); // NOLINT
 	}
 
 	// Only Nulls or empty strings in this vector, nothing to compress
@@ -467,8 +491,8 @@ void FSSTStorage::Compress(CompressionState &state_p, const Vector &scan_vector)
 	vector<size_t> sizes_out(total_count, 0);
 	vector<unsigned char> compress_buffer(compress_buffer_size, 0);
 
-	auto res = duckdb_fsst_compress(
-	    state.fsst_encoder,   /* IN: encoder obtained from duckdb_fsst_create(). */
+	auto res = fsst_compress(
+	    state.fsst_encoder,   /* IN: encoder obtained from fsst_create(). */
 	    total_count,          /* IN: number of strings in batch to compress. */
 	    &sizes_in[0],         /* IN: byte-lengths of the inputs */
 	    &strings_in[0],       /* IN: input string start pointers. */
@@ -513,6 +537,7 @@ struct FSSTScanState : public StringScanState {
 
 	buffer_ptr<void> duckdb_fsst_decoder;
 	void *duckdb_fsst_decoder_ptr = nullptr;
+	idx_t symbol_count = 0;
 	//! Encoder derived from the decoder, shared with all FSST vectors created by this scan.
 	shared_ptr<FSSTEncoder> fsst_encoder;
 
@@ -571,15 +596,15 @@ unique_ptr<SegmentScanState> FSSTStorage::StringInitScan(const QueryContext &con
 	state->handle = buffer_manager.Pin(segment.GetBlockHandle());
 	auto base_ptr = state->handle.GetDataMutable() + block_offset;
 
-	state->duckdb_fsst_decoder = make_buffer<duckdb_fsst_decoder_t>();
-	auto decoder = reinterpret_cast<duckdb_fsst_decoder_t *>(state->duckdb_fsst_decoder.get());
-	auto retval =
-	    ParseFSSTSegmentHeader(base_ptr, decoder, &state->current_width, segment_capacity, segment.count.load());
+	state->duckdb_fsst_decoder = make_buffer<fsst_decoder_t>();
+	auto decoder = reinterpret_cast<fsst_decoder_t *>(state->duckdb_fsst_decoder.get());
+	auto retval = ParseFSSTSegmentHeader(base_ptr, decoder, &state->symbol_count, &state->current_width,
+	                                     segment_capacity, segment.count.load());
 	if (!retval) {
 		state->duckdb_fsst_decoder = nullptr;
 	} else {
 		// build the encoder once, to be shared with all FSST vectors created by this scan
-		state->fsst_encoder = make_shared_ptr<FSSTEncoder>(*decoder);
+		state->fsst_encoder = make_shared_ptr<FSSTEncoder>(state->duckdb_fsst_decoder);
 	}
 	state->duckdb_fsst_decoder_ptr = state->duckdb_fsst_decoder.get();
 	// FSSTPrimitives::SaveDecoder(state->duckdb_fsst_decoder_ptr, "scripts/fsst_symbol_table/tables/hits/url");
@@ -604,12 +629,6 @@ void DeltaDecodeStringOffsets(uint32_t *string_lengths, uint32_t *string_offsets
 void BitUnpackRange(data_ptr_t src_ptr, data_ptr_t dst_ptr, idx_t count, idx_t row, bitpacking_width_t width) {
 	auto bitunpack_src_ptr = &src_ptr[(row * width) / 8];
 	BitpackingPrimitives::UnPackBuffer<uint32_t>(dst_ptr, bitunpack_src_ptr, count, width);
-}
-
-// Isolated (noinline) so their cost shows up separately in a profiler.
-// The new block always goes at the front of the byte buffer (Grow shifts any existing bytes up to make room).
-void CopyCompressedBlock(data_ptr_t dest, const_data_ptr_t src, idx_t block_size) {
-	memcpy(dest, src, block_size);
 }
 
 void PopulateOffsets(int32_t *offsets, uint32_t *lengths, const uint32_t *delta_decode, const uint32_t *row_lengths,
@@ -664,12 +683,8 @@ void FSSTStorage::StringScanPartial(ColumnSegment &segment, ColumnScanState &sta
 	auto &scan_state = state.scan_state->Cast<FSSTScanState>();
 	auto start = state.GetPositionInSegment();
 
-	bool enable_fsst_vectors;
-	if (ALLOW_FSST_VECTORS) {
-		enable_fsst_vectors = Settings::Get<EnableFSSTVectorsSetting>(segment.GetDatabase());
-	} else {
-		enable_fsst_vectors = false;
-	}
+	const bool enable_fsst_vectors =
+	    ALLOW_FSST_VECTORS && Settings::Get<EnableFSSTVectorsSetting>(segment.GetDatabase());
 
 	auto baseptr = scan_state.handle.GetDataMutable() + segment.GetBlockOffset();
 	auto dict = GetDictionary(segment, scan_state.handle);
@@ -684,51 +699,45 @@ void FSSTStorage::StringScanPartial(ColumnSegment &segment, ColumnScanState &sta
 	auto &string_offsets = scan_state.string_offsets;
 	if (enable_fsst_vectors) {
 		D_ASSERT(scan_state.duckdb_fsst_decoder);
-
-		// todo: Now we check: If there is a result_offset then we also need already to get an FSST VECTOR and then we
-		// todo: also need to populate it!
-		// if we have an result offset then we have to
 		const bool new_vector = result_offset == 0;
 		const idx_t unused_values_offset = decode_offsets.unused_delta_decoded_values;
-		// delta_decode_buffer[udv + i] is the distance from the dict end to the START of scanned row i (strings are
+		// string_offsets[udv + i] is the distance from the dict end to the START of scanned row i (strings are
 		// stored in reverse row order). The scanned block runs from the END of the first row (highest address) down
 		// to the START of the last row (lowest address).
 		const uint32_t first_row_start = string_offsets[unused_values_offset];
 		const uint32_t first_row_length = bitunpack_buffer[decode_offsets.scan_offset];
 		const uint32_t last_row_start = string_offsets[unused_values_offset + scan_count - 1];
-
-		// block_top = end of the first row = its start minus its own length (this is why we subtract first_row_length)
 		const uint32_t block_top = first_row_start - first_row_length;
 		const uint32_t block_bottom = last_row_start;
 		const idx_t block_size = block_bottom - block_top;
+		// the compressed strings of the scanned rows are one contiguous block in the dictionary
+		auto src = data_ptr_cast(FetchStringPointer(dict, baseptr, UnsafeNumericCast<int32_t>(block_bottom)));
 
-		// Logical index where the new values start: 0 for a new vector, else after the existing values.
+		// Offsets below are relative to the block's lowest address. A new vector references the block in place
+		// and pins it; a vector continuing into this segment owns its bytes, so the block is copied in front.
 		idx_t index_base;
 		if (new_vector) {
 			const auto string_block_limit = StringUncompressed::GetStringBlockLimit(segment.GetBlockSize());
+			const idx_t row_group_id = state.parent ? state.parent->row_group_id : 0;
 			FSSTVector::Create(result, scan_state.duckdb_fsst_decoder, scan_state.fsst_encoder, string_block_limit,
-			                   scan_count, block_size);
+			                   scan_count, 0, scan_state.symbol_count, row_group_id);
+			auto &buffer_manager = BufferManager::GetBufferManager(segment.GetDatabase());
+			auto pin = make_shared_ptr<BufferHandle>(buffer_manager.Pin(segment.GetBlockHandle()));
+			FSSTVector::GetFSSTBuffer(result).ReferenceBytes(src, std::move(pin));
 			index_base = 0;
 		} else {
 			D_ASSERT(result.GetVectorType() == VectorType::FSST_VECTOR);
 			index_base = FSSTVector::GetFSSTBuffer(result).Capacity();
-			// shifts existing bytes/offsets up so the new block can go at the front
 			FSSTVector::Grow(result, scan_count, block_size);
+			memcpy(FSSTVector::GetFSSTBuffer(result).GetBytes(), src, block_size);
 		}
-
-		// The scanned rows' compressed strings are one contiguous block in the dictionary. Copy the whole block to the
-		// front, then fill the per-row offsets and lengths (relative to block_top) so reads need no arithmetic.
 		auto &fsst_buffer = FSSTVector::GetFSSTBuffer(result);
-		auto src = FetchStringPointer(dict, baseptr, UnsafeNumericCast<int32_t>(block_bottom));
-
-		CopyCompressedBlock(fsst_buffer.GetBytes(), const_data_ptr_cast(src), block_size);
 		PopulateOffsets(fsst_buffer.GetOffsets(), fsst_buffer.GetLengths(), string_offsets.get(),
 		                bitunpack_buffer.get() + decode_offsets.scan_offset, unused_values_offset, block_top,
 		                block_size, scan_count, index_base);
 	} else {
 		D_ASSERT(result.GetVectorType() == VectorType::FLAT_VECTOR);
 		string_t *result_data = FlatVector::GetDataMutable<string_t>(result);
-		// Just decompress
 		auto &str_allocator = StringVector::GetStringAllocator(result);
 		for (idx_t i = 0; i < scan_count; i++) {
 			result_data[i + result_offset] =
@@ -786,9 +795,11 @@ void FSSTStorage::StringFetchRow(ColumnSegment &segment, ColumnFetchState &state
 	auto base_data = data_ptr_cast(base_ptr + sizeof(fsst_compression_header_t));
 	auto dict = GetDictionary(segment, handle);
 
-	duckdb_fsst_decoder_t decoder;
+	fsst_decoder_t decoder;
 	bitpacking_width_t width;
-	auto have_symbol_table = ParseFSSTSegmentHeader(base_ptr, &decoder, &width, segment_capacity, segment.count.load());
+	idx_t symbol_count;
+	auto have_symbol_table =
+	    ParseFSSTSegmentHeader(base_ptr, &decoder, &symbol_count, &width, segment_capacity, segment.count.load());
 
 	auto result_data = FlatVector::GetDataMutable<string_t>(result);
 	if (!have_symbol_table) {
@@ -866,7 +877,7 @@ static void ThrowInvalidFSSTSegment(const char *reason) {
 }
 
 // Returns false if no symbol table was found. This means all strings are either empty or null
-bool FSSTStorage::ParseFSSTSegmentHeader(data_ptr_t base_ptr, duckdb_fsst_decoder_t *decoder_out,
+bool FSSTStorage::ParseFSSTSegmentHeader(data_ptr_t base_ptr, fsst_decoder_t *decoder_out, idx_t *symbol_count_out,
                                          bitpacking_width_t *width_out, const idx_t segment_capacity,
                                          const idx_t segment_count) {
 	if (sizeof(fsst_compression_header_t) > segment_capacity) {
@@ -887,10 +898,6 @@ bool FSSTStorage::ParseFSSTSegmentHeader(data_ptr_t base_ptr, duckdb_fsst_decode
 	if (fsst_symbol_table_offset != expected_symbol_table_offset) {
 		ThrowInvalidFSSTSegment("bitpacking width did not match the stored layout");
 	}
-	if (sizeof(duckdb_fsst_decoder_t) > segment_capacity - fsst_symbol_table_offset) {
-		ThrowInvalidFSSTSegment("symbol table was out of range");
-	}
-
 	StringDictionaryContainer container;
 	container.size = Load<uint32_t>(data_ptr_cast(&header_ptr->dict_size));
 	container.end = Load<uint32_t>(data_ptr_cast(&header_ptr->dict_end));
@@ -898,9 +905,20 @@ bool FSSTStorage::ParseFSSTSegmentHeader(data_ptr_t base_ptr, duckdb_fsst_decode
 	    container.end - container.size < fsst_symbol_table_offset) {
 		ThrowInvalidFSSTSegment("dictionary was out of range");
 	}
+	// the symbol table is the compact serialization fsst_export wrote, not the full decoder struct, and its
+	// stored size is not in the header: copy what the segment has into a padded buffer so a corrupt length
+	// histogram cannot make fsst_import read past the block
+	auto symbol_table_room = (container.end - container.size) - fsst_symbol_table_offset;
+	if (symbol_table_room < FSST_SYMBOL_TABLE_HEADER_SIZE) {
+		ThrowInvalidFSSTSegment("symbol table was out of range");
+	}
 
 	*width_out = width;
-	return duckdb_fsst_import(decoder_out, base_ptr + fsst_symbol_table_offset);
+	unsigned char symbol_table[FSST_MAXHEADER] = {};
+	memcpy(symbol_table, base_ptr + fsst_symbol_table_offset, MinValue<idx_t>(FSST_MAXHEADER, symbol_table_room));
+	// byte 1 of the serialized symbol table is the symbol count; fsst_import does not keep it
+	*symbol_count_out = symbol_table[1];
+	return fsst_import(decoder_out, symbol_table);
 }
 
 // The calculation of offsets and counts while scanning or fetching is a bit tricky, for two reasons:

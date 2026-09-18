@@ -1,0 +1,4 @@
+[submodule "third_party/fsst/upstream"]
+	path = third_party/fsst/upstream
+	url = https://github.com/gropaul/fsst
+	branch = search/prefilter

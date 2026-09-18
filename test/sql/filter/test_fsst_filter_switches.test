@@ -1,0 +1,152 @@
+# name: test/sql/filter/test_fsst_filter_switches.test
+# description: enable_fsst_eq / enable_fsst_contains_prefilter / enable_contains_prefilter do not change results
+# group: [filter]
+
+require noforcestorage
+
+statement ok
+SET storage_compatibility_version='v1.2.0';
+
+statement ok
+ATTACH '{TEST_DIR}/fsst_filter_switches.db' AS db;
+
+statement ok
+SET force_compression='fsst';
+
+statement ok
+CREATE TABLE db.t AS
+SELECT 'row_' || i::VARCHAR || '_google_' || (i % 37)::VARCHAR || '_tail_padding_bytes' AS s
+FROM range(100000) tbl(i);
+
+statement ok
+CHECKPOINT db;
+
+query I
+SELECT count(*) FROM pragma_storage_info('db.t') WHERE compression = 'FSST';
+----
+4
+
+# every kernel is an optimization of the exact predicate: results must not depend on the switches
+foreach fsst_vectors true false
+
+foreach fsst_eq true false
+
+foreach fsst_contains true false
+
+foreach contains_prefilter true false
+
+statement ok
+SET enable_fsst_vectors={fsst_vectors}
+
+statement ok
+SET enable_fsst_eq={fsst_eq}
+
+statement ok
+SET enable_fsst_contains_prefilter={fsst_contains}
+
+statement ok
+SET enable_contains_prefilter={contains_prefilter}
+
+query I
+SELECT count(*) FROM db.t WHERE s = 'row_12345_google_24_tail_padding_bytes';
+----
+1
+
+query I
+SELECT count(*) FROM db.t WHERE s <> 'row_12345_google_24_tail_padding_bytes';
+----
+99999
+
+query I
+SELECT count(*) FROM db.t WHERE contains(s, 'google');
+----
+100000
+
+query I
+SELECT count(*) FROM db.t WHERE contains(s, '_99999_');
+----
+1
+
+query I
+SELECT count(*) FROM db.t WHERE contains(s, '_12345_') OR contains(s, '_54321_');
+----
+2
+
+query I
+SELECT count(*) FROM db.t WHERE contains(s, 'zzzz');
+----
+0
+
+endloop
+
+endloop
+
+endloop
+
+endloop
+
+# two predicates on the FSST column in one filter: the second comparison sees a non-incremental selection
+statement ok
+CREATE TABLE db.pairs AS
+SELECT 'left_' || (i % 5)::VARCHAR AS a, 'right_' || (i % 7)::VARCHAR AS b, i FROM range(100000) tbl(i);
+
+statement ok
+CHECKPOINT db;
+
+query I
+SELECT count(*) FROM pragma_storage_info('db.pairs') WHERE compression = 'FSST';
+----
+2
+
+foreach fsst_vectors true false
+
+foreach fsst_eq true false
+
+statement ok
+SET enable_fsst_vectors={fsst_vectors}
+
+statement ok
+SET enable_fsst_eq={fsst_eq}
+
+# OR: the later equalities run on the rows the earlier ones rejected
+query I
+SELECT count(*) FROM db.pairs WHERE a = 'left_1' OR a = 'left_3' OR b = 'right_2';
+----
+48572
+
+# AND: the second equality runs on the rows the first accepted
+query I
+SELECT count(*) FROM db.pairs WHERE a = 'left_1' AND b = 'right_2';
+----
+2857
+
+# the filter has to stay in the operator, not the scan: go through an expression the scan cannot take
+query I
+SELECT count(*) FROM db.pairs WHERE (a = 'left_1' OR b = 'right_2') AND (a <> 'left_3' OR i % 2 = 0);
+----
+30000
+
+# NULLs on the FSST side reach the compressed compare as invalid rows
+statement ok
+CREATE TABLE db.nullable AS
+SELECT CASE WHEN i % 3 = 0 THEN NULL ELSE 'v_' || (i % 4)::VARCHAR END AS s, i FROM range(100000) tbl(i);
+
+statement ok
+CHECKPOINT db;
+
+query I
+SELECT count(*) FROM db.nullable WHERE s = 'v_1' OR s = 'v_2';
+----
+33334
+
+query I
+SELECT count(*) FROM db.nullable WHERE s <> 'v_1' OR i % 3 = 0;
+----
+83333
+
+statement ok
+DROP TABLE db.nullable;
+
+endloop
+
+endloop

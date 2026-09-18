@@ -13,6 +13,8 @@
 namespace duckdb {
 
 //! Comparison operations evaluated directly on FSST-compressed data, without decompressing.
+//! Same contract as VectorOperations::Equals: the vectors are already sliced to the selected rows and sel
+//! only names the output rows. Table filters over the unsliced scan vector have their own loop.
 struct FSSTOps {
 	//! Try to evaluate an equality select between an FSST vector and a non-NULL constant VARCHAR by
 	//! compressing the constant and comparing in the compressed domain.

@@ -49,23 +49,23 @@ public:
 		// so we can still do the four byte symbol table load. The tail path of
 		// fsst is called often!
 		const auto max_uncompressed_length = compressed_string_len * 8 + 32;
-		const auto fsst_decoder = static_cast<duckdb_fsst_decoder_t *>(duckdb_fsst_decoder);
+		const auto fsst_decoder = static_cast<fsst_decoder_t *>(duckdb_fsst_decoder);
 		const auto compressed_string_ptr = (const unsigned char *)compressed_string; // NOLINT
 		const auto target_ptr = StringVector::AllocateShrinkableBuffer(str_allocator, max_uncompressed_length);
-		const auto decompressed_string_size = duckdb_fsst_decompress(
+		const auto decompressed_string_size = fsst_decompress(
 		    fsst_decoder, compressed_string_len, compressed_string_ptr, max_uncompressed_length, target_ptr);
 		return StringVector::FinalizeShrinkableBuffer(str_allocator, target_ptr, max_uncompressed_length,
 		                                              decompressed_string_size);
 	}
 	static string_t DecompressInlinedValue(void *duckdb_fsst_decoder, const char *compressed_string,
 	                                       const idx_t compressed_string_len) {
-		const auto fsst_decoder = static_cast<duckdb_fsst_decoder_t *>(duckdb_fsst_decoder);
+		const auto fsst_decoder = static_cast<fsst_decoder_t *>(duckdb_fsst_decoder);
 		const auto compressed_string_ptr = (const unsigned char *)compressed_string; // NOLINT
 		StringWithExtraSpace result;
 		const auto target_ptr = (unsigned char *)result.str.GetPrefixWriteable(); // NOLINT
 		const auto decompressed_string_size =
-		    duckdb_fsst_decompress(fsst_decoder, compressed_string_len, compressed_string_ptr,
-		                           string_t::INLINE_LENGTH + sizeof(StringWithExtraSpace::extra_space), target_ptr);
+		    fsst_decompress(fsst_decoder, compressed_string_len, compressed_string_ptr,
+		                    string_t::INLINE_LENGTH + sizeof(StringWithExtraSpace::extra_space), target_ptr);
 		if (decompressed_string_size > string_t::INLINE_LENGTH) {
 			throw DataCorruptionException(
 			    "Corrupt database file: decoded FSST string of >=%llu bytes (should be <=%llu bytes)",
@@ -91,24 +91,15 @@ public:
 //! (e.g. filter predicates), not bulk data. Assumes a little-endian host (as does the FSST format).
 class FSSTEncoder {
 public:
-	explicit FSSTEncoder(const duckdb_fsst_decoder_t &decoder) {
-		for (uint16_t code = 0; code < 255; code++) {
-			const idx_t len = decoder.len[code];
-			if (len == 0 || len > 8) {
-				continue;
-			}
-			const uint64_t mask = len >= 8 ? ~0ULL : ((1ULL << (8 * len)) - 1);
-			const uint64_t value = decoder.symbol[code] & mask;
-			buckets[value & 0xFF].push_back({value, mask, static_cast<uint8_t>(len), static_cast<uint8_t>(code)});
-		}
-		// sort each bucket by descending length so the first match is the longest
-		for (auto &bucket : buckets) {
-			std::sort(bucket.begin(), bucket.end(), [](const Symbol &a, const Symbol &b) { return a.len > b.len; });
-		}
+	//! The tables are built on the first Compress: most scans never compress a needle
+	explicit FSSTEncoder(buffer_ptr<void> decoder_p) : decoder(std::move(decoder_p)) {
 	}
 
 	//! Compress the input via greedy longest-match, returning the compressed bytes.
 	string Compress(const char *input_p, idx_t input_len) const {
+		if (!built) {
+			Build();
+		}
 		const auto input = reinterpret_cast<const unsigned char *>(input_p);
 		string result;
 		result.reserve(input_len);
@@ -143,8 +134,30 @@ private:
 		uint8_t len;    //! symbol byte-length (1-8)
 		uint8_t code;   //! FSST code for this symbol
 	};
+
+	void Build() const {
+		const auto &table = *static_cast<const fsst_decoder_t *>(decoder.get());
+		for (uint16_t code = 0; code < 255; code++) {
+			const idx_t len = table.len[code];
+			if (len == 0 || len > 8) {
+				continue;
+			}
+			const uint64_t mask = len >= 8 ? ~0ULL : ((1ULL << (8 * len)) - 1);
+			const uint64_t value = table.symbol[code] & mask;
+			buckets[value & 0xFF].push_back({value, mask, static_cast<uint8_t>(len), static_cast<uint8_t>(code)});
+		}
+		// sort each bucket by descending length so the first match is the longest
+		for (auto &bucket : buckets) {
+			std::sort(bucket.begin(), bucket.end(), [](const Symbol &a, const Symbol &b) { return a.len > b.len; });
+		}
+		built = true;
+	}
+
+	//! The fsst_decoder_t the tables come from, kept alive here
+	buffer_ptr<void> decoder;
+	mutable bool built = false;
 	//! Symbols grouped by first byte, each bucket sorted by descending length.
-	vector<Symbol> buckets[256];
+	mutable vector<Symbol> buckets[256];
 };
 
 } // namespace duckdb

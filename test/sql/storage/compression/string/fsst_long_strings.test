@@ -1,0 +1,70 @@
+# name: test/sql/storage/compression/string/fsst_long_strings.test
+# description: FSST roundtrip for strings crossing the former 511-byte chunk boundary
+# group: [string]
+
+statement ok
+ATTACH '{TEST_DIR}/fsst_long_new.db' AS db_v13 (STORAGE_VERSION 'v1.3.0');
+
+statement ok
+ATTACH '{TEST_DIR}/fsst_long_old.db' AS db_v1 (STORAGE_VERSION 'v1.0.0');
+
+foreach compression fsst dict_fsst
+
+statement ok
+USE db_v1
+
+onlyif compression=dict_fsst
+statement ok
+USE db_v13
+
+statement ok
+PRAGMA force_compression='{compression}'
+
+statement ok
+CREATE TABLE t AS SELECT range AS i, repeat('abcdefghij', 100) || range::VARCHAR AS s FROM range(3000);
+
+statement ok
+CREATE TABLE t2 AS SELECT range AS i, repeat('xyz', 170 + (range % 20)) || 'unique' || range::VARCHAR AS s FROM range(2000);
+
+statement ok
+CHECKPOINT;
+
+query I
+SELECT lower(compression)='{compression}' FROM pragma_storage_info('t') WHERE segment_type ILIKE 'VARCHAR' LIMIT 1
+----
+1
+
+query I
+SELECT lower(compression)='{compression}' FROM pragma_storage_info('t2') WHERE segment_type ILIKE 'VARCHAR' LIMIT 1
+----
+1
+
+query III
+SELECT COUNT(*), SUM(strlen(s)), COUNT(DISTINCT s) FROM t
+----
+3000
+3010890
+3000
+
+query I
+SELECT bool_and(s = repeat('abcdefghij', 100) || i::VARCHAR) FROM t
+----
+true
+
+query I
+SELECT bool_and(s = repeat('xyz', 170 + (i % 20)) || 'unique' || i::VARCHAR) FROM t2
+----
+true
+
+query I
+SELECT COUNT(*) FROM t WHERE s = repeat('abcdefghij', 100) || '1234'
+----
+1
+
+statement ok
+DROP TABLE t;
+
+statement ok
+DROP TABLE t2;
+
+endloop

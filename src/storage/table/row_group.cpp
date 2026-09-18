@@ -391,7 +391,7 @@ bool RowGroup::InitializeScanWithOffset(CollectionScanState &state, SegmentNode<
 		throw InternalException("RowGroup::InitializeScanWithOffset segment node mismatch");
 	}
 
-	state.row_group = node;
+	state.EnterRowGroup(node);
 	state.vector_index = vector_offset;
 	auto row_start = node.GetRowStart();
 	state.max_row_group_row = row_start > state.max_row ? 0 : MinValue<idx_t>(this->count, state.max_row - row_start);
@@ -420,7 +420,7 @@ bool RowGroup::InitializeScan(CollectionScanState &state, SegmentNode<RowGroup> 
 		throw InternalException("RowGroup::InitializeScan segment node mismatch");
 	}
 	auto row_start = node.GetRowStart();
-	state.row_group = node;
+	state.EnterRowGroup(node);
 	state.vector_index = 0;
 	state.max_row_group_row = row_start > state.max_row ? 0 : MinValue<idx_t>(this->count, state.max_row - row_start);
 	if (state.max_row_group_row == 0) {

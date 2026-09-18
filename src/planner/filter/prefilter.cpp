@@ -344,23 +344,6 @@ idx_t RunStrings(const string_t *strings, const ValidityMask &validity, const Se
 	return result_count;
 }
 
-template <class CodeT, class Test>
-idx_t RunView(const var_binary_view_t &view, const ValidityMask &validity, const SelectionVector &sel,
-              SelectionVector &result_sel, idx_t count, const typename Test::Prep &prep) {
-	idx_t result_count = 0;
-	for (idx_t i = 0; i < count; ++i) {
-		const auto sel_idx = sel.get_index(i);
-		const auto len = view.lengths[sel_idx];
-		if (validity.RowIsValid(sel_idx) && len >= Geometry<CodeT>::CODE_LEN) {
-			const auto row = view.base + view.offsets[sel_idx];
-			const bool hit = Test::Contains(row, len, prep);
-			result_sel.set_index(result_count, sel_idx);
-			result_count += hit;
-		}
-	}
-	return result_count;
-}
-
 //===--------------------------------------------------------------------===//
 // Dispatch
 //===--------------------------------------------------------------------===//
@@ -410,17 +393,6 @@ struct StringsVextBody {
 	}
 };
 
-template <class CodeT, uint32_t K>
-struct ViewVextBody {
-	__attribute__((noinline)) static idx_t Run(const var_binary_view_t *view, const ValidityMask *validity,
-	                                           const SelectionVector *sel, SelectionVector *result_sel, idx_t count,
-	                                           const CodeT *targets) {
-		using Test = VextRowTest<CodeT, K>;
-		const auto prep = Test::Make(targets);
-		return RunView<CodeT, Test>(*view, *validity, *sel, *result_sel, count, prep);
-	}
-};
-
 #endif
 
 template <class CodeT>
@@ -439,42 +411,11 @@ idx_t PrefilterStringsImpl(const string_t *strings, const ValidityMask &validity
 	return RunStrings<CodeT, Test>(strings, validity, sel, result_sel, count, Test::Make(targets, target_count));
 }
 
-template <class CodeT>
-idx_t PrefilterViewImpl(const var_binary_view_t &view, const ValidityMask &validity, const SelectionVector &sel,
-                        SelectionVector &result_sel, idx_t count, const CodeT *targets, idx_t target_count) {
-	if (target_count == 0) {
-		return 0;
-	}
-#ifdef DUCKDB_PREFILTER_VEXT
-	if (target_count <= MAX_FUSED_TARGETS) {
-		return DispatchTargetCount<CodeT, ViewVextBody>(target_count, &view, &validity, &sel, &result_sel, count,
-		                                                targets);
-	}
-#endif
-	using Test = ScalarRowTest<CodeT>;
-	return RunView<CodeT, Test>(view, validity, sel, result_sel, count, Test::Make(targets, target_count));
-}
-
 } // namespace
 
 idx_t PrefilterContainsAny(const string_t *strings, const ValidityMask &validity, const SelectionVector &sel,
                            SelectionVector &result_sel, idx_t count, const uint32_t *targets, idx_t target_count) {
 	return PrefilterStringsImpl(strings, validity, sel, result_sel, count, targets, target_count);
-}
-
-idx_t PrefilterContainsAny(const string_t *strings, const ValidityMask &validity, const SelectionVector &sel,
-                           SelectionVector &result_sel, idx_t count, const uint16_t *targets, idx_t target_count) {
-	return PrefilterStringsImpl(strings, validity, sel, result_sel, count, targets, target_count);
-}
-
-idx_t PrefilterContainsAny(const var_binary_view_t &view, const ValidityMask &validity, const SelectionVector &sel,
-                           SelectionVector &result_sel, idx_t count, const uint32_t *targets, idx_t target_count) {
-	return PrefilterViewImpl(view, validity, sel, result_sel, count, targets, target_count);
-}
-
-idx_t PrefilterContainsAny(const var_binary_view_t &view, const ValidityMask &validity, const SelectionVector &sel,
-                           SelectionVector &result_sel, idx_t count, const uint16_t *targets, idx_t target_count) {
-	return PrefilterViewImpl(view, validity, sel, result_sel, count, targets, target_count);
 }
 
 } // namespace duckdb

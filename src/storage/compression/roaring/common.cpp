@@ -238,7 +238,7 @@ void RoaringScanPartial(ColumnSegment &segment, ColumnScanState &state, idx_t sc
                         idx_t result_offset) {
 	auto &scan_state = state.scan_state->Cast<RoaringScanState>();
 	auto start = state.GetPositionInSegment();
-	auto &result_mask = FlatVector::ValidityMutable(result);
+	auto &result_mask = result.ValidityMutable();
 	scan_state.ScanPartial(start, result_mask, result_offset, scan_count);
 }
 void RoaringScanPartialBoolean(ColumnSegment &segment, ColumnScanState &state, idx_t scan_count, Vector &result,
@@ -251,7 +251,6 @@ void RoaringScanPartialBoolean(ColumnSegment &segment, ColumnScanState &state, i
 	ExtractValidityMaskToData(mask, result, result_offset, scan_count);
 }
 void RoaringScan(ColumnSegment &segment, ColumnScanState &state, idx_t scan_count, Vector &result) {
-	result.Flatten();
 	RoaringScanPartial(segment, state, scan_count, result, 0);
 }
 

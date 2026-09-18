@@ -840,7 +840,8 @@ message(STATUS
 
 include_directories(src/include)
 if (NOT EXTENSION_CONFIG_BUILD)
-  include_directories(third_party/fsst)
+  include_directories(third_party/fsst/upstream)
+  include_directories(third_party/fsst/upstream/search)
   include_directories(third_party/fmt/include)
   include_directories(third_party/hyperloglog)
   include_directories(third_party/fastpforlib)

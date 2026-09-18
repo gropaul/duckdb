@@ -15,7 +15,7 @@ def third_party_includes():
     includes += [os.path.join('third_party', 'fast_float')]
     includes += [os.path.join('third_party', 'fastpforlib')]
     includes += [os.path.join('third_party', 'fmt', 'include')]
-    includes += [os.path.join('third_party', 'fsst')]
+    includes += [os.path.join('third_party', 'fsst', 'upstream')]
     includes += [os.path.join('third_party', 'httplib')]
     includes += [os.path.join('third_party', 'hyperloglog')]
     includes += [os.path.join('third_party', 'jaro_winkler')]
@@ -46,7 +46,7 @@ def third_party_includes():
 def third_party_sources():
     sources = []
     sources += [os.path.join('third_party', 'fmt')]
-    sources += [os.path.join('third_party', 'fsst')]
+    sources += [os.path.join('third_party', 'fsst', 'upstream')]
     sources += [os.path.join('third_party', 'miniz')]
     sources += [os.path.join('third_party', 're2')]
     sources += [os.path.join('third_party', 'hyperloglog')]

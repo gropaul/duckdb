@@ -70,7 +70,7 @@ public:
 	    : VectorBuffer(VectorType::FLAT_VECTOR, VectorBufferType::VARIABLE_BINARY_BUFFER, count),
 	      offset_data(allocator.Allocate(sizeof(int32_t) * (count + 1))),
 	      length_data(allocator.Allocate(sizeof(uint32_t) * (count + 1))), byte_data_ptr(source.byte_data_ptr),
-	      capacity(count), is_view(true) {
+	      pin(source.pin), capacity(count), is_view(true) {
 		offsets = reinterpret_cast<int32_t *>(offset_data.get());
 		lengths = reinterpret_cast<uint32_t *>(length_data.get());
 		validity.Resize(count);
@@ -81,7 +81,7 @@ public:
 	VariableBinaryBuffer(const VariableBinaryBuffer &source, count_t count, idx_t offset)
 	    : VectorBuffer(VectorType::FLAT_VECTOR, VectorBufferType::VARIABLE_BINARY_BUFFER, count),
 	      offsets(source.offsets + offset), lengths(source.lengths + offset), byte_data_ptr(source.byte_data_ptr),
-	      capacity(count), is_view(true) {
+	      pin(source.pin), capacity(count), is_view(true) {
 		validity.Resize(count);
 	}
 
@@ -131,6 +131,13 @@ public:
 	}
 
 	//! Total payload bytes currently held (reverse layout: value 0 sits at the top of the byte buffer)
+	//! Use the bytes at `base` inside a pinned block instead of an owned copy. The pin keeps the block in
+	//! memory for as long as this buffer or any slice of it lives; Grow copies the bytes out and drops it.
+	void ReferenceBytes(data_ptr_t base, shared_ptr<BufferHandle> pin_p) {
+		byte_data_ptr = base;
+		pin = std::move(pin_p);
+	}
+
 	idx_t ByteSize() const {
 		if (is_view) {
 			throw InternalException("ByteSize is not defined for a slice view of a VariableBinaryBuffer");
@@ -170,6 +177,7 @@ public:
 		offsets = new_offsets;
 		lengths = new_lengths;
 		byte_data_ptr = byte_data.get();
+		pin.reset();
 		capacity = new_capacity;
 		validity.Resize(new_capacity);
 		SetVectorSizeOnly(new_capacity);
@@ -187,6 +195,8 @@ private:
 	//! contiguous payload bytes
 	AllocatedData byte_data;
 	data_ptr_t byte_data_ptr;
+	//! Set when byte_data_ptr points into a buffer-manager block rather than byte_data
+	shared_ptr<BufferHandle> pin;
 	//! number of values this buffer holds
 	idx_t capacity;
 	//! true when this buffer shares another buffer's byte data (must not Grow)

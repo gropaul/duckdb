@@ -1,0 +1,85 @@
+# name: test/sql/storage/compression/fsst/fsst_bulk_tail.test
+# description: FSST round-trip over the staged-tail and former 511-byte chunk boundary lengths
+# group: [fsst]
+
+require no_latest_storage
+
+load {TEST_DIR}/fsst_bulk_tail.db readwrite v1.0.0
+
+statement ok
+PRAGMA force_compression='fsst'
+
+# repetitive content, so the symbol table holds long (up to 8-byte) symbols whose matches
+# straddle the staged tail. lengths 0..2200 cover the fully staged range (0..8), the mixed
+# range, and the former 511-byte chunk boundary
+statement ok
+CREATE TABLE repeated AS
+SELECT i AS id, substr(repeat('abcdefghij', 300), 1, i) AS s FROM range(0, 2200) t(i)
+
+# escape-heavy content: hex digits, few long repeats
+statement ok
+CREATE TABLE hexish AS
+SELECT i AS id, substr(repeat(md5(i::VARCHAR), 80), 1, i) AS s FROM range(0, 2200) t(i)
+
+statement ok
+CHECKPOINT
+
+# the columns must actually be FSST, otherwise the round-trip checks below are vacuous
+query I
+SELECT DISTINCT compression FROM pragma_storage_info('repeated') WHERE segment_type = 'VARCHAR'
+----
+FSST
+
+query I
+SELECT DISTINCT compression FROM pragma_storage_info('hexish') WHERE segment_type = 'VARCHAR'
+----
+FSST
+
+# every string must come back byte-identical to what generated it
+query I
+SELECT count(*) FROM repeated WHERE s <> substr(repeat('abcdefghij', 300), 1, id)
+----
+0
+
+query I
+SELECT count(*) FROM hexish WHERE s <> substr(repeat(md5(id::VARCHAR), 80), 1, id)
+----
+0
+
+query I
+SELECT count(*) FROM repeated WHERE length(s) <> id
+----
+0
+
+query I
+SELECT count(*) FROM hexish WHERE length(s) <> id
+----
+0
+
+query II
+SELECT count(*), sum(length(s)) FROM repeated
+----
+2200	2418900
+
+# spot-check the boundary lengths individually
+query III
+SELECT id, length(s), s = substr(repeat('abcdefghij', 300), 1, id) FROM repeated
+WHERE id IN (0, 1, 7, 8, 9, 15, 16, 17, 510, 511, 512, 513, 519, 1022, 1023, 1024)
+ORDER BY id
+----
+0	0	true
+1	1	true
+7	7	true
+8	8	true
+9	9	true
+15	15	true
+16	16	true
+17	17	true
+510	510	true
+511	511	true
+512	512	true
+513	513	true
+519	519	true
+1022	1022	true
+1023	1023	true
+1024	1024	true

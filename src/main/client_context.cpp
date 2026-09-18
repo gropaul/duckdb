@@ -4,6 +4,7 @@
 #include "duckdb/catalog/catalog_entry/table_catalog_entry.hpp"
 #include "duckdb/catalog/catalog_search_path.hpp"
 #include "duckdb/common/chrono.hpp"
+#include "duckdb/common/samply_marker.hpp"
 #include "duckdb/common/error_data.hpp"
 #include "duckdb/common/exception/transaction_exception.hpp"
 #include "duckdb/common/progress_bar/progress_bar.hpp"
@@ -1169,6 +1170,7 @@ unique_ptr<QueryResult> ClientContext::Query(unique_ptr<SQLStatement> statement,
 }
 
 unique_ptr<QueryResult> ClientContext::Query(const string &query, QueryParameters query_parameters) {
+	SamplyMarkerSpan marker(query);
 	auto lock = LockContext();
 	// The lazy path bypasses ParseStatementsInternal → InitialCleanup, so clear leftover query state
 	// (interrupt flag, etc.) ourselves.

@@ -18,6 +18,8 @@ VectorFSSTStringBuffer::VectorFSSTStringBuffer(const VectorFSSTStringBuffer &sou
 	vector_type = VectorType::FSST_VECTOR;
 	duckdb_fsst_decoder = source.duckdb_fsst_decoder;
 	fsst_encoder = source.fsst_encoder;
+	symbol_count = source.symbol_count;
+	row_group_id = source.row_group_id;
 	decompress_buffer.resize(source.decompress_buffer.size());
 }
 
@@ -27,6 +29,8 @@ VectorFSSTStringBuffer::VectorFSSTStringBuffer(const VectorFSSTStringBuffer &sou
 	vector_type = VectorType::FSST_VECTOR;
 	duckdb_fsst_decoder = source.duckdb_fsst_decoder;
 	fsst_encoder = source.fsst_encoder;
+	symbol_count = source.symbol_count;
+	row_group_id = source.row_group_id;
 	decompress_buffer.resize(source.decompress_buffer.size());
 }
 
@@ -68,8 +72,7 @@ Value VectorFSSTStringBuffer::GetValue(const LogicalType &type, idx_t index) con
 }
 
 template <bool SEL_IS_IDENTITY, bool SRC_HAS_INVALIDS>
-buffer_ptr<VectorBuffer> VectorFSSTStringBuffer::FlattenSliceTemplated(const SelectionVector &sel,
-                                                                       idx_t count) const {
+buffer_ptr<VectorBuffer> VectorFSSTStringBuffer::FlattenSliceTemplated(const SelectionVector &sel, idx_t count) const {
 	auto result = make_buffer<VectorStringBuffer>(capacity_t(count));
 
 	auto result_data = reinterpret_cast<string_t *>(result->GetData());
@@ -176,6 +179,16 @@ void *FSSTVector::GetDecoder(const Vector &vector) {
 	return fsst_string_buffer.GetDecoder();
 }
 
+idx_t FSSTVector::GetSymbolCount(const Vector &vector) {
+	auto &fsst_string_buffer = GetFSSTBuffer(vector);
+	return fsst_string_buffer.GetSymbolCount();
+}
+
+idx_t FSSTVector::GetRowGroupId(const Vector &vector) {
+	auto &fsst_string_buffer = GetFSSTBuffer(vector);
+	return fsst_string_buffer.GetRowGroupId();
+}
+
 vector<unsigned char> &FSSTVector::GetDecompressBuffer(const Vector &vector) {
 	auto &fsst_string_buffer = GetFSSTBuffer(vector);
 	return fsst_string_buffer.GetDecompressBuffer();
@@ -203,10 +216,12 @@ string FSSTVector::CompressValue(const Vector &vector, const char *input, idx_t 
 }
 
 void FSSTVector::Create(Vector &vector, buffer_ptr<void> &duckdb_fsst_decoder, shared_ptr<FSSTEncoder> encoder,
-                        const idx_t string_block_limit, idx_t capacity, idx_t auxiliary_size) {
+                        const idx_t string_block_limit, idx_t capacity, idx_t auxiliary_size, idx_t symbol_count,
+                        idx_t row_group_id) {
 	vector.SetBuffer(make_buffer<VectorFSSTStringBuffer>(capacity_t(capacity), auxiliary_size));
 	auto &fsst_string_buffer = vector.BufferMutable().Cast<VectorFSSTStringBuffer>();
-	fsst_string_buffer.AddDecoder(duckdb_fsst_decoder, std::move(encoder), string_block_limit);
+	fsst_string_buffer.AddDecoder(duckdb_fsst_decoder, std::move(encoder), string_block_limit, symbol_count,
+	                              row_group_id);
 }
 
 void FSSTVector::Grow(Vector &vector, idx_t added_count, idx_t added_bytes) {

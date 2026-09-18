@@ -5,8 +5,8 @@
 
 namespace duckdb {
 
-//! Branchless select loop over the compressed rows: a row matches when it is valid and its compressed
-//! bytes compare to the compressed needle according to EQUALITY. NULL rows go to the false side.
+//! Branchless select loop over the compressed rows. The vector is already sliced to the selected rows, so row i
+//! is compared and sel only names the row the verdict is reported under. NULL rows go to the false side.
 template <bool EQUALITY, bool HAS_NULLS, bool HAS_SEL, bool HAS_TRUE_SEL, bool HAS_FALSE_SEL>
 static idx_t FSSTCompareLoop(const Vector &fsst_vec, const var_binary_t &target, const SelectionVector *sel,
                              const idx_t count, SelectionVector *true_sel, SelectionVector *false_sel) {
@@ -15,13 +15,12 @@ static idx_t FSSTCompareLoop(const Vector &fsst_vec, const var_binary_t &target,
 	idx_t true_count = 0;
 	idx_t false_count = 0;
 
-	for (idx_t base_idx = 0; base_idx < count; base_idx++) {
-		const bool valid = !HAS_NULLS || validity.RowIsValid(base_idx);
-		const var_binary_t row = view.GetVarBinary(base_idx);
+	for (idx_t i = 0; i < count; i++) {
+		const idx_t result_idx = HAS_SEL ? sel->get_index(i) : i;
+		const bool valid = !HAS_NULLS || validity.RowIsValid(i);
+		const var_binary_t row = view.GetVarBinary(i);
 		const bool eq = valid && row == target;
 		const bool match = eq == EQUALITY && valid;
-
-		const idx_t result_idx = HAS_SEL ? sel->get_index(base_idx) : base_idx;
 
 		if (HAS_TRUE_SEL) {
 			true_sel->set_index(true_count, result_idx);
@@ -105,9 +104,8 @@ static bool TryFSSTSelectComparison(const Vector &left, const Vector &right, opt
 		if (null_mask) {
 			// the constant is not NULL, so the result is NULL exactly where the input is
 			for (idx_t i = 0; i < count; i++) {
-				const idx_t row_idx = sel ? sel->get_index(i) : i;
-				if (!validity.RowIsValid(row_idx)) {
-					null_mask->SetInvalid(row_idx);
+				if (!validity.RowIsValid(i)) {
+					null_mask->SetInvalid(sel ? sel->get_index(i) : i);
 				}
 			}
 		}
@@ -125,9 +123,8 @@ bool FSSTOps::TryEquals(const Vector &left, const Vector &right, optional_ptr<co
 }
 
 bool FSSTOps::TryNotEquals(const Vector &left, const Vector &right, optional_ptr<const SelectionVector> sel,
-                           idx_t count, optional_ptr<SelectionVector> true_sel,
-                           optional_ptr<SelectionVector> false_sel, optional_ptr<ValidityMask> null_mask,
-                           idx_t &result) {
+                           idx_t count, optional_ptr<SelectionVector> true_sel, optional_ptr<SelectionVector> false_sel,
+                           optional_ptr<ValidityMask> null_mask, idx_t &result) {
 	return TryFSSTSelectComparison<false>(left, right, sel, count, true_sel, false_sel, null_mask, result);
 }
 

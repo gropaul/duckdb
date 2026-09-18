@@ -16,7 +16,13 @@ excluded_compilation_files = excluded_files + ['gram.hpp', 'kwlist.hpp', "duckdb
 amal_dir = os.path.join('src', 'amalgamation')
 
 # files always excluded
-always_excluded = []
+fsst_dir = os.path.join('third_party', 'fsst', 'upstream')
+# the fsst submodule also carries the standalone tool, fsst12 and the AVX-512 encoder, none of which duckdb builds
+always_excluded = [
+    os.path.join(fsst_dir, 'fsst.cpp'),
+    os.path.join(fsst_dir, 'fsst_avx512.cpp'),
+    os.path.join(fsst_dir, 'libfsst12.cpp'),
+]
 written_files = {}
 
 

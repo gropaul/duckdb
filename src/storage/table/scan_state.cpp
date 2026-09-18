@@ -226,6 +226,11 @@ ParallelCollectionScanState::GetNextRowGroup(RowGroupSegmentTree &row_groups, Se
 	return row_groups.GetNextSegment(row_group);
 }
 
+void CollectionScanState::EnterRowGroup(SegmentNode<RowGroup> &node) {
+	row_group = node;
+	row_group_id = ++parent.row_groups_entered;
+}
+
 CollectionScanState::CollectionScanState(TableScanState &parent_p)
     : row_group(nullptr), vector_index(0), max_row_group_row(0), row_groups(nullptr), max_row(0), batch_index(0),
       valid_sel(STANDARD_VECTOR_SIZE), random(-1), parent(parent_p) {

@@ -189,7 +189,7 @@ void InterpretedBenchmark::ProcessFile(const string &path) {
 				if (line.empty()) {
 					break;
 				} else {
-					query += line + " ";
+					query += line + "\n";
 				}
 			}
 			if (splits.size() > 1 && !splits[1].empty()) {
