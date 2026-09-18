@@ -1,5 +1,5 @@
 # name: test/sql/filter/test_fsst_filter_switches.test
-# description: enable_fsst_eq / enable_fsst_contains_prefilter / enable_contains_prefilter do not change results
+# description: enable_fsst_vectors / enable_fsst_eq do not change results
 # group: [filter]
 
 require noforcestorage
@@ -31,21 +31,11 @@ foreach fsst_vectors true false
 
 foreach fsst_eq true false
 
-foreach fsst_contains true false
-
-foreach contains_prefilter true false
-
 statement ok
 SET enable_fsst_vectors={fsst_vectors}
 
 statement ok
 SET enable_fsst_eq={fsst_eq}
-
-statement ok
-SET enable_fsst_contains_prefilter={fsst_contains}
-
-statement ok
-SET enable_contains_prefilter={contains_prefilter}
 
 query I
 SELECT count(*) FROM db.t WHERE s = 'row_12345_google_24_tail_padding_bytes';
@@ -76,10 +66,6 @@ query I
 SELECT count(*) FROM db.t WHERE contains(s, 'zzzz');
 ----
 0
-
-endloop
-
-endloop
 
 endloop
 

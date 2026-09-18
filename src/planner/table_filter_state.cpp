@@ -2,13 +2,12 @@
 #include "duckdb/common/limits.hpp"
 #include "duckdb/main/settings.hpp"
 #include "duckdb/common/operator/comparison_operators.hpp"
-#include "duckdb/planner/filter/prefilter.hpp"
 #include "duckdb/common/vector_operations/vector_operations.hpp"
 #include "duckdb/common/vector/constant_vector.hpp"
 #include "duckdb/common/vector/dictionary_vector.hpp"
 #include "duckdb/common/vector/flat_vector.hpp"
 #include "duckdb/common/vector/fsst_vector.hpp"
-#include "duckdb/planner/filter/fsst_prefilter.hpp"
+#include "duckdb/planner/filter/fsst_contains.hpp"
 #include "duckdb/planner/expression/bound_conjunction_expression.hpp"
 #include "duckdb/planner/expression/bound_constant_expression.hpp"
 #include "duckdb/planner/expression/bound_function_expression.hpp"
@@ -597,121 +596,6 @@ private:
 	unique_ptr<SelectivityOptionalFilterState::SelectivityStats> stats;
 };
 
-// Contains prefilter: one scan per vector, dropping rows that definitely cannot contain ANY of the
-// needles. FSST vectors go through FSSTPrefilter, which plans a probe cover over the segment's symbol
-// table and scans the compressed code stream for it. Flat vectors scan for each needle's 4-byte prefix
-// with PrefilterContainsAny. Both are per-decoder or per-needle precomputed. Survivors have false
-// positives and anything the scan cannot handle passes through untouched - the exact filter downstream
-// is the correctness authority.
-class ContainsPrefilterExecutor final : public ExpressionFilterExecutor {
-public:
-	static constexpr idx_t FLAT_TARGET_LEN = sizeof(uint32_t);
-
-	ContainsPrefilterExecutor(const ContainsPrefilterFunctionData &data, bool inside_selectivity_optional,
-	                          bool fsst_scan_enabled_p)
-	    : needles(data.needles), fsst_scan_enabled(fsst_scan_enabled_p) {
-		for (auto &needle : needles) {
-			if (needle.size() < FLAT_TARGET_LEN) {
-				// unusable needle set (e.g. after deserialization): degrade to always-true
-				flat_targets.clear();
-				break;
-			}
-			uint32_t target;
-			memcpy(&target, needle.data(), FLAT_TARGET_LEN);
-			flat_targets.push_back(target);
-		}
-		if (!inside_selectivity_optional && data.n_vectors_to_check != 0) {
-			stats = make_uniq<SelectivityOptionalFilterState::SelectivityStats>(data.n_vectors_to_check,
-			                                                                    data.selectivity_threshold);
-		}
-	}
-
-	idx_t FilterSelectionInternal(SelectionVector &sel, Vector &vector, idx_t scan_count,
-	                              idx_t &approved_tuple_count) override {
-		if (approved_tuple_count == 0) {
-			return 0;
-		}
-		if (flat_targets.empty()) {
-			return approved_tuple_count;
-		}
-		if (stats && !stats->IsActive()) {
-			stats->Update(0, 0);
-			return approved_tuple_count;
-		}
-		const auto before_count = approved_tuple_count;
-		idx_t result_count;
-		const bool fsst_executable = FilterFSST(sel, vector, before_count, result_count);
-
-		if (!fsst_executable) {
-			if (vector.GetVectorType() == VectorType::FLAT_VECTOR) {
-				result_count = FilterFlat(sel, vector, before_count);
-			} else {
-				// don't decompress, hope that later filter will take this out.
-				return approved_tuple_count;
-			}
-		}
-		if (stats) {
-			stats->Update(result_count, before_count);
-		}
-		approved_tuple_count = result_count;
-		return approved_tuple_count;
-	}
-
-private:
-	bool FilterFSST(SelectionVector &sel, Vector &vector, const idx_t count, idx_t &result_count) {
-		if (!fsst_scan_enabled || vector.GetVectorType() != VectorType::FSST_VECTOR) {
-			return false;
-		}
-		const auto view = FSSTVector::GetDataView(vector);
-		const auto row_count = FSSTVector::GetFSSTBuffer(vector).Capacity();
-		if (row_count == 0) {
-			return false;
-		}
-		// planned once per row group, off the code counts stored with its symbol table
-		if (!prefilter.Prepare(FSSTVector::GetRowGroupId(vector), FSSTVector::GetDecoder(vector),
-		                       FSSTVector::GetSymbolCount(vector), needles, row_count)) {
-			return false;
-		}
-		PrepareCapacity(count);
-		if (!prefilter.Filter(view, row_count, sel, count, result_sel, result_count)) {
-			return false;
-		}
-		sel.Initialize(result_sel);
-		return true;
-	}
-
-	idx_t FilterFlat(SelectionVector &sel, Vector &vector, idx_t count) {
-		PrepareCapacity(count);
-		const auto strings = FlatVector::GetData<string_t>(vector);
-		auto &validity = FlatVector::Validity(vector);
-		const auto result_count =
-		    PrefilterContainsAny(strings, validity, sel, result_sel, count, flat_targets.data(), flat_targets.size());
-		sel.Initialize(result_sel);
-		return result_count;
-	}
-
-	void PrepareCapacity(idx_t count) {
-		if (current_capacity >= count) {
-			return;
-		}
-		result_sel.Initialize(count);
-		current_capacity = count;
-	}
-
-	vector<string> needles;
-	//! enable_fsst_contains_prefilter: when false, FSST vectors pass through untouched instead of
-	//! being scanned in the compressed domain
-	bool fsst_scan_enabled;
-	//! Per-needle kernel targets for the flat path (first 4 bytes of each needle);
-	//! empty when the needle set is unusable
-	vector<uint32_t> flat_targets;
-	//! The compressed path: a probe cover planned once per segment symbol table
-	FSSTPrefilter prefilter;
-	SelectionVector result_sel;
-	idx_t current_capacity = 0;
-	unique_ptr<SelectivityOptionalFilterState::SelectivityStats> stats;
-};
-
 static bool IsColumnReferenceFunction(const BoundFunctionExpression &func) {
 	auto &children = func.GetChildren();
 	if (children.size() != 1 || children[0]->GetExpressionClass() != ExpressionClass::BOUND_REF) {
@@ -727,6 +611,87 @@ static bool IsColumnReferenceExpression(const Expression &expr) {
 	}
 	auto &ref = expr.Cast<BoundReferenceExpression>();
 	return ref.Index() == 0;
+}
+
+// contains(col, needle), or an OR of them on one column. An FSST vector is answered in the compressed
+// domain by FSSTContains; every other vector, and an FSST vector its planner declines, goes through the
+// regular contains expression.
+class ContainsFilterExecutor final : public ExpressionFilterExecutor {
+public:
+	ContainsFilterExecutor(ClientContext &context, const Expression &expression, vector<string> needles_p)
+	    : needles(std::move(needles_p)), exact(context, expression) {
+	}
+
+	idx_t FilterSelectionInternal(SelectionVector &sel, Vector &vector, idx_t scan_count,
+	                              idx_t &approved_tuple_count) override {
+		if (approved_tuple_count == 0) {
+			return 0;
+		}
+		if (FilterFSST(sel, vector, approved_tuple_count)) {
+			return approved_tuple_count;
+		}
+		return exact.FilterSelection(sel, vector, scan_count, approved_tuple_count);
+	}
+
+private:
+	bool FilterFSST(SelectionVector &sel, Vector &vector, idx_t &approved_tuple_count) {
+		if (vector.GetVectorType() != VectorType::FSST_VECTOR) {
+			return false;
+		}
+		const auto view = FSSTVector::GetDataView(vector);
+		const auto row_count = FSSTVector::GetFSSTBuffer(vector).Capacity();
+		if (row_count == 0) {
+			return false;
+		}
+		// planned once per row group, off the code counts stored with its symbol table
+		if (!fsst.Prepare(FSSTVector::GetRowGroupId(vector), FSSTVector::GetDecoder(vector),
+		                  FSSTVector::GetSymbolCount(vector), needles, row_count)) {
+			return false;
+		}
+		if (current_capacity < approved_tuple_count) {
+			result_sel.Initialize(approved_tuple_count);
+			current_capacity = approved_tuple_count;
+		}
+		auto &current_sel = sel.IsSet() ? sel : *FlatVector::IncrementalSelectionVector();
+		idx_t result_count;
+		if (!fsst.Filter(view, FSSTVector::Validity(vector), row_count, current_sel, approved_tuple_count, result_sel,
+		                 result_count)) {
+			return false;
+		}
+		sel.Initialize(result_sel);
+		approved_tuple_count = result_count;
+		return true;
+	}
+
+	vector<string> needles;
+	FSSTContains fsst;
+	GenericFilterExecutor exact;
+	SelectionVector result_sel;
+	idx_t current_capacity = 0;
+};
+
+// contains(col, 'needle') over the filter's column: the needle, or false for any other shape
+static bool TryGetContainsNeedle(const Expression &expr, string &needle) {
+	if (expr.GetExpressionClass() != ExpressionClass::BOUND_FUNCTION) {
+		return false;
+	}
+	auto &func = expr.Cast<BoundFunctionExpression>();
+	auto &children = func.GetChildren();
+	if (func.Function().GetName() != "contains" || children.size() != 2) {
+		return false;
+	}
+	// contains is not commutative: children[0] is the haystack, children[1] the needle
+	if (!IsColumnReferenceExpression(*children[0]) ||
+	    children[1]->GetExpressionClass() != ExpressionClass::BOUND_CONSTANT ||
+	    children[0]->GetReturnType().id() != LogicalTypeId::VARCHAR) {
+		return false;
+	}
+	auto &value = children[1]->Cast<BoundConstantExpression>().GetValue();
+	if (value.IsNull() || value.type().id() != LogicalTypeId::VARCHAR) {
+		return false;
+	}
+	needle = StringValue::Get(value);
+	return true;
 }
 
 static bool IsSupportedComparisonType(PhysicalType type) {
@@ -798,6 +763,10 @@ static unique_ptr<ExpressionFilterExecutor> TryCreateFunctionExecutor(ClientCont
 	    BoundComparisonExpression::IsComparison(func.GetExpressionType())) {
 		return TryCreateComparisonExecutor(context, func);
 	}
+	string needle;
+	if (!inside_selectivity_optional && TryGetContainsNeedle(func, needle)) {
+		return make_uniq<ContainsFilterExecutor>(context, func, vector<string> {std::move(needle)});
+	}
 	if (!IsColumnReferenceFunction(func)) {
 		return nullptr;
 	}
@@ -835,14 +804,6 @@ static unique_ptr<ExpressionFilterExecutor> TryCreateFunctionExecutor(ClientCont
 		return make_uniq<PrefixRangeFilterExecutor>(func.BindInfo()->Cast<PrefixRangeFunctionData>(),
 		                                            inside_selectivity_optional);
 	}
-	if (func_name == ContainsPrefilterScalarFun::NAME) {
-		if (!func.BindInfo()) {
-			return nullptr;
-		}
-		return make_uniq<ContainsPrefilterExecutor>(func.BindInfo()->Cast<ContainsPrefilterFunctionData>(),
-		                                            inside_selectivity_optional,
-		                                            Settings::Get<EnableFSSTContainsPrefilterSetting>(context));
-	}
 	return nullptr;
 }
 
@@ -853,10 +814,22 @@ static unique_ptr<ExpressionFilterExecutor> TryCreateFastExecutor(ClientContext 
 		return TryCreateFunctionExecutor(context, expression.Cast<BoundFunctionExpression>(),
 		                                 inside_selectivity_optional);
 	case ExpressionClass::BOUND_CONJUNCTION: {
+		auto &conjunction = expression.Cast<BoundConjunctionExpression>();
+		if (expression.GetExpressionType() == ExpressionType::CONJUNCTION_OR) {
+			// every branch a contains on the column: one executor answers the whole OR
+			vector<string> needles;
+			for (auto &child : conjunction.GetChildren()) {
+				string needle;
+				if (inside_selectivity_optional || !TryGetContainsNeedle(*child, needle)) {
+					return nullptr;
+				}
+				needles.push_back(std::move(needle));
+			}
+			return make_uniq<ContainsFilterExecutor>(context, expression, std::move(needles));
+		}
 		if (expression.GetExpressionType() != ExpressionType::CONJUNCTION_AND) {
 			return nullptr;
 		}
-		auto &conjunction = expression.Cast<BoundConjunctionExpression>();
 		auto &child_exprs = conjunction.GetChildren();
 		vector<unique_ptr<ExpressionFilterExecutor>> children(child_exprs.size());
 		idx_t fast_count = 0;
@@ -868,13 +841,20 @@ static unique_ptr<ExpressionFilterExecutor> TryCreateFastExecutor(ClientContext 
 			// no conjunct has a kernel executor: leave the whole expression to the regular executor
 			return nullptr;
 		}
-		// mixed conjunction: conjuncts without a kernel executor run through the regular executor
-		for (idx_t child_idx = 0; child_idx < child_exprs.size(); child_idx++) {
-			if (!children[child_idx]) {
-				children[child_idx] = make_uniq<GenericFilterExecutor>(context, *child_exprs[child_idx]);
+		// mixed conjunction: the kernel executors run first, so that the conjuncts evaluated through the
+		// regular executor, which decompress what they read, only see the rows the kernels let through
+		vector<unique_ptr<ExpressionFilterExecutor>> ordered;
+		for (auto &child : children) {
+			if (child) {
+				ordered.push_back(std::move(child));
 			}
 		}
-		return make_uniq<ConjunctionAndFilterExecutor>(std::move(children));
+		for (idx_t child_idx = 0; child_idx < child_exprs.size(); child_idx++) {
+			if (!children[child_idx]) {
+				ordered.push_back(make_uniq<GenericFilterExecutor>(context, *child_exprs[child_idx]));
+			}
+		}
+		return make_uniq<ConjunctionAndFilterExecutor>(std::move(ordered));
 	}
 	default:
 		return nullptr;

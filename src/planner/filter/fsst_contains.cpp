@@ -1,12 +1,12 @@
-#include "duckdb/planner/filter/fsst_prefilter.hpp"
+#include "duckdb/planner/filter/fsst_contains.hpp"
 
 #include "duckdb/common/helper.hpp"
 #include "duckdb/common/numeric_utils.hpp"
 #include "fsst.h"
 
 // The kernels of search/prefilter need NEON, AVX-512BW or AVX2 and refuse to compile without one.
-// A build below that baseline keeps the prefilter switched off rather than failing to build; on x86
-// that means configuring with -march=native (or -mavx2) to get any scan at all.
+// A build below that baseline evaluates contains on decompressed strings rather than failing to build;
+// on x86 that means configuring with -march=native (or -mavx2) to get the compressed scan at all.
 #if defined(__ARM_NEON) || defined(__AVX512BW__) || defined(__AVX2__)
 #define DUCKDB_FSST_SEARCH_AVAILABLE
 #include "prefilter/prefilter.hpp"
@@ -18,16 +18,18 @@ namespace duckdb {
 
 namespace search = fsst::search::prefilter;
 
-struct FSSTPrefilter::State {
+struct FSSTContains::State {
 	//! The row group the plan was built for, 0 when none
 	idx_t planned_row_group = 0;
 	bool usable = false;
 	search::Dictionary dict;
 	search::Frequency freq;
 	//! The needles' covers merged into one: a row matching any needle holds a code of its own cover,
-	//! hence one of the merged cover. Only the superset scan reads this, never the walk, whose
-	//! exactness is per needle.
-	search::Analysis analysis;
+	//! hence one of the merged cover. The scan runs this cover once.
+	search::ProbeCover cover;
+	uint32_t covered_frequency = 0;
+	//! One walk per needle: a hit is a match when some needle's walk accepts it
+	std::vector<search::scan::Walk> walks;
 
 	unsafe_vector<uint32_t> stream_offsets;
 	std::vector<size_t> hits;
@@ -57,16 +59,32 @@ search::ProbeCover MergeCovers(const vector<search::ProbeCover> &covers) {
 	return merged;
 }
 
+//! Stage-two check of the scan: the hit is a match when any needle's walk verifies it
+struct AnyWalkCheck {
+	const std::vector<search::scan::Walk> &walks;
+	const search::Dictionary &dict;
+	const uint8_t *codes;
+
+	bool passes(size_t hit, size_t row_start, size_t row_end) const {
+		for (auto &walk : walks) {
+			if (walk.check(dict, codes, row_start, row_end, hit)) {
+				return true;
+			}
+		}
+		return false;
+	}
+};
+
 } // namespace
 
-FSSTPrefilter::FSSTPrefilter() : state(make_uniq<State>()) {
+FSSTContains::FSSTContains() : state(make_uniq<State>()) {
 }
 
-FSSTPrefilter::~FSSTPrefilter() {
+FSSTContains::~FSSTContains() {
 }
 
-bool FSSTPrefilter::Prepare(idx_t row_group_id, const void *decoder_p, idx_t symbol_count,
-                            const vector<string> &needles, idx_t row_count) {
+bool FSSTContains::Prepare(idx_t row_group_id, const void *decoder_p, idx_t symbol_count, const vector<string> &needles,
+                           idx_t row_count) {
 	if (row_group_id != 0 && row_group_id == state->planned_row_group) {
 		return state->usable;
 	}
@@ -92,23 +110,25 @@ bool FSSTPrefilter::Prepare(idx_t row_group_id, const void *decoder_p, idx_t sym
 	}
 
 	vector<search::ProbeCover> covers;
+	state->walks.clear();
 	for (auto &needle : needles) {
 		auto analysis =
 		    search::analyze(const_data_ptr_cast(needle.data()), needle.size(), state->dict, state->freq, row_count);
 		if (analysis.matches_all || analysis.cover.empty()) {
-			// every row, or a needle this symbol table cannot spell: no cover to scan for
+			// every row, or a needle this symbol table cannot spell: left to the decompressing path
 			return false;
 		}
 		covers.push_back(std::move(analysis.cover));
+		state->walks.push_back(std::move(analysis.walk));
 	}
-	auto merged = MergeCovers(covers);
-	state->analysis = search::Analysis {merged, state->freq.of_cover(merged), state->freq.total, 0.0, {}, false};
+	state->cover = MergeCovers(covers);
+	state->covered_frequency = state->freq.of_cover(state->cover);
 	state->usable = true;
 	return true;
 }
 
-bool FSSTPrefilter::Filter(const var_binary_view_t &view, idx_t row_count, const SelectionVector &sel, idx_t count,
-                           SelectionVector &result_sel, idx_t &result_count) {
+bool FSSTContains::Filter(const var_binary_view_t &view, const ValidityMask &validity, idx_t row_count,
+                          const SelectionVector &sel, idx_t count, SelectionVector &result_sel, idx_t &result_count) {
 	if (!state->usable || row_count == 0) {
 		return false;
 	}
@@ -129,12 +149,15 @@ bool FSSTPrefilter::Filter(const var_binary_view_t &view, idx_t row_count, const
 	}
 	stream_offsets[row_count] = UnsafeNumericCast<uint32_t>(stream_size);
 
+	const auto codes = const_data_ptr_cast(view.base);
 	state->hits.clear();
-	search::superset_rows(const_data_ptr_cast(view.base), stream_size, stream_offsets.data(), row_count + 1,
-	                      state->analysis, state->hits);
+	search::scan::execute(state->cover, codes, stream_size, stream_offsets.data(), row_count + 1,
+	                      state->covered_frequency, state->freq.total, AnyWalkCheck {state->walks, state->dict, codes},
+	                      state->hits);
 
 	// The scan emits stream rows ascending, which is vector rows descending, so the hits walked backwards
 	// merge straight into the incoming selection - itself ascending, since every filter compacts in order.
+	// A NULL row is stored as an empty string, which the empty needle would match, so validity decides too.
 	result_count = 0;
 	idx_t remaining = state->hits.size();
 	idx_t i = 0;
@@ -146,7 +169,8 @@ bool FSSTPrefilter::Filter(const var_binary_view_t &view, idx_t row_count, const
 		} else if (hit_row > row) {
 			i++;
 		} else {
-			result_sel.set_index(result_count++, row);
+			result_sel.set_index(result_count, row);
+			result_count += validity.RowIsValid(row);
 			i++;
 			remaining--;
 		}
@@ -156,20 +180,20 @@ bool FSSTPrefilter::Filter(const var_binary_view_t &view, idx_t row_count, const
 
 #else
 
-struct FSSTPrefilter::State {};
+struct FSSTContains::State {};
 
-FSSTPrefilter::FSSTPrefilter() : state(make_uniq<State>()) {
+FSSTContains::FSSTContains() : state(make_uniq<State>()) {
 }
 
-FSSTPrefilter::~FSSTPrefilter() {
+FSSTContains::~FSSTContains() {
 }
 
-bool FSSTPrefilter::Prepare(idx_t, const void *, idx_t, const vector<string> &, idx_t) {
+bool FSSTContains::Prepare(idx_t, const void *, idx_t, const vector<string> &, idx_t) {
 	return false;
 }
 
-bool FSSTPrefilter::Filter(const var_binary_view_t &, idx_t, const SelectionVector &, idx_t, SelectionVector &,
-                           idx_t &) {
+bool FSSTContains::Filter(const var_binary_view_t &, const ValidityMask &, idx_t, const SelectionVector &, idx_t,
+                          SelectionVector &, idx_t &) {
 	return false;
 }
 

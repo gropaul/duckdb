@@ -953,17 +953,6 @@ struct EnableCachingOperatorsSetting {
 	static constexpr idx_t SettingIndex = NEXT_SETTING_INDEX();
 };
 
-struct EnableContainsPrefilterSetting {
-	using RETURN_TYPE = bool;
-	static constexpr const char *Name = "enable_contains_prefilter";
-	static constexpr const char *Description = "Push a byte-level prefilter for contains(col, 'needle') into the scan, "
-	                                           "dropping rows that cannot match before the exact predicate runs";
-	static constexpr const char *InputType = "BOOLEAN";
-	static constexpr const char *DefaultValue = "true";
-	static constexpr SettingScopeTarget Scope = SettingScopeTarget::GLOBAL_ONLY;
-	static constexpr idx_t SettingIndex = NEXT_SETTING_INDEX();
-};
-
 struct EnableExternalAccessSetting {
 	using RETURN_TYPE = bool;
 	static constexpr const char *Name = "enable_external_access";
@@ -986,18 +975,6 @@ struct EnableExternalFileCacheSetting {
 	static constexpr SettingScopeTarget Scope = SettingScopeTarget::GLOBAL_ONLY;
 	static constexpr idx_t SettingIndex = NEXT_SETTING_INDEX();
 	static void OnSet(SettingCallbackInfo &info, Value &input);
-};
-
-struct EnableFSSTContainsPrefilterSetting {
-	using RETURN_TYPE = bool;
-	static constexpr const char *Name = "enable_fsst_contains_prefilter";
-	static constexpr const char *Description =
-	    "Allow the contains prefilter to run on FSST compressed vectors by searching the needle's mandatory code "
-	    "chain, instead of falling back to the decompressed path";
-	static constexpr const char *InputType = "BOOLEAN";
-	static constexpr const char *DefaultValue = "true";
-	static constexpr SettingScopeTarget Scope = SettingScopeTarget::GLOBAL_ONLY;
-	static constexpr idx_t SettingIndex = NEXT_SETTING_INDEX();
 };
 
 struct EnableFSSTEqSetting {
