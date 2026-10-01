@@ -104,6 +104,12 @@ public:
 		if (approved_tuple_count == 0) {
 			return 0;
 		}
+		// This executor decompresses what it reads, and it reads a slice, so a second conjunct on the same
+		// column would decompress the survivors again. Flattening the scan vector while every row is still
+		// selected costs the same one pass and leaves the column flat for everything after it.
+		if (vector.GetVectorType() == VectorType::FSST_VECTOR && !sel.IsSet() && approved_tuple_count == scan_count) {
+			vector.Flatten();
+		}
 		PrepareCapacity(approved_tuple_count);
 		DataChunk chunk;
 		chunk.data.emplace_back(Vector::Ref(vector));
@@ -618,7 +624,7 @@ static bool IsColumnReferenceExpression(const Expression &expr) {
 // regular contains expression.
 class ContainsFilterExecutor final : public ExpressionFilterExecutor {
 public:
-	ContainsFilterExecutor(ClientContext &context, const Expression &expression, vector<string> needles_p)
+	ContainsFilterExecutor(ClientContext &context, const Expression &expression, vector<FSSTPattern> needles_p)
 	    : needles(std::move(needles_p)), exact(context, expression) {
 	}
 
@@ -628,7 +634,11 @@ public:
 			return 0;
 		}
 		if (FilterFSST(sel, vector, approved_tuple_count)) {
-			return approved_tuple_count;
+			if (fsst.PlanIsExact() || approved_tuple_count == 0) {
+				return approved_tuple_count;
+			}
+			// the compressed rows are a superset: the survivors still go through the predicate itself
+			return exact.FilterSelection(sel, vector, scan_count, approved_tuple_count);
 		}
 		return exact.FilterSelection(sel, vector, scan_count, approved_tuple_count);
 	}
@@ -663,24 +673,58 @@ private:
 		return true;
 	}
 
-	vector<string> needles;
+	vector<FSSTPattern> needles;
 	FSSTContains fsst;
 	GenericFilterExecutor exact;
 	SelectionVector result_sel;
 	idx_t current_capacity = 0;
 };
 
-// contains(col, 'needle') over the filter's column: the needle, or false for any other shape
-static bool TryGetContainsNeedle(const Expression &expr, string &needle) {
+// Split a LIKE pattern into the literal runs between its wildcards. False for a pattern with a single
+// character wildcard or an escape, which runs cannot express, or with no literal at all.
+static bool TrySplitLikePattern(const string &pattern, FSSTPattern &out) {
+	if (pattern.find('_') != string::npos || pattern.find('\\') != string::npos) {
+		return false;
+	}
+	out.runs.clear();
+	string run;
+	for (auto c : pattern) {
+		if (c != '%') {
+			run += c;
+			continue;
+		}
+		if (!run.empty()) {
+			out.runs.push_back(std::move(run));
+			run.clear();
+		}
+	}
+	if (!run.empty()) {
+		out.runs.push_back(std::move(run));
+	}
+	if (out.runs.empty()) {
+		return false;
+	}
+	out.anchor_start = pattern.front() != '%';
+	out.anchor_end = pattern.back() != '%';
+	return true;
+}
+
+// contains / prefix / suffix / LIKE over the filter's column, false for any other shape
+static bool TryGetStringMatch(const Expression &expr, FSSTPattern &match) {
 	if (expr.GetExpressionClass() != ExpressionClass::BOUND_FUNCTION) {
 		return false;
 	}
 	auto &func = expr.Cast<BoundFunctionExpression>();
 	auto &children = func.GetChildren();
-	if (func.Function().GetName() != "contains" || children.size() != 2) {
+	auto &name = func.Function().GetName();
+	if (name != "contains" && name != "prefix" && name != "starts_with" && name != "^@" && name != "suffix" &&
+	    name != "ends_with" && name != "~~") {
 		return false;
 	}
-	// contains is not commutative: children[0] is the haystack, children[1] the needle
+	if (children.size() != 2) {
+		return false;
+	}
+	// none of these is commutative: children[0] is the haystack, children[1] the pattern
 	if (!IsColumnReferenceExpression(*children[0]) ||
 	    children[1]->GetExpressionClass() != ExpressionClass::BOUND_CONSTANT ||
 	    children[0]->GetReturnType().id() != LogicalTypeId::VARCHAR) {
@@ -690,14 +734,24 @@ static bool TryGetContainsNeedle(const Expression &expr, string &needle) {
 	if (value.IsNull() || value.type().id() != LogicalTypeId::VARCHAR) {
 		return false;
 	}
-	needle = StringValue::Get(value);
+	auto literal = StringValue::Get(value);
+	if (literal.empty()) {
+		return false;
+	}
+	if (name == "~~") {
+		return TrySplitLikePattern(literal, match);
+	}
+	match.runs.clear();
+	match.runs.push_back(std::move(literal));
+	match.anchor_start = name != "contains" && name != "suffix" && name != "ends_with";
+	match.anchor_end = name == "suffix" || name == "ends_with";
 	return true;
 }
 
-// contains(col, 'needle'), or an OR of them: what ContainsFilterExecutor answers
+// a string match on the column, or an OR of them: what ContainsFilterExecutor answers
 static bool IsContainsFilter(const Expression &expr) {
-	string needle;
-	if (TryGetContainsNeedle(expr, needle)) {
+	FSSTPattern match;
+	if (TryGetStringMatch(expr, match)) {
 		return true;
 	}
 	if (expr.GetExpressionClass() != ExpressionClass::BOUND_CONJUNCTION ||
@@ -705,7 +759,7 @@ static bool IsContainsFilter(const Expression &expr) {
 		return false;
 	}
 	for (auto &child : expr.Cast<BoundConjunctionExpression>().GetChildren()) {
-		if (!TryGetContainsNeedle(*child, needle)) {
+		if (!TryGetStringMatch(*child, match)) {
 			return false;
 		}
 	}
@@ -781,9 +835,9 @@ static unique_ptr<ExpressionFilterExecutor> TryCreateFunctionExecutor(ClientCont
 	    BoundComparisonExpression::IsComparison(func.GetExpressionType())) {
 		return TryCreateComparisonExecutor(context, func);
 	}
-	string needle;
-	if (!inside_selectivity_optional && TryGetContainsNeedle(func, needle)) {
-		return make_uniq<ContainsFilterExecutor>(context, func, vector<string> {std::move(needle)});
+	FSSTPattern match;
+	if (!inside_selectivity_optional && TryGetStringMatch(func, match)) {
+		return make_uniq<ContainsFilterExecutor>(context, func, vector<FSSTPattern> {std::move(match)});
 	}
 	if (!IsColumnReferenceFunction(func)) {
 		return nullptr;
@@ -835,13 +889,13 @@ static unique_ptr<ExpressionFilterExecutor> TryCreateFastExecutor(ClientContext 
 		auto &conjunction = expression.Cast<BoundConjunctionExpression>();
 		if (expression.GetExpressionType() == ExpressionType::CONJUNCTION_OR) {
 			// every branch a contains on the column: one executor answers the whole OR
-			vector<string> needles;
+			vector<FSSTPattern> needles;
 			for (auto &child : conjunction.GetChildren()) {
-				string needle;
-				if (inside_selectivity_optional || !TryGetContainsNeedle(*child, needle)) {
+				FSSTPattern match;
+				if (inside_selectivity_optional || !TryGetStringMatch(*child, match)) {
 					return nullptr;
 				}
-				needles.push_back(std::move(needle));
+				needles.push_back(std::move(match));
 			}
 			return make_uniq<ContainsFilterExecutor>(context, expression, std::move(needles));
 		}

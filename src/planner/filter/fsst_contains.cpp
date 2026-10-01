@@ -9,7 +9,7 @@
 // on x86 that means configuring with -march=native (or -mavx2) to get the compressed scan at all.
 #if defined(__ARM_NEON) || defined(__AVX512BW__) || defined(__AVX2__)
 #define DUCKDB_FSST_SEARCH_AVAILABLE
-#include "prefilter/prefilter.hpp"
+#include "prefilter/pattern.hpp"
 #endif
 
 namespace duckdb {
@@ -25,11 +25,18 @@ struct FSSTContains::State {
 	search::Dictionary dict;
 	search::Frequency freq;
 	//! The needles' covers merged into one: a row matching any needle holds a code of its own cover,
-	//! hence one of the merged cover. The scan runs this cover once.
+	//! hence one of the merged cover. The scan runs this cover once. Empty when anchored.
 	search::ProbeCover cover;
 	uint32_t covered_frequency = 0;
 	//! One walk per needle: a hit is a match when some needle's walk accepts it
 	std::vector<search::scan::Walk> walks;
+	//! Anchored needles are answered per row, with no scan over the code stream
+	bool anchored = false;
+	//! Set when a pattern has several runs, or a shape only a superset covers: one plan per pattern then,
+	//! run separately and unioned, and the caller confirms the rows.
+	bool multi_run = false;
+	bool exact = true;
+	std::vector<search::PatternPlan> plans;
 
 	unsafe_vector<uint32_t> stream_offsets;
 	std::vector<size_t> hits;
@@ -83,8 +90,16 @@ FSSTContains::FSSTContains() : state(make_uniq<State>()) {
 FSSTContains::~FSSTContains() {
 }
 
-bool FSSTContains::Prepare(idx_t row_group_id, const void *decoder_p, idx_t symbol_count, const vector<string> &needles,
-                           idx_t row_count) {
+bool FSSTContains::PlanIsExact() const {
+#ifdef DUCKDB_FSST_SEARCH_AVAILABLE
+	return state->exact;
+#else
+	return false;
+#endif
+}
+
+bool FSSTContains::Prepare(idx_t row_group_id, const void *decoder_p, idx_t symbol_count,
+                           const vector<FSSTPattern> &patterns, idx_t row_count) {
 	if (row_group_id != 0 && row_group_id == state->planned_row_group) {
 		return state->usable;
 	}
@@ -94,7 +109,7 @@ bool FSSTContains::Prepare(idx_t row_group_id, const void *decoder_p, idx_t symb
 		return false;
 	}
 	const auto &decoder = *static_cast<const fsst_decoder_t *>(decoder_p);
-	if (needles.empty() || symbol_count == 0) {
+	if (patterns.empty() || symbol_count == 0) {
 		return false;
 	}
 	state->dict = search::Dictionary::from(decoder.symbol, decoder.len, symbol_count);
@@ -109,20 +124,56 @@ bool FSSTContains::Prepare(idx_t row_group_id, const void *decoder_p, idx_t symb
 		return false;
 	}
 
-	vector<search::ProbeCover> covers;
+	// One run per pattern and one shape across all of them is the case worth a single merged scan: the
+	// covers become one and a row matches when any walk accepts a hit. Anything else is planned per pattern.
+	bool one_run_each = true;
+	for (auto &pattern : patterns) {
+		one_run_each = one_run_each && pattern.runs.size() == 1 && !pattern.anchor_end;
+	}
+	const bool anchored = patterns[0].anchor_start;
+	for (auto &pattern : patterns) {
+		one_run_each = one_run_each && pattern.anchor_start == anchored;
+	}
+
 	state->walks.clear();
-	for (auto &needle : needles) {
-		auto analysis =
-		    search::analyze(const_data_ptr_cast(needle.data()), needle.size(), state->dict, state->freq, row_count);
-		if (analysis.matches_all || analysis.cover.empty()) {
-			// every row, or a needle this symbol table cannot spell: left to the decompressing path
+	state->plans.clear();
+	state->multi_run = !one_run_each;
+	state->anchored = one_run_each && anchored;
+	state->exact = one_run_each;
+
+	if (one_run_each) {
+		const auto anchor = anchored ? search::Anchor::Start : search::Anchor::None;
+		vector<search::ProbeCover> covers;
+		for (auto &pattern : patterns) {
+			auto &run = pattern.runs[0];
+			auto analysis = search::analyze(const_data_ptr_cast(run.data()), run.size(), state->dict, state->freq,
+			                                row_count, anchor);
+			if (analysis.matches_all || (!anchored && analysis.cover.empty())) {
+				// every row, or a run this symbol table cannot spell: left to the decompressing path
+				return false;
+			}
+			if (!anchored) {
+				covers.push_back(std::move(analysis.cover));
+			}
+			state->walks.push_back(std::move(analysis.walk));
+		}
+		if (!anchored) {
+			state->cover = MergeCovers(covers);
+			state->covered_frequency = state->freq.of_cover(state->cover);
+		}
+		state->usable = true;
+		return true;
+	}
+
+	for (auto &pattern : patterns) {
+		auto plan = search::plan_pattern(state->dict, state->freq, pattern.runs, pattern.anchor_start,
+		                                 pattern.anchor_end, row_count);
+		if (!plan.usable) {
 			return false;
 		}
-		covers.push_back(std::move(analysis.cover));
-		state->walks.push_back(std::move(analysis.walk));
+		state->exact = state->exact && plan.exact;
+		state->plans.push_back(std::move(plan));
 	}
-	state->cover = MergeCovers(covers);
-	state->covered_frequency = state->freq.of_cover(state->cover);
 	state->usable = true;
 	return true;
 }
@@ -151,9 +202,23 @@ bool FSSTContains::Filter(const var_binary_view_t &view, const ValidityMask &val
 
 	const auto codes = const_data_ptr_cast(view.base);
 	state->hits.clear();
-	search::scan::execute(state->cover, codes, stream_size, stream_offsets.data(), row_count + 1,
-	                      state->covered_frequency, state->freq.total, AnyWalkCheck {state->walks, state->dict, codes},
-	                      state->hits);
+	if (state->multi_run) {
+		// one plan per pattern, each ascending; the union is what an OR of them keeps
+		for (auto &plan : state->plans) {
+			search::pattern_rows(codes, stream_size, stream_offsets.data(), row_count + 1, state->dict, plan,
+			                     state->hits);
+		}
+		if (state->plans.size() > 1) {
+			std::sort(state->hits.begin(), state->hits.end());
+			state->hits.erase(std::unique(state->hits.begin(), state->hits.end()), state->hits.end());
+		}
+	} else if (state->anchored) {
+		search::anchored_rows(codes, stream_offsets.data(), row_count + 1, state->dict, state->walks, state->hits);
+	} else {
+		search::scan::execute(state->cover, codes, stream_size, stream_offsets.data(), row_count + 1,
+		                      state->covered_frequency, state->freq.total,
+		                      AnyWalkCheck {state->walks, state->dict, codes}, state->hits);
+	}
 
 	// The scan emits stream rows ascending, which is vector rows descending, so the hits walked backwards
 	// merge straight into the incoming selection - itself ascending, since every filter compacts in order.
@@ -188,7 +253,7 @@ FSSTContains::FSSTContains() : state(make_uniq<State>()) {
 FSSTContains::~FSSTContains() {
 }
 
-bool FSSTContains::Prepare(idx_t, const void *, idx_t, const vector<string> &, idx_t) {
+bool FSSTContains::Prepare(idx_t, const void *, idx_t, const vector<FSSTPattern> &, idx_t) {
 	return false;
 }
 

@@ -18,6 +18,20 @@
 
 namespace duckdb {
 
+//! A LIKE pattern as the literal runs between its wildcards, plus where it is anchored. `contains(col, x)`
+//! is one run with no anchor, `prefix(col, x)` one run anchored at the start, `x%y%` two runs anchored at
+//! the start. One unanchored or start-anchored run is answered exactly; anything else is a superset and the
+//! exact predicate has to run behind it.
+struct FSSTPattern {
+	vector<string> runs;
+	bool anchor_start;
+	bool anchor_end;
+
+	bool IsExact() const {
+		return runs.size() == 1 && !anchor_end;
+	}
+};
+
 //! contains(col, needle) for one or more needles, evaluated on an FSST vector in the compressed domain
 //! with the substring search of the fsst repository (third_party/fsst/upstream/search). Planning turns
 //! each needle into a probe cover over the segment's symbol table and an alignment walk; the scan finds
@@ -32,8 +46,12 @@ public:
 	//! the table, so a vector with the planned row_group_id reuses the plan unchecked. The counts are per
 	//! segment, so a plan from the first segment can be poor for the rest; that is accepted. row_group_id
 	//! 0 means unknown and plans every time. Returns whether a usable plan exists.
-	bool Prepare(idx_t row_group_id, const void *decoder, idx_t symbol_count, const vector<string> &needles,
+	bool Prepare(idx_t row_group_id, const void *decoder, idx_t symbol_count, const vector<FSSTPattern> &patterns,
 	             idx_t row_count);
+
+	//! Whether the last Prepare planned rows that are the answer rather than a superset. False means the
+	//! caller must still run the exact predicate over the rows Filter keeps.
+	bool PlanIsExact() const;
 
 	//! Keep the rows of `sel` that are valid and contain one of the needles. False when the vector's
 	//! layout is not one contiguous descending block, in which case nothing is written.

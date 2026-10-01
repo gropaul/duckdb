@@ -445,18 +445,23 @@ FilterPushdownResult FilterCombiner::TryPushdownPrefixFilter(TableFilterSet &tab
 		return FilterPushdownResult::NO_PUSHDOWN;
 	}
 	auto filter_idx = column_ref.Binding().column_index;
-	//! Replace prefix with a set of comparisons
+	auto &column_type = func.GetChildren()[0]->GetReturnType();
+	// The bounds are what prunes row groups, so they are pushed as optional filters: statistics still see
+	// them, but the rows are decided by the prefix itself, which a compressed scan can answer directly.
 	auto lower_bound = CreateComparisonExpression(*func.GetChildren()[0], ExpressionType::COMPARE_GREATERTHANOREQUALTO,
 	                                              Value(prefix_string));
-	table_filters.PushFilter(filter_idx, make_uniq<ExpressionFilter>(std::move(lower_bound)));
+	table_filters.PushFilter(
+	    filter_idx, make_uniq<ExpressionFilter>(CreateOptionalFilterExpression(std::move(lower_bound), column_type)));
 	if (Utf8Proc::FindNextLegalUTF8(prefix_string)) {
 		auto upper_bound =
 		    CreateComparisonExpression(*func.GetChildren()[0], ExpressionType::COMPARE_LESSTHAN, Value(prefix_string));
-		table_filters.PushFilter(filter_idx, make_uniq<ExpressionFilter>(std::move(upper_bound)));
-		return FilterPushdownResult::PUSHED_DOWN_FULLY;
+		table_filters.PushFilter(filter_idx, make_uniq<ExpressionFilter>(
+		                                         CreateOptionalFilterExpression(std::move(upper_bound), column_type)));
 	}
-	// could not find next legal utf8 string - skip upper bound
-	return FilterPushdownResult::NO_PUSHDOWN;
+	auto prefix_expr = expr.Copy();
+	ReplaceWithBoundReference(prefix_expr);
+	table_filters.PushFilter(filter_idx, make_uniq<ExpressionFilter>(std::move(prefix_expr)));
+	return FilterPushdownResult::PUSHED_DOWN_FULLY;
 }
 
 FilterPushdownResult FilterCombiner::TryPushdownLikeFilter(TableFilterSet &table_filters,

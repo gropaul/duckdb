@@ -24,7 +24,8 @@ struct var_binary_t {
 	}
 
 	bool operator==(const var_binary_t &other) const {
-		return length == other.length && memcmp(ptr, other.ptr, length) == 0;
+		// the empty needle is a common filter and memcmp is an out-of-line call even for length 0
+		return length == other.length && (length == 0 || memcmp(ptr, other.ptr, length) == 0);
 	}
 };
 
