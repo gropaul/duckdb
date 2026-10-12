@@ -35,10 +35,12 @@ struct FSSTContains::State {
 	//! Set when a pattern has several runs, or a shape only a superset covers: one plan per pattern then,
 	//! run separately and unioned, and the caller confirms the rows.
 	bool multi_run = false;
+	bool all_anchored = false;
+	std::vector<uint32_t> rest;
 	bool exact = true;
 	//! The single pattern is negated: Filter keeps the valid rows that do not match
 	bool negated = false;
-	//! Per vector row, whether it matched; only used for a negated pattern
+	//! Per vector row, whether it matched
 	unsafe_vector<uint8_t> matched;
 	std::vector<search::PatternPlan> plans;
 
@@ -152,6 +154,7 @@ bool FSSTContains::Prepare(idx_t row_group_id, const void *decoder_p, idx_t symb
 	state->walks.clear();
 	state->plans.clear();
 	state->multi_run = !one_run_each;
+	state->all_anchored = true;
 	state->anchor = one_run_each ? anchor : search::Anchor::None;
 	state->exact = one_run_each;
 
@@ -185,6 +188,7 @@ bool FSSTContains::Prepare(idx_t row_group_id, const void *decoder_p, idx_t symb
 			return false;
 		}
 		state->exact = state->exact && plan.exact;
+		state->all_anchored = state->all_anchored && plan.anchored;
 		state->plans.push_back(std::move(plan));
 	}
 	state->usable = true;
@@ -235,6 +239,37 @@ bool FSSTContains::FilterMatches(const var_binary_view_t &view, const ValidityMa
 			const auto row = result_sel.get_index(match_index);
 			result_sel.set_index(result_count, row);
 			result_count += validity.RowIsValid(row);
+		}
+		return true;
+	}
+	if (state->multi_run && state->all_anchored) {
+		// an anchored pattern is checked row by row anyway, so only the selected rows are; one pattern at a
+		// time over the rows the earlier ones left
+		auto &rest = state->rest;
+		rest.resize(count);
+		for (idx_t i = 0; i < count; i++) {
+			rest[i] = UnsafeNumericCast<uint32_t>(sel.get_index(i));
+		}
+		auto &matched = state->matched;
+		matched.assign(row_count, 0);
+		idx_t rest_count = count;
+		for (auto &plan : state->plans) {
+			idx_t kept = 0;
+			for (idx_t i = 0; i < rest_count; i++) {
+				const idx_t row = rest[i];
+				const idx_t start = UnsafeNumericCast<idx_t>(view.offsets[row]);
+				const bool match = search::anchored_row(state->dict, codes, start, start + view.lengths[row], plan);
+				matched[row] = match;
+				rest[kept] = UnsafeNumericCast<uint32_t>(row);
+				kept += !match;
+			}
+			rest_count = kept;
+		}
+		result_count = 0;
+		for (idx_t i = 0; i < count; i++) {
+			const idx_t row = sel.get_index(i);
+			result_sel.set_index(result_count, row);
+			result_count += matched[row] & validity.RowIsValid(row);
 		}
 		return true;
 	}
