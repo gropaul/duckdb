@@ -49,7 +49,17 @@ SELECT 'like', count(*), md5(coalesce(string_agg(s, '|' ORDER BY s), '')) FROM d
 SELECT 'or', count(*), md5(coalesce(string_agg(s, '|' ORDER BY s), '')) FROM db.t WHERE contains(s, 'abc') OR contains(s, 'def') UNION ALL
 SELECT 'or3', count(*), md5(coalesce(string_agg(s, '|' ORDER BY s), '')) FROM db.t WHERE contains(s, '_tail_1') OR contains(s, '_tail_5') OR contains(s, 'beef') UNION ALL
 SELECT 'and', count(*), md5(coalesce(string_agg(s, '|' ORDER BY s), '')) FROM db.t WHERE contains(s, 'abc') AND contains(s, '_tail_6') UNION ALL
-SELECT 'not', count(*), md5(coalesce(string_agg(s, '|' ORDER BY s), '')) FROM db.t WHERE NOT contains(s, 'a');
+SELECT 'not', count(*), md5(coalesce(string_agg(s, '|' ORDER BY s), '')) FROM db.t WHERE NOT contains(s, 'a') UNION ALL
+SELECT 'prefix', count(*), md5(coalesce(string_agg(s, '|' ORDER BY s), '')) FROM db.t WHERE prefix(s, 'esc') UNION ALL
+SELECT 'suffix', count(*), md5(coalesce(string_agg(s, '|' ORDER BY s), '')) FROM db.t WHERE suffix(s, 'tail_3') UNION ALL
+SELECT 'suffix_escape', count(*), md5(coalesce(string_agg(s, '|' ORDER BY s), '')) FROM db.t WHERE ends_with(s, 'ape_2' || chr(200)) UNION ALL
+SELECT 'and_suffix', count(*), md5(coalesce(string_agg(s, '|' ORDER BY s), '')) FROM db.t WHERE contains(s, 'abc') AND suffix(s, 'tail_6') UNION ALL
+SELECT 'and_prefix', count(*), md5(coalesce(string_agg(s, '|' ORDER BY s), '')) FROM db.t WHERE prefix(s, 'esc') AND contains(s, 'ape_2') UNION ALL
+SELECT 'not_like', count(*), md5(coalesce(string_agg(s, '|' ORDER BY s), '')) FROM db.t WHERE s NOT LIKE '%beef%' UNION ALL
+SELECT 'not_like_prefix', count(*), md5(coalesce(string_agg(s, '|' ORDER BY s), '')) FROM db.t WHERE s NOT LIKE 'esc%' UNION ALL
+SELECT 'not_suffix', count(*), md5(coalesce(string_agg(s, '|' ORDER BY s), '')) FROM db.t WHERE NOT suffix(s, 'tail_3') UNION ALL
+SELECT 'not_like_runs', count(*), md5(coalesce(string_agg(s, '|' ORDER BY s), '')) FROM db.t WHERE s NOT LIKE '%a%b%' UNION ALL
+SELECT 'like_suffix', count(*), md5(coalesce(string_agg(s, '|' ORDER BY s), '')) FROM db.t WHERE s LIKE '%3';
 
 statement ok
 SET enable_fsst_vectors=true;
@@ -69,7 +79,17 @@ SELECT count(*) FROM (
     SELECT 'or', count(*), md5(coalesce(string_agg(s, '|' ORDER BY s), '')) FROM db.t WHERE contains(s, 'abc') OR contains(s, 'def') UNION ALL
     SELECT 'or3', count(*), md5(coalesce(string_agg(s, '|' ORDER BY s), '')) FROM db.t WHERE contains(s, '_tail_1') OR contains(s, '_tail_5') OR contains(s, 'beef') UNION ALL
     SELECT 'and', count(*), md5(coalesce(string_agg(s, '|' ORDER BY s), '')) FROM db.t WHERE contains(s, 'abc') AND contains(s, '_tail_6') UNION ALL
-    SELECT 'not', count(*), md5(coalesce(string_agg(s, '|' ORDER BY s), '')) FROM db.t WHERE NOT contains(s, 'a')
+    SELECT 'not', count(*), md5(coalesce(string_agg(s, '|' ORDER BY s), '')) FROM db.t WHERE NOT contains(s, 'a') UNION ALL
+    SELECT 'prefix', count(*), md5(coalesce(string_agg(s, '|' ORDER BY s), '')) FROM db.t WHERE prefix(s, 'esc') UNION ALL
+    SELECT 'suffix', count(*), md5(coalesce(string_agg(s, '|' ORDER BY s), '')) FROM db.t WHERE suffix(s, 'tail_3') UNION ALL
+    SELECT 'suffix_escape', count(*), md5(coalesce(string_agg(s, '|' ORDER BY s), '')) FROM db.t WHERE ends_with(s, 'ape_2' || chr(200)) UNION ALL
+    SELECT 'and_suffix', count(*), md5(coalesce(string_agg(s, '|' ORDER BY s), '')) FROM db.t WHERE contains(s, 'abc') AND suffix(s, 'tail_6') UNION ALL
+    SELECT 'and_prefix', count(*), md5(coalesce(string_agg(s, '|' ORDER BY s), '')) FROM db.t WHERE prefix(s, 'esc') AND contains(s, 'ape_2') UNION ALL
+    SELECT 'not_like', count(*), md5(coalesce(string_agg(s, '|' ORDER BY s), '')) FROM db.t WHERE s NOT LIKE '%beef%' UNION ALL
+    SELECT 'not_like_prefix', count(*), md5(coalesce(string_agg(s, '|' ORDER BY s), '')) FROM db.t WHERE s NOT LIKE 'esc%' UNION ALL
+    SELECT 'not_suffix', count(*), md5(coalesce(string_agg(s, '|' ORDER BY s), '')) FROM db.t WHERE NOT suffix(s, 'tail_3') UNION ALL
+    SELECT 'not_like_runs', count(*), md5(coalesce(string_agg(s, '|' ORDER BY s), '')) FROM db.t WHERE s NOT LIKE '%a%b%' UNION ALL
+    SELECT 'like_suffix', count(*), md5(coalesce(string_agg(s, '|' ORDER BY s), '')) FROM db.t WHERE s LIKE '%3'
 ) scanned JOIN db.reference USING (needle)
 WHERE scanned.matches <> db.reference.matches OR scanned.digest <> db.reference.digest;
 ----
@@ -79,7 +99,7 @@ WHERE scanned.matches <> db.reference.matches OR scanned.digest <> db.reference.
 query II
 SELECT count(*), count(*) FILTER (WHERE matches > 0) FROM db.reference;
 ----
-14	12
+24	22
 
 # a LIKE with only leading and trailing wildcards is rewritten to contains and takes the same path
 query I

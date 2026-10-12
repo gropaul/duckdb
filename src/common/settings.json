@@ -629,6 +629,14 @@
         ]
     },
     {
+        "name": "enable_fsst_contains",
+        "description": "Allow contains, prefix, suffix and LIKE filters on FSST compressed vectors to be evaluated on the compressed data, without decompressing",
+        "type": "BOOLEAN",
+        "scope": "global",
+        "default_value": "true",
+        "struct": "EnableFSSTContainsSetting"
+    },
+    {
         "name": "enable_fsst_eq",
         "description": "Allow equality and inequality filters on FSST compressed vectors to be evaluated on the compressed data, without decompressing",
         "type": "BOOLEAN",

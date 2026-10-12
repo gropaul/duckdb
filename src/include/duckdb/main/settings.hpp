@@ -977,6 +977,17 @@ struct EnableExternalFileCacheSetting {
 	static void OnSet(SettingCallbackInfo &info, Value &input);
 };
 
+struct EnableFSSTContainsSetting {
+	using RETURN_TYPE = bool;
+	static constexpr const char *Name = "enable_fsst_contains";
+	static constexpr const char *Description = "Allow contains, prefix, suffix and LIKE filters on FSST compressed "
+	                                           "vectors to be evaluated on the compressed data, without decompressing";
+	static constexpr const char *InputType = "BOOLEAN";
+	static constexpr const char *DefaultValue = "true";
+	static constexpr SettingScopeTarget Scope = SettingScopeTarget::GLOBAL_ONLY;
+	static constexpr idx_t SettingIndex = NEXT_SETTING_INDEX();
+};
+
 struct EnableFSSTEqSetting {
 	using RETURN_TYPE = bool;
 	static constexpr const char *Name = "enable_fsst_eq";

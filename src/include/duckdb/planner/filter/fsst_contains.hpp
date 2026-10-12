@@ -19,16 +19,18 @@
 namespace duckdb {
 
 //! A LIKE pattern as the literal runs between its wildcards, plus where it is anchored. `contains(col, x)`
-//! is one run with no anchor, `prefix(col, x)` one run anchored at the start, `x%y%` two runs anchored at
-//! the start. One unanchored or start-anchored run is answered exactly; anything else is a superset and the
-//! exact predicate has to run behind it.
+//! is one run with no anchor, `prefix(col, x)` one run anchored at the start, `suffix(col, x)` one anchored
+//! at the end, `x%y%` two runs anchored at the start. One run anchored at most at one end is answered
+//! exactly; anything else is a superset and the exact predicate has to run behind it.
 struct FSSTPattern {
 	vector<string> runs;
 	bool anchor_start;
 	bool anchor_end;
+	//! NOT LIKE / NOT contains(...): keep the valid rows that do not match
+	bool negated = false;
 
 	bool IsExact() const {
-		return runs.size() == 1 && !anchor_end;
+		return runs.size() == 1 && !(anchor_start && anchor_end);
 	}
 };
 
@@ -53,12 +55,18 @@ public:
 	//! caller must still run the exact predicate over the rows Filter keeps.
 	bool PlanIsExact() const;
 
-	//! Keep the rows of `sel` that are valid and contain one of the needles. False when the vector's
-	//! layout is not one contiguous descending block, in which case nothing is written.
+	//! Keep the rows of `sel` that are valid and contain one of the needles, or for a negated pattern the
+	//! valid rows that do not. False when a plan that scans the code stream gets a vector that is not one
+	//! contiguous descending block, or a negated pattern has only a superset plan, in which case nothing is
+	//! written; an anchored plan reads each row on its own and takes any layout.
 	bool Filter(const var_binary_view_t &view, const ValidityMask &validity, idx_t row_count,
 	            const SelectionVector &sel, idx_t count, SelectionVector &result_sel, idx_t &result_count);
 
 private:
+	//! The rows of `sel` that are valid and match, ascending, into result_sel
+	bool FilterMatches(const var_binary_view_t &view, const ValidityMask &validity, idx_t row_count,
+	                   const SelectionVector &sel, idx_t count, SelectionVector &result_sel, idx_t &result_count);
+
 	struct State;
 	unique_ptr<State> state;
 };

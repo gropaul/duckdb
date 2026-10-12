@@ -131,7 +131,6 @@ public:
 		return string_t(view.ptr, UnsafeNumericCast<uint32_t>(view.length));
 	}
 
-	//! Total payload bytes currently held (reverse layout: value 0 sits at the top of the byte buffer)
 	//! Use the bytes at `base` inside a pinned block instead of an owned copy. The pin keeps the block in
 	//! memory for as long as this buffer or any slice of it lives; Grow copies the bytes out and drops it.
 	void ReferenceBytes(data_ptr_t base, shared_ptr<BufferHandle> pin_p) {
@@ -139,6 +138,7 @@ public:
 		pin = std::move(pin_p);
 	}
 
+	//! Total payload bytes currently held (reverse layout: value 0 sits at the top of the byte buffer)
 	idx_t ByteSize() const {
 		if (is_view) {
 			throw InternalException("ByteSize is not defined for a slice view of a VariableBinaryBuffer");
