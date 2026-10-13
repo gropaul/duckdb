@@ -46,6 +46,9 @@ struct FSSTContains::State {
 
 	unsafe_vector<uint32_t> stream_offsets;
 	std::vector<size_t> hits;
+	//! A partial selection as ascending stream rows, and the scans restricted to it
+	std::vector<uint32_t> stream_sel;
+	search::Finder finder {STANDARD_VECTOR_SIZE};
 };
 
 namespace {
@@ -293,16 +296,34 @@ bool FSSTContains::FilterMatches(const var_binary_view_t &view, const ValidityMa
 	}
 	stream_offsets[row_count] = UnsafeNumericCast<uint32_t>(stream_size);
 
+	// a partial selection is scanned over its own rows only, in stream order
+	const bool selected = count < row_count;
+	auto &stream_sel = state->stream_sel;
+	if (selected) {
+		stream_sel.resize(count);
+		for (idx_t i = 0; i < count; i++) {
+			stream_sel[count - 1 - i] = UnsafeNumericCast<uint32_t>(row_count - 1 - sel.get_index(i));
+		}
+	}
 	if (state->multi_run) {
 		// one plan per pattern, each ascending; the union is what an OR of them keeps
 		for (auto &plan : state->plans) {
-			search::pattern_rows(codes, stream_size, stream_offsets.data(), row_count + 1, state->dict, plan,
-			                     hits);
+			if (selected) {
+				search::pattern_rows(codes, stream_size, stream_offsets.data(), row_count + 1, state->dict, plan,
+				                     state->finder, stream_sel.data(), count, hits);
+			} else {
+				search::pattern_rows(codes, stream_size, stream_offsets.data(), row_count + 1, state->dict, plan,
+				                     hits);
+			}
 		}
 		if (state->plans.size() > 1) {
 			std::sort(hits.begin(), hits.end());
 			hits.erase(std::unique(hits.begin(), hits.end()), hits.end());
 		}
+	} else if (selected) {
+		state->finder.find(codes, stream_size, stream_offsets.data(), row_count + 1, state->cover,
+		                   state->covered_frequency, state->freq.total, AnyWalkCheck {state->walks, state->dict, codes},
+		                   stream_sel.data(), count, hits);
 	} else {
 		search::scan::execute(state->cover, codes, stream_size, stream_offsets.data(), row_count + 1,
 		                      state->covered_frequency, state->freq.total,

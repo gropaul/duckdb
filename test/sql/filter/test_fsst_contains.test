@@ -107,3 +107,47 @@ SELECT count(*) FROM db.t WHERE contains(s, 'beef')
 EXCEPT
 SELECT count(*) FROM db.t WHERE s LIKE '%beef%';
 ----
+
+# a filter on another column leaves a partial selection, which the compressed scan searches alone
+statement ok
+CREATE TABLE db.sel AS SELECT i AS k, s FROM (SELECT row_number() OVER () - 1 AS i, s FROM db.t);
+
+statement ok
+CHECKPOINT db;
+
+statement ok
+SET enable_fsst_contains=false;
+
+statement ok
+CREATE TABLE db.sel_reference AS
+SELECT 'sparse_or' AS needle, count(*) AS matches, md5(coalesce(string_agg(s, '|' ORDER BY s), '')) AS digest FROM db.sel WHERE k % 97 < 3 AND (contains(s, 'abc') OR contains(s, 'def')) UNION ALL
+SELECT 'sparse_runs' AS needle, count(*) AS matches, md5(coalesce(string_agg(s, '|' ORDER BY s), '')) AS digest FROM db.sel WHERE k % 97 < 3 AND (s LIKE '%ab%cd%') UNION ALL
+SELECT 'sparse_or_runs' AS needle, count(*) AS matches, md5(coalesce(string_agg(s, '|' ORDER BY s), '')) AS digest FROM db.sel WHERE k % 97 < 3 AND (s LIKE '%ab%cd%' OR s LIKE '%ef%01%') UNION ALL
+SELECT 'sparse_or_anchored_runs' AS needle, count(*) AS matches, md5(coalesce(string_agg(s, '|' ORDER BY s), '')) AS digest FROM db.sel WHERE k % 97 < 3 AND (s LIKE 'esc%ape%' OR s LIKE 'c4%tail%') UNION ALL
+SELECT 'dense_or' AS needle, count(*) AS matches, md5(coalesce(string_agg(s, '|' ORDER BY s), '')) AS digest FROM db.sel WHERE k % 3 = 0 AND (contains(s, 'abc') OR contains(s, 'def')) UNION ALL
+SELECT 'dense_runs' AS needle, count(*) AS matches, md5(coalesce(string_agg(s, '|' ORDER BY s), '')) AS digest FROM db.sel WHERE k % 3 = 0 AND (s LIKE '%ab%cd%') UNION ALL
+SELECT 'dense_or_runs' AS needle, count(*) AS matches, md5(coalesce(string_agg(s, '|' ORDER BY s), '')) AS digest FROM db.sel WHERE k % 3 = 0 AND (s LIKE '%ab%cd%' OR s LIKE '%ef%01%') UNION ALL
+SELECT 'dense_or_anchored_runs' AS needle, count(*) AS matches, md5(coalesce(string_agg(s, '|' ORDER BY s), '')) AS digest FROM db.sel WHERE k % 3 = 0 AND (s LIKE 'esc%ape%' OR s LIKE 'c4%tail%');
+
+statement ok
+SET enable_fsst_contains=true;
+
+query I
+SELECT count(*) FROM (
+    SELECT 'sparse_or' AS needle, count(*) AS matches, md5(coalesce(string_agg(s, '|' ORDER BY s), '')) AS digest FROM db.sel WHERE k % 97 < 3 AND (contains(s, 'abc') OR contains(s, 'def')) UNION ALL
+    SELECT 'sparse_runs' AS needle, count(*) AS matches, md5(coalesce(string_agg(s, '|' ORDER BY s), '')) AS digest FROM db.sel WHERE k % 97 < 3 AND (s LIKE '%ab%cd%') UNION ALL
+    SELECT 'sparse_or_runs' AS needle, count(*) AS matches, md5(coalesce(string_agg(s, '|' ORDER BY s), '')) AS digest FROM db.sel WHERE k % 97 < 3 AND (s LIKE '%ab%cd%' OR s LIKE '%ef%01%') UNION ALL
+    SELECT 'sparse_or_anchored_runs' AS needle, count(*) AS matches, md5(coalesce(string_agg(s, '|' ORDER BY s), '')) AS digest FROM db.sel WHERE k % 97 < 3 AND (s LIKE 'esc%ape%' OR s LIKE 'c4%tail%') UNION ALL
+    SELECT 'dense_or' AS needle, count(*) AS matches, md5(coalesce(string_agg(s, '|' ORDER BY s), '')) AS digest FROM db.sel WHERE k % 3 = 0 AND (contains(s, 'abc') OR contains(s, 'def')) UNION ALL
+    SELECT 'dense_runs' AS needle, count(*) AS matches, md5(coalesce(string_agg(s, '|' ORDER BY s), '')) AS digest FROM db.sel WHERE k % 3 = 0 AND (s LIKE '%ab%cd%') UNION ALL
+    SELECT 'dense_or_runs' AS needle, count(*) AS matches, md5(coalesce(string_agg(s, '|' ORDER BY s), '')) AS digest FROM db.sel WHERE k % 3 = 0 AND (s LIKE '%ab%cd%' OR s LIKE '%ef%01%') UNION ALL
+    SELECT 'dense_or_anchored_runs' AS needle, count(*) AS matches, md5(coalesce(string_agg(s, '|' ORDER BY s), '')) AS digest FROM db.sel WHERE k % 3 = 0 AND (s LIKE 'esc%ape%' OR s LIKE 'c4%tail%')
+) scanned JOIN db.sel_reference USING (needle)
+WHERE scanned.matches <> db.sel_reference.matches OR scanned.digest <> db.sel_reference.digest;
+----
+0
+
+query II
+SELECT count(*), count(*) FILTER (WHERE matches > 0) FROM db.sel_reference;
+----
+8	8
