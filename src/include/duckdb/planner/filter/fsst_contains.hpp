@@ -8,62 +8,35 @@
 
 #pragma once
 
-#include "duckdb/common/constants.hpp"
 #include "duckdb/common/string.hpp"
-#include "duckdb/common/types/selection_vector.hpp"
-#include "duckdb/common/types/validity_mask.hpp"
-#include "duckdb/common/helper.hpp"
+#include "duckdb/common/unique_ptr.hpp"
 #include "duckdb/common/vector.hpp"
-#include "duckdb/common/vector/variable_binary_buffer.hpp"
+#include "duckdb/planner/table_filter_state.hpp"
 
 namespace duckdb {
 
-//! A LIKE pattern as the literals between its wildcards, plus where it is anchored. `contains(col, x)`
-//! is one literal with no anchor, `prefix(col, x)` one anchored at the start, `suffix(col, x)` one anchored
-//! at the end, `x%y%` two literals anchored at the start. FSSTContains answers one literal anchored at most at one
-//! end; anything else is filtered literal by literal, then by the pattern itself.
+class ClientContext;
+
+//! A LIKE pattern as the literals between its wildcards and its anchors: contains is one literal, prefix one
+//! anchored at the start, suffix one anchored at the end.
 struct FSSTPattern {
 	vector<string> literals;
 	bool anchor_start;
 	bool anchor_end;
-	//! NOT LIKE / NOT contains(...): keep the valid rows that do not match
+	//! NOT LIKE / NOT contains(...)
 	bool negated = false;
 
+	//! One literal anchored at most at one end, which the compressed filter answers exactly
 	bool IsExact() const {
 		return literals.size() == 1 && !(anchor_start && anchor_end);
 	}
 };
 
-//! contains(col, needle), prefix or suffix, evaluated on an FSST vector in the compressed domain with the
-//! substring search of the fsst repository (third_party/fsst/upstream/search). Planning turns the needle into a
-//! probe cover over the segment's symbol table and an alignment walk; the scan finds the rows holding a covered
-//! code and the walk verifies every hit, so the rows come out exact.
-class FSSTContains {
-public:
-	FSSTContains();
-	~FSSTContains();
-
-	//! Make sure the pattern, one literal anchored at most at one end, is planned over the vector's symbol table,
-	//! weighted by the code counts the encoder stored with it. Planning happens once per row group: every segment
-	//! of a row group shares the table, so a vector with the planned row_group_id reuses the plan unchecked. The
-	//! counts are per segment, so a plan from the first segment can be poor for the rest; that is accepted.
-	//! row_group_id 0 means unknown and plans every time. Returns whether a usable plan exists.
-	bool Prepare(idx_t row_group_id, const void *decoder, idx_t symbol_count, const FSSTPattern &pattern,
-	             idx_t row_count);
-
-	//! Keep the rows of `sel` that are valid and match, or for a negated pattern the valid rows that do not.
-	//! False when an unanchored plan gets a vector that is not one contiguous descending block, in which case
-	//! nothing is written; an anchored plan reads each row on its own and takes any layout.
-	bool Filter(const var_binary_view_t &view, const ValidityMask &validity, idx_t row_count,
-	            const SelectionVector &sel, idx_t count, SelectionVector &result_sel, idx_t &result_count);
-
-private:
-	//! The rows of `sel` that are valid and match, ascending, into result_sel
-	bool FilterMatches(const var_binary_view_t &view, const ValidityMask &validity, idx_t row_count,
-	                   const SelectionVector &sel, idx_t count, SelectionVector &result_sel, idx_t &result_count);
-
-	struct State;
-	unique_ptr<State> state;
-};
+//! A filter for an exact pattern that answers FSST vectors on their codes, with the substring search of
+//! third_party/fsst/upstream/search. Other vectors, and those its planner declines, go to `exact`; without one
+//! it keeps them, as a prefilter in front of a pattern checked after it. A build without the search returns
+//! `exact` itself.
+unique_ptr<ExpressionFilterExecutor> CreateContainsExecutor(ClientContext &context, FSSTPattern pattern,
+                                                            unique_ptr<ExpressionFilterExecutor> exact);
 
 } // namespace duckdb

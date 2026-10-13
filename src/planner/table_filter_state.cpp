@@ -676,67 +676,6 @@ static bool IsColumnReferenceExpression(const Expression &expr) {
 	return ref.Index() == 0;
 }
 
-// contains(col, needle), prefix or suffix. An FSST vector is answered in the compressed domain by FSSTContains;
-// every other vector, and an FSST vector its planner declines, goes through the regular expression. Without
-// one it is a prefilter for a pattern checked after it, and keeps every row it cannot answer.
-class ContainsFilterExecutor final : public ExpressionFilterExecutor {
-public:
-	ContainsFilterExecutor(ClientContext &context, optional_ptr<const Expression> expression, FSSTPattern pattern_p)
-	    : pattern(std::move(pattern_p)), enabled(Settings::Get<EnableFSSTContainsSetting>(context)) {
-		if (expression) {
-			exact = make_uniq<GenericFilterExecutor>(context, *expression);
-		}
-	}
-
-	idx_t FilterSelectionInternal(SelectionVector &sel, Vector &vector, idx_t scan_count,
-	                              idx_t &approved_tuple_count) override {
-		if (approved_tuple_count == 0) {
-			return 0;
-		}
-		if ((enabled && FilterFSST(sel, vector, approved_tuple_count)) || !exact) {
-			return approved_tuple_count;
-		}
-		return exact->FilterSelection(sel, vector, scan_count, approved_tuple_count);
-	}
-
-private:
-	bool FilterFSST(SelectionVector &sel, Vector &vector, idx_t &approved_tuple_count) {
-		if (vector.GetVectorType() != VectorType::FSST_VECTOR) {
-			return false;
-		}
-		const auto view = FSSTVector::GetDataView(vector);
-		const auto row_count = FSSTVector::GetFSSTBuffer(vector).Capacity();
-		if (row_count == 0) {
-			return false;
-		}
-		// planned once per row group, off the code counts stored with its symbol table
-		if (!fsst.Prepare(FSSTVector::GetRowGroupId(vector), FSSTVector::GetDecoder(vector),
-		                  FSSTVector::GetSymbolCount(vector), pattern, row_count)) {
-			return false;
-		}
-		if (current_capacity < approved_tuple_count) {
-			result_sel.Initialize(approved_tuple_count);
-			current_capacity = approved_tuple_count;
-		}
-		auto &current_sel = sel.IsSet() ? sel : *FlatVector::IncrementalSelectionVector();
-		idx_t result_count;
-		if (!fsst.Filter(view, FSSTVector::Validity(vector), row_count, current_sel, approved_tuple_count, result_sel,
-		                 result_count)) {
-			return false;
-		}
-		sel.Initialize(result_sel);
-		approved_tuple_count = result_count;
-		return true;
-	}
-
-	FSSTPattern pattern;
-	bool enabled;
-	FSSTContains fsst;
-	unique_ptr<GenericFilterExecutor> exact;
-	SelectionVector result_sel;
-	idx_t current_capacity = 0;
-};
-
 // Split a LIKE pattern into the literals between its wildcards. False for a pattern with a single
 // character wildcard or an escape, which literals cannot express, or with no literal at all.
 static bool TrySplitLikePattern(const string &pattern, FSSTPattern &out) {
@@ -806,12 +745,12 @@ static bool TryGetStringMatch(const Expression &expr, FSSTPattern &match) {
 	return true;
 }
 
-// One literal goes to FSSTContains as it is. Several are filtered one at a time and the survivors by the pattern
-// itself; a negated one is left to the regular expression.
+// One literal is filtered on the codes as it is. Several are filtered one at a time and the survivors by the
+// pattern itself; a negated one is left to the regular expression.
 static unique_ptr<ExpressionFilterExecutor> TryCreateMatchExecutor(ClientContext &context, const Expression &expr,
                                                                    FSSTPattern match) {
 	if (match.IsExact()) {
-		return make_uniq<ContainsFilterExecutor>(context, &expr, std::move(match));
+		return CreateContainsExecutor(context, std::move(match), make_uniq<GenericFilterExecutor>(context, expr));
 	}
 	if (match.negated) {
 		return nullptr;
@@ -822,7 +761,9 @@ static unique_ptr<ExpressionFilterExecutor> TryCreateMatchExecutor(ClientContext
 		literal.literals.push_back(match.literals[i]);
 		literal.anchor_start = i == 0 && match.anchor_start;
 		literal.anchor_end = i + 1 == match.literals.size() && match.anchor_end && !literal.anchor_start;
-		children.push_back(make_uniq<ContainsFilterExecutor>(context, nullptr, std::move(literal)));
+		if (auto child = CreateContainsExecutor(context, std::move(literal), nullptr)) {
+			children.push_back(std::move(child));
+		}
 	}
 	children.push_back(make_uniq<GenericFilterExecutor>(context, expr));
 	return make_uniq<ConjunctionAndFilterExecutor>(std::move(children));
