@@ -161,6 +161,62 @@ private:
 	vector<unique_ptr<ExpressionFilterExecutor>> children;
 };
 
+// An OR of string matches on the column: each branch filters the selected rows no earlier branch matched.
+class ConjunctionOrFilterExecutor final : public ExpressionFilterExecutor {
+public:
+	explicit ConjunctionOrFilterExecutor(vector<unique_ptr<ExpressionFilterExecutor>> children_p)
+	    : children(std::move(children_p)) {
+	}
+
+	idx_t FilterSelectionInternal(SelectionVector &sel, Vector &vector, idx_t scan_count,
+	                              idx_t &approved_tuple_count) override {
+		if (current_capacity < scan_count) {
+			remaining.Initialize(scan_count);
+			result_sel.Initialize(scan_count);
+			current_capacity = scan_count;
+		}
+		matched.assign(scan_count, 0);
+		idx_t remaining_count = approved_tuple_count;
+		for (idx_t i = 0; i < remaining_count; i++) {
+			remaining.set_index(i, sel.get_index(i));
+		}
+		for (auto &child : children) {
+			if (remaining_count == 0) {
+				break;
+			}
+			SelectionVector child_sel(remaining);
+			idx_t child_count = remaining_count;
+			child->FilterSelection(child_sel, vector, scan_count, child_count);
+			for (idx_t i = 0; i < child_count; i++) {
+				matched[child_sel.get_index(i)] = 1;
+			}
+			idx_t kept = 0;
+			for (idx_t i = 0; i < remaining_count; i++) {
+				const auto row = remaining.get_index(i);
+				remaining.set_index(kept, row);
+				kept += !matched[row];
+			}
+			remaining_count = kept;
+		}
+		idx_t result_count = 0;
+		for (idx_t i = 0; i < approved_tuple_count; i++) {
+			const auto row = sel.get_index(i);
+			result_sel.set_index(result_count, row);
+			result_count += matched[row];
+		}
+		sel.Initialize(result_sel);
+		approved_tuple_count = result_count;
+		return result_count;
+	}
+
+private:
+	vector<unique_ptr<ExpressionFilterExecutor>> children;
+	SelectionVector remaining;
+	SelectionVector result_sel;
+	idx_t current_capacity = 0;
+	unsafe_vector<uint8_t> matched;
+};
+
 class OptionalFilterExecutor final : public ExpressionFilterExecutor {
 public:
 	idx_t FilterSelectionInternal(SelectionVector &sel, Vector &vector, idx_t scan_count,
@@ -620,14 +676,16 @@ static bool IsColumnReferenceExpression(const Expression &expr) {
 	return ref.Index() == 0;
 }
 
-// contains(col, needle), or an OR of them on one column. An FSST vector is answered in the compressed
-// domain by FSSTContains; every other vector, and an FSST vector its planner declines, goes through the
-// regular contains expression.
+// contains(col, needle), prefix or suffix. An FSST vector is answered in the compressed domain by FSSTContains;
+// every other vector, and an FSST vector its planner declines, goes through the regular expression. Without
+// one it is a prefilter for a pattern checked after it, and keeps every row it cannot answer.
 class ContainsFilterExecutor final : public ExpressionFilterExecutor {
 public:
-	ContainsFilterExecutor(ClientContext &context, const Expression &expression, vector<FSSTPattern> needles_p)
-	    : needles(std::move(needles_p)), enabled(Settings::Get<EnableFSSTContainsSetting>(context)),
-	      exact(context, expression) {
+	ContainsFilterExecutor(ClientContext &context, optional_ptr<const Expression> expression, FSSTPattern pattern_p)
+	    : pattern(std::move(pattern_p)), enabled(Settings::Get<EnableFSSTContainsSetting>(context)) {
+		if (expression) {
+			exact = make_uniq<GenericFilterExecutor>(context, *expression);
+		}
 	}
 
 	idx_t FilterSelectionInternal(SelectionVector &sel, Vector &vector, idx_t scan_count,
@@ -635,14 +693,10 @@ public:
 		if (approved_tuple_count == 0) {
 			return 0;
 		}
-		if (enabled && FilterFSST(sel, vector, approved_tuple_count)) {
-			if (fsst.PlanIsExact() || approved_tuple_count == 0) {
-				return approved_tuple_count;
-			}
-			// the compressed rows are a superset: the survivors still go through the predicate itself
-			return exact.FilterSelection(sel, vector, scan_count, approved_tuple_count);
+		if ((enabled && FilterFSST(sel, vector, approved_tuple_count)) || !exact) {
+			return approved_tuple_count;
 		}
-		return exact.FilterSelection(sel, vector, scan_count, approved_tuple_count);
+		return exact->FilterSelection(sel, vector, scan_count, approved_tuple_count);
 	}
 
 private:
@@ -657,7 +711,7 @@ private:
 		}
 		// planned once per row group, off the code counts stored with its symbol table
 		if (!fsst.Prepare(FSSTVector::GetRowGroupId(vector), FSSTVector::GetDecoder(vector),
-		                  FSSTVector::GetSymbolCount(vector), needles, row_count)) {
+		                  FSSTVector::GetSymbolCount(vector), pattern, row_count)) {
 			return false;
 		}
 		if (current_capacity < approved_tuple_count) {
@@ -675,10 +729,10 @@ private:
 		return true;
 	}
 
-	vector<FSSTPattern> needles;
+	FSSTPattern pattern;
 	bool enabled;
 	FSSTContains fsst;
-	GenericFilterExecutor exact;
+	unique_ptr<GenericFilterExecutor> exact;
 	SelectionVector result_sel;
 	idx_t current_capacity = 0;
 };
@@ -752,6 +806,28 @@ static bool TryGetStringMatch(const Expression &expr, FSSTPattern &match) {
 	return true;
 }
 
+// One literal goes to FSSTContains as it is. Several are filtered one at a time and the survivors by the pattern
+// itself; a negated one is left to the regular expression.
+static unique_ptr<ExpressionFilterExecutor> TryCreateMatchExecutor(ClientContext &context, const Expression &expr,
+                                                                   FSSTPattern match) {
+	if (match.IsExact()) {
+		return make_uniq<ContainsFilterExecutor>(context, &expr, std::move(match));
+	}
+	if (match.negated) {
+		return nullptr;
+	}
+	vector<unique_ptr<ExpressionFilterExecutor>> children;
+	for (idx_t i = 0; i < match.literals.size(); i++) {
+		FSSTPattern literal;
+		literal.literals.push_back(match.literals[i]);
+		literal.anchor_start = i == 0 && match.anchor_start;
+		literal.anchor_end = i + 1 == match.literals.size() && match.anchor_end && !literal.anchor_start;
+		children.push_back(make_uniq<ContainsFilterExecutor>(context, nullptr, std::move(literal)));
+	}
+	children.push_back(make_uniq<GenericFilterExecutor>(context, expr));
+	return make_uniq<ConjunctionAndFilterExecutor>(std::move(children));
+}
+
 static bool IsSupportedComparisonType(PhysicalType type) {
 	switch (type) {
 	case PhysicalType::BOOL:
@@ -823,7 +899,7 @@ static unique_ptr<ExpressionFilterExecutor> TryCreateFunctionExecutor(ClientCont
 	}
 	FSSTPattern match;
 	if (!inside_selectivity_optional && TryGetStringMatch(func, match)) {
-		return make_uniq<ContainsFilterExecutor>(context, func, vector<FSSTPattern> {std::move(match)});
+		return TryCreateMatchExecutor(context, func, std::move(match));
 	}
 	if (!IsColumnReferenceFunction(func)) {
 		return nullptr;
@@ -880,21 +956,25 @@ static unique_ptr<ExpressionFilterExecutor> TryCreateFastExecutor(ClientContext 
 			return nullptr;
 		}
 		match.negated = true;
-		return make_uniq<ContainsFilterExecutor>(context, expression, vector<FSSTPattern> {std::move(match)});
+		return TryCreateMatchExecutor(context, expression, std::move(match));
 	}
 	case ExpressionClass::BOUND_CONJUNCTION: {
 		auto &conjunction = expression.Cast<BoundConjunctionExpression>();
 		if (expression.GetExpressionType() == ExpressionType::CONJUNCTION_OR) {
-			// every branch a contains on the column: one executor answers the whole OR
-			vector<FSSTPattern> needles;
+			// every branch a string match on the column
+			vector<unique_ptr<ExpressionFilterExecutor>> children;
 			for (auto &child : conjunction.GetChildren()) {
 				FSSTPattern match;
-				if (inside_selectivity_optional || !TryGetStringMatch(*child, match) || match.negated) {
+				if (inside_selectivity_optional || !TryGetStringMatch(*child, match)) {
 					return nullptr;
 				}
-				needles.push_back(std::move(match));
+				auto executor = TryCreateMatchExecutor(context, *child, std::move(match));
+				if (!executor) {
+					executor = make_uniq<GenericFilterExecutor>(context, *child);
+				}
+				children.push_back(std::move(executor));
 			}
-			return make_uniq<ContainsFilterExecutor>(context, expression, std::move(needles));
+			return make_uniq<ConjunctionOrFilterExecutor>(std::move(children));
 		}
 		if (expression.GetExpressionType() != ExpressionType::CONJUNCTION_AND) {
 			return nullptr;
