@@ -18,19 +18,19 @@
 
 namespace duckdb {
 
-//! A LIKE pattern as the literal runs between its wildcards, plus where it is anchored. `contains(col, x)`
-//! is one run with no anchor, `prefix(col, x)` one run anchored at the start, `suffix(col, x)` one anchored
-//! at the end, `x%y%` two runs anchored at the start. One run anchored at most at one end is answered
+//! A LIKE pattern as the literals between its wildcards, plus where it is anchored. `contains(col, x)`
+//! is one literal with no anchor, `prefix(col, x)` one anchored at the start, `suffix(col, x)` one anchored
+//! at the end, `x%y%` two literals anchored at the start. One literal anchored at most at one end is answered
 //! exactly; anything else is a superset and the exact predicate has to run behind it.
 struct FSSTPattern {
-	vector<string> runs;
+	vector<string> literals;
 	bool anchor_start;
 	bool anchor_end;
 	//! NOT LIKE / NOT contains(...): keep the valid rows that do not match
 	bool negated = false;
 
 	bool IsExact() const {
-		return runs.size() == 1 && !(anchor_start && anchor_end);
+		return literals.size() == 1 && !(anchor_start && anchor_end);
 	}
 };
 

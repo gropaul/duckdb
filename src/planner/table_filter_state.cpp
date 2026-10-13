@@ -683,13 +683,13 @@ private:
 	idx_t current_capacity = 0;
 };
 
-// Split a LIKE pattern into the literal runs between its wildcards. False for a pattern with a single
-// character wildcard or an escape, which runs cannot express, or with no literal at all.
+// Split a LIKE pattern into the literals between its wildcards. False for a pattern with a single
+// character wildcard or an escape, which literals cannot express, or with no literal at all.
 static bool TrySplitLikePattern(const string &pattern, FSSTPattern &out) {
 	if (pattern.find('_') != string::npos || pattern.find('\\') != string::npos) {
 		return false;
 	}
-	out.runs.clear();
+	out.literals.clear();
 	string run;
 	for (auto c : pattern) {
 		if (c != '%') {
@@ -697,14 +697,14 @@ static bool TrySplitLikePattern(const string &pattern, FSSTPattern &out) {
 			continue;
 		}
 		if (!run.empty()) {
-			out.runs.push_back(std::move(run));
+			out.literals.push_back(std::move(run));
 			run.clear();
 		}
 	}
 	if (!run.empty()) {
-		out.runs.push_back(std::move(run));
+		out.literals.push_back(std::move(run));
 	}
-	if (out.runs.empty()) {
+	if (out.literals.empty()) {
 		return false;
 	}
 	out.anchor_start = pattern.front() != '%';
@@ -745,8 +745,8 @@ static bool TryGetStringMatch(const Expression &expr, FSSTPattern &match) {
 		match.negated = name == "!~~";
 		return TrySplitLikePattern(literal, match);
 	}
-	match.runs.clear();
-	match.runs.push_back(std::move(literal));
+	match.literals.clear();
+	match.literals.push_back(std::move(literal));
 	match.anchor_start = name != "contains" && name != "suffix" && name != "ends_with";
 	match.anchor_end = name == "suffix" || name == "ends_with";
 	return true;

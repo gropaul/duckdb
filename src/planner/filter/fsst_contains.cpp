@@ -32,20 +32,23 @@ struct FSSTContains::State {
 	std::vector<search::scan::Walk> walks;
 	//! Anchored needles are answered per row, with no scan over the code stream and no stream offsets
 	search::Anchor anchor = search::Anchor::None;
-	//! Set when a pattern has several runs, or a shape only a superset covers: one plan per pattern then,
-	//! run separately and unioned, and the caller confirms the rows.
-	bool multi_run = false;
+	//! One plan per OR branch, when the branches cannot share one cover: a branch with several literals, or
+	//! branches of different anchoring. Each is searched on its own and a row matches when any branch finds it.
+	//! Empty when the shared cover above is used.
+	std::vector<search::PatternPlan> alternatives;
+	//! Every alternative is anchored at the start, so each is a check per row and needs no stream
 	bool all_anchored = false;
-	std::vector<uint32_t> rest;
+	//! The selected rows no alternative has matched yet, for the anchored alternatives
+	std::vector<uint32_t> remaining;
 	bool exact = true;
 	//! The single pattern is negated: Filter keeps the valid rows that do not match
 	bool negated = false;
 	//! Per vector row, whether it matched
 	unsafe_vector<uint8_t> matched;
-	std::vector<search::PatternPlan> plans;
 
 	unsafe_vector<uint32_t> stream_offsets;
-	std::vector<size_t> hits;
+	//! The stream rows one search found, ascending
+	std::vector<size_t> found;
 	//! A partial selection as ascending stream rows, and the scans restricted to it
 	std::vector<uint32_t> stream_sel;
 	search::Finder finder {STANDARD_VECTOR_SIZE};
@@ -134,13 +137,14 @@ bool FSSTContains::Prepare(idx_t row_group_id, const void *decoder_p, idx_t symb
 		return false;
 	}
 
-	// One run per pattern, anchored at most at one end, and one shape across all of them is the case worth a
-	// single merged scan: the covers become one and a row matches when any walk accepts a hit. Anything else
+	// One literal per pattern, anchored at most at one end, and one shape across all of them is the case worth
+	// a single merged scan: the covers become one and a row matches when any walk accepts a hit. Anything else
 	// is planned per pattern.
-	bool one_run_each = true;
+	bool single_literals = true;
 	for (auto &pattern : patterns) {
-		one_run_each = one_run_each && pattern.IsExact() && pattern.anchor_start == patterns[0].anchor_start &&
-		               pattern.anchor_end == patterns[0].anchor_end;
+		single_literals = single_literals && pattern.IsExact() &&
+		                  pattern.anchor_start == patterns[0].anchor_start &&
+		                  pattern.anchor_end == patterns[0].anchor_end;
 	}
 	auto anchor = search::Anchor::None;
 	if (patterns[0].anchor_start) {
@@ -149,24 +153,23 @@ bool FSSTContains::Prepare(idx_t row_group_id, const void *decoder_p, idx_t symb
 		anchor = search::Anchor::End;
 	}
 	const bool anchored = anchor != search::Anchor::None;
-	if (one_run_each && anchored && patterns.size() > 1) {
+	if (single_literals && anchored && patterns.size() > 1) {
 		// an OR of anchored patterns is left to the decompressing path
 		return false;
 	}
 
 	state->walks.clear();
-	state->plans.clear();
-	state->multi_run = !one_run_each;
+	state->alternatives.clear();
 	state->all_anchored = true;
-	state->anchor = one_run_each ? anchor : search::Anchor::None;
-	state->exact = one_run_each;
+	state->anchor = single_literals ? anchor : search::Anchor::None;
+	state->exact = true;
 
-	if (one_run_each) {
+	if (single_literals) {
 		vector<search::ProbeCover> covers;
 		for (auto &pattern : patterns) {
-			auto &run = pattern.runs[0];
-			auto analysis = search::analyze(const_data_ptr_cast(run.data()), run.size(), state->dict, state->freq,
-			                                row_count, anchor);
+			auto &literal = pattern.literals[0];
+			auto analysis = search::analyze(const_data_ptr_cast(literal.data()), literal.size(), state->dict,
+			                                state->freq, row_count, anchor);
 			if (analysis.matches_all || (!anchored && analysis.cover.empty())) {
 				// every row, or a run this symbol table cannot spell: left to the decompressing path
 				return false;
@@ -185,14 +188,14 @@ bool FSSTContains::Prepare(idx_t row_group_id, const void *decoder_p, idx_t symb
 	}
 
 	for (auto &pattern : patterns) {
-		auto plan = search::plan_pattern(state->dict, state->freq, pattern.runs, pattern.anchor_start,
+		auto plan = search::plan_pattern(state->dict, state->freq, pattern.literals, pattern.anchor_start,
 		                                 pattern.anchor_end, row_count);
 		if (!plan.usable) {
 			return false;
 		}
 		state->exact = state->exact && plan.exact;
 		state->all_anchored = state->all_anchored && plan.anchored;
-		state->plans.push_back(std::move(plan));
+		state->alternatives.push_back(std::move(plan));
 	}
 	state->usable = true;
 	return true;
@@ -245,28 +248,28 @@ bool FSSTContains::FilterMatches(const var_binary_view_t &view, const ValidityMa
 		}
 		return true;
 	}
-	if (state->multi_run && state->all_anchored) {
-		// an anchored pattern is checked row by row anyway, so only the selected rows are; one pattern at a
-		// time over the rows the earlier ones left
-		auto &rest = state->rest;
-		rest.resize(count);
+	auto &matched = state->matched;
+	if (!state->alternatives.empty() && state->all_anchored) {
+		// an anchored alternative is a check per row, so it only reads the selected rows no earlier one matched
+		auto &remaining = state->remaining;
+		remaining.resize(count);
 		for (idx_t i = 0; i < count; i++) {
-			rest[i] = UnsafeNumericCast<uint32_t>(sel.get_index(i));
+			remaining[i] = UnsafeNumericCast<uint32_t>(sel.get_index(i));
 		}
-		auto &matched = state->matched;
 		matched.assign(row_count, 0);
-		idx_t rest_count = count;
-		for (auto &plan : state->plans) {
+		idx_t remaining_count = count;
+		for (auto &alternative : state->alternatives) {
 			idx_t kept = 0;
-			for (idx_t i = 0; i < rest_count; i++) {
-				const idx_t row = rest[i];
+			for (idx_t i = 0; i < remaining_count; i++) {
+				const idx_t row = remaining[i];
 				const idx_t start = UnsafeNumericCast<idx_t>(view.offsets[row]);
-				const bool match = search::anchored_row(state->dict, codes, start, start + view.lengths[row], plan);
+				const bool match =
+				    search::anchored_row(state->dict, codes, start, start + view.lengths[row], alternative);
 				matched[row] = match;
-				rest[kept] = UnsafeNumericCast<uint32_t>(row);
+				remaining[kept] = UnsafeNumericCast<uint32_t>(row);
 				kept += !match;
 			}
-			rest_count = kept;
+			remaining_count = kept;
 		}
 		result_count = 0;
 		for (idx_t i = 0; i < count; i++) {
@@ -276,8 +279,6 @@ bool FSSTContains::FilterMatches(const var_binary_view_t &view, const ValidityMa
 		}
 		return true;
 	}
-	auto &hits = state->hits;
-	hits.clear();
 	// The scan runs over the payload as one stream. It is a contiguous block holding the rows back to front,
 	// so reading the offsets backwards gives the ascending row offsets the scan wants; stream row r is
 	// vector row row_count-1-r.
@@ -305,52 +306,47 @@ bool FSSTContains::FilterMatches(const var_binary_view_t &view, const ValidityMa
 			stream_sel[count - 1 - i] = UnsafeNumericCast<uint32_t>(row_count - 1 - sel.get_index(i));
 		}
 	}
-	if (state->multi_run) {
-		// one plan per pattern, each ascending; the union is what an OR of them keeps
-		for (auto &plan : state->plans) {
+	// every search marks the vector rows it found; a row found by several alternatives is marked once
+	auto &found = state->found;
+	matched.assign(row_count, 0);
+	auto mark_found = [&]() {
+		for (auto stream_row : found) {
+			matched[row_count - 1 - stream_row] = 1;
+		}
+	};
+	if (!state->alternatives.empty()) {
+		for (auto &alternative : state->alternatives) {
+			found.clear();
 			if (selected) {
-				search::pattern_rows(codes, stream_size, stream_offsets.data(), row_count + 1, state->dict, plan,
-				                     state->finder, stream_sel.data(), count, hits);
+				search::pattern_rows(codes, stream_size, stream_offsets.data(), row_count + 1, state->dict,
+				                     alternative, state->finder, stream_sel.data(), count, found);
 			} else {
-				search::pattern_rows(codes, stream_size, stream_offsets.data(), row_count + 1, state->dict, plan,
-				                     hits);
+				search::pattern_rows(codes, stream_size, stream_offsets.data(), row_count + 1, state->dict,
+				                     alternative, found);
 			}
+			mark_found();
 		}
-		if (state->plans.size() > 1) {
-			std::sort(hits.begin(), hits.end());
-			hits.erase(std::unique(hits.begin(), hits.end()), hits.end());
-		}
-	} else if (selected) {
-		state->finder.find(codes, stream_size, stream_offsets.data(), row_count + 1, state->cover,
-		                   state->covered_frequency, state->freq.total, AnyWalkCheck {state->walks, state->dict, codes},
-		                   stream_sel.data(), count, hits);
 	} else {
-		search::scan::execute(state->cover, codes, stream_size, stream_offsets.data(), row_count + 1,
-		                      state->covered_frequency, state->freq.total,
-		                      AnyWalkCheck {state->walks, state->dict, codes}, hits);
+		found.clear();
+		if (selected) {
+			state->finder.find(codes, stream_size, stream_offsets.data(), row_count + 1, state->cover,
+			                   state->covered_frequency, state->freq.total,
+			                   AnyWalkCheck {state->walks, state->dict, codes}, stream_sel.data(), count, found);
+		} else {
+			search::scan::execute(state->cover, codes, stream_size, stream_offsets.data(), row_count + 1,
+			                      state->covered_frequency, state->freq.total,
+			                      AnyWalkCheck {state->walks, state->dict, codes}, found);
+		}
+		mark_found();
 	}
-	// stream rows ascending are vector rows descending
-	std::reverse(hits.begin(), hits.end());
-	for (auto &hit : hits) {
-		hit = row_count - 1 - hit;
-	}
-	const idx_t hit_count = hits.size();
 
-	// The hits are ascending vector rows, and so is the incoming selection, since every filter compacts in
-	// order. A NULL row is stored as an empty string, which the empty needle would match, so validity decides
-	// too.
+	// The incoming selection is ascending, since every filter compacts in order, so result_sel is too. A NULL
+	// row is stored as an empty string, which the empty needle would match, so validity decides too.
 	result_count = 0;
-	idx_t hit_index = 0;
-	for (idx_t i = 0; i < count && hit_index < hit_count; i++) {
+	for (idx_t i = 0; i < count; i++) {
 		const idx_t row = sel.get_index(i);
-		while (hit_index < hit_count && hits[hit_index] < row) {
-			hit_index++;
-		}
-		if (hit_index < hit_count && hits[hit_index] == row) {
-			result_sel.set_index(result_count, row);
-			result_count += validity.RowIsValid(row);
-			hit_index++;
-		}
+		result_sel.set_index(result_count, row);
+		result_count += matched[row] & validity.RowIsValid(row);
 	}
 	return true;
 }
