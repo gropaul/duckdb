@@ -90,7 +90,7 @@ private:
 		if (!decoder || symbol_count == 0) {
 			return false;
 		}
-		dict = search::Dictionary::from(decoder->symbol, decoder->len, symbol_count);
+		dict = search::Dictionary::from(*decoder, symbol_count);
 		freq = search::Frequency::of_counts(decoder->count);
 		// the planner needs codes in byte order of their symbols, and the counts; segments written before
 		// fsst_sort_codes or without counts have neither
@@ -109,13 +109,12 @@ private:
 	bool MarkMatches(const var_binary_view_t &view, const SelectionVector &sel, idx_t count, idx_t row_count) {
 		const auto codes = const_data_ptr_cast(view.base);
 		matched.assign(row_count, 0);
-		if (anchor != search::Anchor::None) {
-			hits.resize(count);
-			const idx_t hit_count = search::anchored_rows(codes, view.offsets, view.lengths, sel.data(), count, dict,
-			                                              analysis.walk, hits.data());
-			for (idx_t i = 0; i < hit_count; i++) {
-				matched[hits[i]] = 1;
-			}
+		if (anchor == search::Anchor::Start) {
+			MarkAnchored<search::Anchor::Start>(view, sel, count);
+			return true;
+		}
+		if (anchor == search::Anchor::End) {
+			MarkAnchored<search::Anchor::End>(view, sel, count);
 			return true;
 		}
 		// The block holds the rows back to front, so the offsets read backwards are the ascending row offsets the
@@ -132,21 +131,32 @@ private:
 			stream_offsets[row] = UnsafeNumericCast<uint32_t>(offset);
 		}
 		stream_offsets[row_count] = UnsafeNumericCast<uint32_t>(stream_size);
+		const search::scan::Stream stream {codes, stream_size, stream_offsets.data(), row_count + 1};
 		found.clear();
 		if (count < row_count) {
 			stream_sel.resize(count);
 			for (idx_t i = 0; i < count; i++) {
 				stream_sel[count - 1 - i] = UnsafeNumericCast<uint32_t>(row_count - 1 - sel.get_index(i));
 			}
-			finder.find(codes, stream_size, stream_offsets.data(), row_count + 1, dict, analysis, stream_sel.data(),
-			            count, found);
+			finder.find(stream, dict, analysis, stream_sel.data(), count, found);
 		} else {
-			search::candidate_rows(codes, stream_size, stream_offsets.data(), row_count + 1, dict, analysis, found);
+			search::candidate_rows(stream, dict, analysis, found);
 		}
 		for (auto stream_row : found) {
 			matched[row_count - 1 - stream_row] = 1;
 		}
 		return true;
+	}
+
+	//! Each selected row walked on its own from its first code (Start) or back from its last (End).
+	template <search::Anchor A>
+	void MarkAnchored(const var_binary_view_t &view, const SelectionVector &sel, idx_t count) {
+		const auto codes = const_data_ptr_cast(view.base);
+		for (idx_t i = 0; i < count; i++) {
+			const idx_t row = sel.get_index(i);
+			const idx_t start = UnsafeNumericCast<idx_t>(view.offsets[row]);
+			matched[row] = analysis.walk.check_anchored<A>(dict, codes, start, start + view.lengths[row]);
+		}
 	}
 
 	FSSTPattern pattern;
@@ -161,11 +171,10 @@ private:
 	search::Analysis analysis;
 
 	unsafe_vector<uint8_t> matched;
-	unsafe_vector<uint32_t> hits;
 	unsafe_vector<uint32_t> stream_offsets;
 	std::vector<uint32_t> stream_sel;
 	std::vector<size_t> found;
-	search::Finder finder {STANDARD_VECTOR_SIZE};
+	search::Finder finder;
 	SelectionVector result_sel;
 	idx_t result_capacity = 0;
 };
