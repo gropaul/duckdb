@@ -27,7 +27,7 @@ public:
 	ContainsFilterExecutor(ClientContext &context, FSSTPattern pattern_p, unique_ptr<ExpressionFilterExecutor> exact_p)
 	    : pattern(std::move(pattern_p)), enabled(Settings::Get<EnableFSSTContainsSetting>(context)),
 	      exact(std::move(exact_p)) {
-		D_ASSERT(pattern.IsExact());
+		D_ASSERT(!(pattern.anchor_start && pattern.anchor_end));
 		if (pattern.anchor_start) {
 			anchor = search::Anchor::Start;
 		} else if (pattern.anchor_end) {
@@ -97,7 +97,7 @@ private:
 		if (!dict.sorted() || freq.total == 0) {
 			return false;
 		}
-		auto &literal = pattern.literals[0];
+		auto &literal = pattern.literal;
 		analysis = search::analyze(const_data_ptr_cast(literal.data()), literal.size(), dict, freq, row_count, anchor);
 		// every row, or a literal this symbol table cannot spell: left to the decompressing path
 		usable = !analysis.matches_all && (anchor != search::Anchor::None || !analysis.cover.empty());

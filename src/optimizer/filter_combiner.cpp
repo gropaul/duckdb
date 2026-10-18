@@ -5,6 +5,7 @@
 #include "duckdb/execution/expression_executor.hpp"
 #include "duckdb/function/scalar/string_common.hpp"
 #include "duckdb/optimizer/optimizer.hpp"
+#include "duckdb/optimizer/rule/like_optimizations.hpp"
 #include "duckdb/planner/expression.hpp"
 #include "duckdb/planner/expression/bound_between_expression.hpp"
 #include "duckdb/planner/expression/bound_cast_expression.hpp"
@@ -391,6 +392,48 @@ void ReplaceWithBoundReference(unique_ptr<Expression> &root_expr) {
 	    });
 }
 
+// Every multi-literal ~~ under the conjunctions of expr becomes (optional literal filters AND ~~): a compressed
+// scan answers the literals on the codes and the pattern decides on their survivors.
+static void AddLikePrefilters(ClientContext &context, unique_ptr<Expression> &expr) {
+	if (expr->GetExpressionClass() == ExpressionClass::BOUND_CONJUNCTION) {
+		for (auto &child : expr->Cast<BoundConjunctionExpression>().GetChildrenMutable()) {
+			AddLikePrefilters(context, child);
+		}
+		return;
+	}
+	if (expr->GetExpressionClass() != ExpressionClass::BOUND_FUNCTION) {
+		return;
+	}
+	auto &func = expr->Cast<BoundFunctionExpression>();
+	auto &children = func.GetChildren();
+	if (func.Function().GetName() != "~~" || children[0]->GetExpressionClass() != ExpressionClass::BOUND_REF ||
+	    children[1]->GetExpressionClass() != ExpressionClass::BOUND_CONSTANT) {
+		return;
+	}
+	auto &pattern = children[1]->Cast<BoundConstantExpression>().GetValue();
+	LikePatternSplit split;
+	if (pattern.IsNull() || !TrySplitLikePattern(StringValue::Get(pattern), PatternMatchType::LIKE, split) ||
+	    split.IsExact()) {
+		return;
+	}
+	auto &column = *children[0];
+	auto conjunction = make_uniq<BoundConjunctionExpression>(ExpressionType::CONJUNCTION_AND);
+	for (idx_t i = 0; i < split.literals.size(); i++) {
+		const bool first = i == 0;
+		const bool last = i + 1 == split.literals.size();
+		auto function = first && split.anchor_start ? PrefixFun::GetFunction()
+		                : last && split.anchor_end  ? SuffixFun::GetFunction()
+		                                            : GetStringContains();
+		vector<unique_ptr<Expression>> arguments;
+		arguments.push_back(column.Copy());
+		arguments.push_back(make_uniq<BoundConstantExpression>(Value(split.literals[i])));
+		conjunction->GetChildrenMutable().push_back(
+		    CreateOptionalFilterExpression(function.Bind(context, std::move(arguments)), column.GetReturnType()));
+	}
+	conjunction->GetChildrenMutable().push_back(std::move(expr));
+	expr = std::move(conjunction);
+}
+
 FilterPushdownResult FilterCombiner::TryPushdownGenericExpression(LogicalGet &get, Expression &expr) {
 	if (!get.function.pushdown_expression) {
 		// the scan does not support pushing down generic expressions
@@ -415,6 +458,7 @@ FilterPushdownResult FilterCombiner::TryPushdownGenericExpression(LogicalGet &ge
 	// replace the BoundColumnRefExpression with a BoundReference
 	auto filter_expr = expr.Copy();
 	ReplaceWithBoundReference(filter_expr);
+	AddLikePrefilters(context, filter_expr);
 
 	// push the expression filter
 	auto expr_filter = make_uniq<ExpressionFilter>(std::move(filter_expr));
@@ -493,6 +537,10 @@ FilterPushdownResult FilterCombiner::TryPushdownLikeFilter(TableFilterSet &table
 		return FilterPushdownResult::PUSHED_DOWN_FULLY;
 	}
 	auto &like_string = StringValue::Get(constant_value_expr.GetValue());
+	// Several literals: the pattern goes through the generic pushdown, where AddLikePrefilters puts the literals
+	// ahead of it, so the result stays NO_PUSHDOWN.
+	LikePatternSplit split;
+	const bool prefiltered = TrySplitLikePattern(like_string, PatternMatchType::LIKE, split) && !split.IsExact();
 	if (like_string[0] == '%' || like_string[0] == '_') {
 		//! If the like starts with a special character we have no fixed prefix so nothing to pushdown
 		return FilterPushdownResult::NO_PUSHDOWN;
@@ -524,7 +572,7 @@ FilterPushdownResult FilterCombiner::TryPushdownLikeFilter(TableFilterSet &table
 		    CreateComparisonExpression(*func.GetChildren()[0], ExpressionType::COMPARE_LESSTHAN, Value(prefix));
 		table_filters.PushFilter(proj_index, make_uniq<ExpressionFilter>(std::move(upper_bound)));
 	}
-	return FilterPushdownResult::PUSHED_DOWN_PARTIALLY;
+	return prefiltered ? FilterPushdownResult::NO_PUSHDOWN : FilterPushdownResult::PUSHED_DOWN_PARTIALLY;
 }
 
 FilterPushdownResult FilterCombiner::TryPushdownInFilter(TableFilterSet &table_filters,

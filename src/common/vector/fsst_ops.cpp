@@ -1,13 +1,15 @@
 #include "duckdb/common/vector/fsst_ops.hpp"
 
 #include "duckdb/common/vector/constant_vector.hpp"
+#include "duckdb/common/vector/flat_vector.hpp"
 #include "duckdb/common/vector/fsst_vector.hpp"
 
 namespace duckdb {
 
-//! Branchless select loop over the compressed rows. The vector is already sliced to the selected rows, so row i
-//! is compared and sel only names the row the verdict is reported under. NULL rows go to the false side.
-template <bool EQUALITY, bool HAS_NULLS, bool HAS_SEL, bool HAS_TRUE_SEL, bool HAS_FALSE_SEL>
+//! Branchless select loop over the compressed rows. The vector is sliced to the selected rows unless
+//! SEL_IS_ROW: then sel names the rows of the unsliced vector, and the verdict is reported under that same row.
+//! NULL rows go to the false side.
+template <bool EQUALITY, bool HAS_NULLS, bool HAS_SEL, bool HAS_TRUE_SEL, bool HAS_FALSE_SEL, bool SEL_IS_ROW = false>
 static idx_t FSSTCompareLoop(const Vector &fsst_vec, const var_binary_t &target, const SelectionVector *sel,
                              const idx_t count, SelectionVector *true_sel, SelectionVector *false_sel) {
 	const auto view = FSSTVector::GetDataView(fsst_vec);
@@ -17,8 +19,9 @@ static idx_t FSSTCompareLoop(const Vector &fsst_vec, const var_binary_t &target,
 
 	for (idx_t i = 0; i < count; i++) {
 		const idx_t result_idx = HAS_SEL ? sel->get_index(i) : i;
-		const bool valid = !HAS_NULLS || validity.RowIsValid(i);
-		const var_binary_t row = view.GetVarBinary(i);
+		const idx_t row_idx = SEL_IS_ROW ? result_idx : i;
+		const bool valid = !HAS_NULLS || validity.RowIsValid(row_idx);
+		const var_binary_t row = view.GetVarBinary(row_idx);
 		const bool eq = valid && row == target;
 		const bool match = eq == EQUALITY && valid;
 
@@ -120,6 +123,24 @@ bool FSSTOps::TryEquals(const Vector &left, const Vector &right, optional_ptr<co
                         optional_ptr<SelectionVector> true_sel, optional_ptr<SelectionVector> false_sel,
                         optional_ptr<ValidityMask> null_mask, idx_t &result) {
 	return TryFSSTSelectComparison<true>(left, right, sel, count, true_sel, false_sel, null_mask, result);
+}
+
+idx_t FSSTOps::SelectEquals(const Vector &fsst_vec, const string &needle, bool equality,
+                            optional_ptr<const SelectionVector> sel, idx_t count, SelectionVector &result_sel) {
+	const auto compressed_needle = FSSTVector::CompressValue(fsst_vec, needle.data(), needle.size());
+	const var_binary_t target {compressed_needle.data(), compressed_needle.size()};
+	auto &rows = sel ? *sel : *FlatVector::IncrementalSelectionVector();
+	const bool has_nulls = FSSTVector::Validity(fsst_vec).CanHaveNull();
+	if (equality) {
+		return has_nulls ? FSSTCompareLoop<true, true, true, true, false, true>(fsst_vec, target, &rows, count,
+		                                                                        &result_sel, nullptr)
+		                 : FSSTCompareLoop<true, false, true, true, false, true>(fsst_vec, target, &rows, count,
+		                                                                         &result_sel, nullptr);
+	}
+	return has_nulls ? FSSTCompareLoop<false, true, true, true, false, true>(fsst_vec, target, &rows, count,
+	                                                                         &result_sel, nullptr)
+	                 : FSSTCompareLoop<false, false, true, true, false, true>(fsst_vec, target, &rows, count,
+	                                                                          &result_sel, nullptr);
 }
 
 bool FSSTOps::TryNotEquals(const Vector &left, const Vector &right, optional_ptr<const SelectionVector> sel,

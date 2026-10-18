@@ -136,8 +136,6 @@ void ColumnSegment::InitializeScan(ColumnScanState &state) {
 
 void ColumnSegment::Scan(ColumnScanState &state, idx_t scan_count, Vector &result, idx_t result_offset,
                          ScanVectorType scan_type) {
-	// printf("ColumnSegment::Scan: scan_count=%llu, result_offset=%llu, scan_type=%d, compression_type=%d\n",
-	// scan_count, result_offset, static_cast<int>(scan_type), static_cast<int>(this->GetCompressionFunction().type));
 	if (scan_type == ScanVectorType::SCAN_ENTIRE_VECTOR) {
 		D_ASSERT(result_offset == 0);
 		Scan(state, scan_count, result);
@@ -441,12 +439,7 @@ static idx_t ExecuteExpressionFilterSelection(SelectionVector &sel, Vector &vect
 		return 0;
 	}
 	D_ASSERT(state.executor);
-	// The expression executor decompresses what it reads, and it reads a slice per conjunct, so several
-	// predicates on one column would decompress the survivors once each. Flattening the scan vector while
-	// every row is still selected costs that same one pass and leaves the column flat for all of them.
-	if (vector.GetVectorType() == VectorType::FSST_VECTOR && !sel.IsSet() && approved_tuple_count == scan_count) {
-		vector.Flatten();
-	}
+	FlattenForExpressionExecutor(vector, sel, scan_count, approved_tuple_count);
 	SelectionVector result_sel(approved_tuple_count);
 	if (scan_count > STANDARD_VECTOR_SIZE) {
 		// scan count is > vector size - split up the vector into multiple chunks

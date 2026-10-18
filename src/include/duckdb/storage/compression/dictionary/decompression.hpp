@@ -30,9 +30,6 @@ private:
 	//! Validate the index buffer (offsets monotonic and within the dictionary) so scans can trust it.
 	void ValidateIndexBuffer() const;
 
-	template <bool NEEDS_STRING_OFFSET_CHECK, bool CAN_HAVE_NULLS>
-	void ScanToFlatVectorInternal(Vector &result, idx_t result_offset, idx_t start, idx_t scan_count);
-
 public:
 	BufferHandle owned_handle;
 	optional_ptr<BufferHandle> handle;
@@ -52,8 +49,6 @@ public:
 	idx_t dictionary_size;
 	StringDictionaryContainer dict;
 	idx_t block_size;
-	//! Whether the segment can contain null values (from its statistics)
-	bool can_have_nulls = true;
 };
 
 } // namespace duckdb

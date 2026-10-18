@@ -6,7 +6,7 @@
 #include "duckdb/common/vector/constant_vector.hpp"
 #include "duckdb/common/vector/dictionary_vector.hpp"
 #include "duckdb/common/vector/flat_vector.hpp"
-#include "duckdb/common/vector/fsst_vector.hpp"
+#include "duckdb/common/vector/fsst_ops.hpp"
 #include "duckdb/planner/filter/fsst_contains.hpp"
 #include "duckdb/planner/expression/bound_conjunction_expression.hpp"
 #include "duckdb/planner/expression/bound_operator_expression.hpp"
@@ -32,6 +32,13 @@ ExpressionFilterState::ExpressionFilterState(ClientContext &context, const Expre
 }
 
 ExpressionFilterState::~ExpressionFilterState() {
+}
+
+void FlattenForExpressionExecutor(Vector &vector, const SelectionVector &sel, idx_t scan_count,
+                                  idx_t approved_tuple_count) {
+	if (vector.GetVectorType() == VectorType::FSST_VECTOR && !sel.IsSet() && approved_tuple_count == scan_count) {
+		vector.Flatten();
+	}
 }
 
 // Dictionaries larger than this are not worth pre-evaluating per entry (mirrors the threshold of
@@ -105,12 +112,7 @@ public:
 		if (approved_tuple_count == 0) {
 			return 0;
 		}
-		// This executor decompresses what it reads, and it reads a slice, so a second conjunct on the same
-		// column would decompress the survivors again. Flattening the scan vector while every row is still
-		// selected costs the same one pass and leaves the column flat for everything after it.
-		if (vector.GetVectorType() == VectorType::FSST_VECTOR && !sel.IsSet() && approved_tuple_count == scan_count) {
-			vector.Flatten();
-		}
+		FlattenForExpressionExecutor(vector, sel, scan_count, approved_tuple_count);
 		PrepareCapacity(approved_tuple_count);
 		DataChunk chunk;
 		chunk.data.emplace_back(Vector::Ref(vector));
@@ -161,7 +163,7 @@ private:
 	vector<unique_ptr<ExpressionFilterExecutor>> children;
 };
 
-// An OR of string matches on the column: each branch filters the selected rows no earlier branch matched.
+// An OR of filters on the column: each branch filters the selected rows no earlier branch matched.
 class ConjunctionOrFilterExecutor final : public ExpressionFilterExecutor {
 public:
 	explicit ConjunctionOrFilterExecutor(vector<unique_ptr<ExpressionFilterExecutor>> children_p)
@@ -268,24 +270,13 @@ private:
 		if (constant.type().InternalType() != PhysicalType::VARCHAR) {
 			return false;
 		}
-		const auto &needle = StringValue::Get(constant);
-		const auto compressed_needle = FSSTVector::CompressValue(vector, needle.data(), needle.size());
-		const var_binary_t target {compressed_needle.data(), compressed_needle.size()};
-		const bool equality = comparison_type == ExpressionType::COMPARE_EQUAL;
-
-		const auto view = FSSTVector::GetDataView(vector);
-		auto &validity = FSSTVector::Validity(vector);
-		auto &current_sel = sel.IsSet() ? sel : *FlatVector::IncrementalSelectionVector();
-		idx_t result_count = 0;
-		for (idx_t i = 0; i < approved_tuple_count; i++) {
-			const idx_t idx = current_sel.get_index(i);
-			const bool valid = validity.RowIsValid(idx);
-			const bool eq = valid && view.GetVarBinary(idx) == target;
-			const bool match = eq == equality && valid;
-			result_sel.set_index(result_count, idx);
-			result_count += match;
+		optional_ptr<const SelectionVector> rows;
+		if (sel.IsSet()) {
+			rows = &sel;
 		}
-		approved_tuple_count = result_count;
+		approved_tuple_count =
+		    FSSTOps::SelectEquals(vector, StringValue::Get(constant), comparison_type == ExpressionType::COMPARE_EQUAL,
+		                          rows, approved_tuple_count, result_sel);
 		return true;
 	}
 
@@ -676,36 +667,7 @@ static bool IsColumnReferenceExpression(const Expression &expr) {
 	return ref.Index() == 0;
 }
 
-// Split a LIKE pattern into the literals between its wildcards. False for a pattern with a single
-// character wildcard or an escape, which literals cannot express, or with no literal at all.
-static bool TrySplitLikePattern(const string &pattern, FSSTPattern &out) {
-	if (pattern.find('_') != string::npos || pattern.find('\\') != string::npos) {
-		return false;
-	}
-	out.literals.clear();
-	string run;
-	for (auto c : pattern) {
-		if (c != '%') {
-			run += c;
-			continue;
-		}
-		if (!run.empty()) {
-			out.literals.push_back(std::move(run));
-			run.clear();
-		}
-	}
-	if (!run.empty()) {
-		out.literals.push_back(std::move(run));
-	}
-	if (out.literals.empty()) {
-		return false;
-	}
-	out.anchor_start = pattern.front() != '%';
-	out.anchor_end = pattern.back() != '%';
-	return true;
-}
-
-// contains / prefix / suffix / LIKE over the filter's column, false for any other shape
+// contains / prefix / suffix over the filter's column, false for any other shape
 static bool TryGetStringMatch(const Expression &expr, FSSTPattern &match) {
 	if (expr.GetExpressionClass() != ExpressionClass::BOUND_FUNCTION) {
 		return false;
@@ -714,7 +676,7 @@ static bool TryGetStringMatch(const Expression &expr, FSSTPattern &match) {
 	auto &children = func.GetChildren();
 	auto &name = func.Function().GetName();
 	if (name != "contains" && name != "prefix" && name != "starts_with" && name != "^@" && name != "suffix" &&
-	    name != "ends_with" && name != "~~" && name != "!~~") {
+	    name != "ends_with") {
 		return false;
 	}
 	if (children.size() != 2) {
@@ -734,39 +696,16 @@ static bool TryGetStringMatch(const Expression &expr, FSSTPattern &match) {
 	if (literal.empty()) {
 		return false;
 	}
-	if (name == "~~" || name == "!~~") {
-		match.negated = name == "!~~";
-		return TrySplitLikePattern(literal, match);
-	}
-	match.literals.clear();
-	match.literals.push_back(std::move(literal));
+	match.literal = std::move(literal);
 	match.anchor_start = name != "contains" && name != "suffix" && name != "ends_with";
 	match.anchor_end = name == "suffix" || name == "ends_with";
 	return true;
 }
 
-// One literal is filtered on the codes as it is. Several are filtered one at a time and the survivors by the
-// pattern itself; a negated one is left to the regular expression.
-static unique_ptr<ExpressionFilterExecutor> TryCreateMatchExecutor(ClientContext &context, const Expression &expr,
-                                                                   FSSTPattern match) {
-	if (match.IsExact()) {
-		return CreateContainsExecutor(context, std::move(match), make_uniq<GenericFilterExecutor>(context, expr));
-	}
-	if (match.negated) {
-		return nullptr;
-	}
-	vector<unique_ptr<ExpressionFilterExecutor>> children;
-	for (idx_t i = 0; i < match.literals.size(); i++) {
-		FSSTPattern literal;
-		literal.literals.push_back(match.literals[i]);
-		literal.anchor_start = i == 0 && match.anchor_start;
-		literal.anchor_end = i + 1 == match.literals.size() && match.anchor_end && !literal.anchor_start;
-		if (auto child = CreateContainsExecutor(context, std::move(literal), nullptr)) {
-			children.push_back(std::move(child));
-		}
-	}
-	children.push_back(make_uniq<GenericFilterExecutor>(context, expr));
-	return make_uniq<ConjunctionAndFilterExecutor>(std::move(children));
+// The literal is filtered on the codes where the vector has them, by the function itself elsewhere.
+static unique_ptr<ExpressionFilterExecutor> CreateMatchExecutor(ClientContext &context, const Expression &expr,
+                                                                FSSTPattern match) {
+	return CreateContainsExecutor(context, std::move(match), make_uniq<GenericFilterExecutor>(context, expr));
 }
 
 static bool IsSupportedComparisonType(PhysicalType type) {
@@ -840,7 +779,7 @@ static unique_ptr<ExpressionFilterExecutor> TryCreateFunctionExecutor(ClientCont
 	}
 	FSSTPattern match;
 	if (!inside_selectivity_optional && TryGetStringMatch(func, match)) {
-		return TryCreateMatchExecutor(context, func, std::move(match));
+		return CreateMatchExecutor(context, func, std::move(match));
 	}
 	if (!IsColumnReferenceFunction(func)) {
 		return nullptr;
@@ -848,6 +787,15 @@ static unique_ptr<ExpressionFilterExecutor> TryCreateFunctionExecutor(ClientCont
 
 	const auto &func_name = func.Function().GetName();
 	if (func_name == OptionalFilterScalarFun::NAME) {
+		// a literal of a LIKE pattern pushed ahead of it: a prefilter on the codes, nothing on other vectors
+		if (func.BindInfo()) {
+			auto &child = func.BindInfo()->Cast<OptionalFilterFunctionData>().child_filter_expr;
+			if (child && TryGetStringMatch(*child, match)) {
+				if (auto prefilter = CreateContainsExecutor(context, std::move(match), nullptr)) {
+					return prefilter;
+				}
+			}
+		}
 		return make_uniq<OptionalFilterExecutor>();
 	}
 	if (func_name == SelectivityOptionalFilterScalarFun::NAME) {
@@ -897,45 +845,39 @@ static unique_ptr<ExpressionFilterExecutor> TryCreateFastExecutor(ClientContext 
 			return nullptr;
 		}
 		match.negated = true;
-		return TryCreateMatchExecutor(context, expression, std::move(match));
+		return CreateMatchExecutor(context, expression, std::move(match));
 	}
 	case ExpressionClass::BOUND_CONJUNCTION: {
-		auto &conjunction = expression.Cast<BoundConjunctionExpression>();
-		if (expression.GetExpressionType() == ExpressionType::CONJUNCTION_OR) {
-			// every branch a string match on the column
-			vector<unique_ptr<ExpressionFilterExecutor>> children;
-			for (auto &child : conjunction.GetChildren()) {
-				FSSTPattern match;
-				if (inside_selectivity_optional || !TryGetStringMatch(*child, match)) {
-					return nullptr;
-				}
-				auto executor = TryCreateMatchExecutor(context, *child, std::move(match));
-				if (!executor) {
-					executor = make_uniq<GenericFilterExecutor>(context, *child);
-				}
-				children.push_back(std::move(executor));
-			}
-			return make_uniq<ConjunctionOrFilterExecutor>(std::move(children));
-		}
-		if (expression.GetExpressionType() != ExpressionType::CONJUNCTION_AND) {
-			return nullptr;
-		}
-		auto &child_exprs = conjunction.GetChildren();
+		auto &child_exprs = expression.Cast<BoundConjunctionExpression>().GetChildren();
 		vector<unique_ptr<ExpressionFilterExecutor>> children(child_exprs.size());
-		idx_t fast_count = 0;
+		vector<idx_t> generic_conjuncts;
 		for (idx_t child_idx = 0; child_idx < child_exprs.size(); child_idx++) {
 			children[child_idx] = TryCreateFastExecutor(context, *child_exprs[child_idx], inside_selectivity_optional);
-			fast_count += children[child_idx] != nullptr;
+			if (!children[child_idx]) {
+				generic_conjuncts.push_back(child_idx);
+			}
 		}
-		if (fast_count == 0) {
+		if (generic_conjuncts.size() == child_exprs.size()) {
 			// no conjunct has a kernel executor: leave the whole expression to the regular executor
 			return nullptr;
 		}
-		// mixed conjunction: conjuncts without a kernel executor run through the regular executor
-		for (idx_t child_idx = 0; child_idx < child_exprs.size(); child_idx++) {
-			if (!children[child_idx]) {
-				children[child_idx] = make_uniq<GenericFilterExecutor>(context, *child_exprs[child_idx]);
+		// conjuncts without a kernel executor run through the regular executor
+		if (expression.GetExpressionType() == ExpressionType::CONJUNCTION_OR) {
+			// Kernels first: handed every row, the regular executor flattens the vector, which would take the codes
+			// from the kernels after it.
+			vector<unique_ptr<ExpressionFilterExecutor>> ordered;
+			for (auto &child : children) {
+				if (child) {
+					ordered.push_back(std::move(child));
+				}
 			}
+			for (auto child_idx : generic_conjuncts) {
+				ordered.push_back(make_uniq<GenericFilterExecutor>(context, *child_exprs[child_idx]));
+			}
+			return make_uniq<ConjunctionOrFilterExecutor>(std::move(ordered));
+		}
+		for (auto child_idx : generic_conjuncts) {
+			children[child_idx] = make_uniq<GenericFilterExecutor>(context, *child_exprs[child_idx]);
 		}
 		return make_uniq<ConjunctionAndFilterExecutor>(std::move(children));
 	}

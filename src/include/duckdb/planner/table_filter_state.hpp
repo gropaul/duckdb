@@ -41,6 +41,12 @@ private:
 	idx_t dictionary_result_capacity = 0;
 };
 
+//! The expression executor decompresses what it reads, and it reads a slice per conjunct, so several predicates
+//! on one column would decompress the survivors once each. Flattening the scan vector while every row is still
+//! selected costs that same one pass and leaves the column flat for all of them.
+void FlattenForExpressionExecutor(Vector &vector, const SelectionVector &sel, idx_t scan_count,
+                                  idx_t approved_tuple_count);
+
 //! Thread-local state for executing a table filter
 struct TableFilterState {
 public:

@@ -98,9 +98,6 @@ void CompressedStringScanState::Initialize(ColumnSegment &segment, bool initiali
 	index_buffer_ptr = reinterpret_cast<uint32_t *>(baseptr + index_buffer_offset);
 	base_data = data_ptr_cast(baseptr + DictionaryCompression::DICTIONARY_HEADER_SIZE);
 
-	block_size = segment.GetBlockSize();
-	can_have_nulls = segment.GetStats().CanHaveNull();
-
 	dict = DictionaryCompression::GetDictionary(segment, *handle);
 	auto index_buffer_end = index_buffer_offset + sizeof(uint32_t) * index_buffer_count;
 	if (dict.end > segment_capacity || dict.size > dict.end || dict.end - dict.size < index_buffer_end) {
@@ -128,16 +125,6 @@ void CompressedStringScanState::Initialize(ColumnSegment &segment, bool initiali
 
 template <bool NEEDS_STRING_OFFSET_CHECK>
 void CompressedStringScanState::ScanToFlatVector(Vector &result, idx_t result_offset, idx_t start, idx_t scan_count) {
-	if (can_have_nulls) {
-		ScanToFlatVectorInternal<NEEDS_STRING_OFFSET_CHECK, true>(result, result_offset, start, scan_count);
-	} else {
-		ScanToFlatVectorInternal<NEEDS_STRING_OFFSET_CHECK, false>(result, result_offset, start, scan_count);
-	}
-}
-
-template <bool NEEDS_STRING_OFFSET_CHECK, bool CAN_HAVE_NULLS>
-void CompressedStringScanState::ScanToFlatVectorInternal(Vector &result, idx_t result_offset, idx_t start,
-                                                         idx_t scan_count) {
 	// Handling non-bitpacking-group-aligned start values;
 	idx_t start_offset = start % BitpackingPrimitives::BITPACKING_ALGORITHM_GROUP_SIZE;
 
@@ -156,15 +143,11 @@ void CompressedStringScanState::ScanToFlatVectorInternal(Vector &result, idx_t r
 	BitpackingPrimitives::UnPackBuffer<sel_t>(data_ptr_cast(sel_vec_ptr), src, decompress_count, current_width);
 
 	auto result_data = FlatVector::Writer<string_t>(result, scan_count, result_offset);
-	const auto sel_reference = sel_vec.get();
+
 	bool has_error = false;
 	for (idx_t i = 0; i < scan_count; i++) {
 		// Lookup dict offset in index buffer
-		auto string_dict_index = sel_reference->get_index(i + start_offset);
-
-		if (CAN_HAVE_NULLS) {
-			FlatVector::ValidityMutable(result).Set(i + result_offset, string_dict_index != 0);
-		}
+		auto string_dict_index = sel_vec->get_index(i + start_offset);
 
 		bool elem_error = string_dict_index >= index_buffer_count;
 		string_dict_index = elem_error ? 0 : string_dict_index;
